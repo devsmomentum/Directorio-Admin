@@ -5,64 +5,178 @@ import { supabase } from '../../lib/supabase';
 
 export default function DashboardPage() {
   const [kiosks, setKiosks] = useState<any[]>([]);
+  const [stores, setStores] = useState<number>(0);
+  const [campaigns, setCampaigns] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    fetchKiosks();
+    fetchData();
   }, []);
 
-  const fetchKiosks = async () => {
-    const { data, error } = await supabase
-      .from('kiosks')
-      .select('*')
-      .order('created_at', { ascending: false });
+  const fetchData = async () => {
+    setRefreshing(true);
+    const [kiosksRes, storesRes, campaignsRes] = await Promise.all([
+      supabase.from('kiosks').select('*').order('created_at', { ascending: false }),
+      supabase.from('stores').select('id', { count: 'exact', head: true }),
+      supabase.from('ad_campaigns').select('id', { count: 'exact', head: true }),
+    ]);
 
-    if (data) setKiosks(data);
+    if (kiosksRes.data) setKiosks(kiosksRes.data);
+    if (storesRes.count != null) setStores(storesRes.count);
+    if (campaignsRes.count != null) setCampaigns(campaignsRes.count);
     setLoading(false);
+    setRefreshing(false);
   };
 
+  const online = kiosks.filter(k => k.status === 'online').length;
+  const offline = kiosks.filter(k => k.status !== 'online').length;
+  const paperIssues = kiosks.filter(k => k.paper_level !== 'ok').length;
+
+  const getTimeSince = (date: string) => {
+    const diff = Date.now() - new Date(date).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Ahora';
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="w-8 h-8 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold text-white">Monitoreo de Hardware</h2>
-        <p className="text-white/50 mt-2">Estado en tiempo real de los Kioscos Sunmi</p>
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Dashboard</p>
+          <h2 className="text-2xl font-bold text-white">Monitoreo de Hardware</h2>
+        </div>
+        <button
+          onClick={fetchData}
+          disabled={refreshing}
+          className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 transition-colors bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 disabled:opacity-50"
+        >
+          <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          {refreshing ? 'Actualizando...' : 'Actualizar'}
+        </button>
       </div>
 
-      {loading ? (
-        <div className="text-white/50 animate-pulse">Cargando estado de máquinas...</div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {kiosks.map((kiosk) => (
-            <div key={kiosk.id} className="bg-[#111111] border border-white/10 rounded-2xl p-6 relative overflow-hidden">
-              {/* Luz de estado (Verde = Online, Rojo = Offline) */}
-              <div className={`absolute top-0 left-0 w-1 h-full ${kiosk.status === 'online' ? 'bg-green-500' : 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]'}`} />
-              
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="font-bold text-lg">{kiosk.location_name || 'Kiosco sin nombre'}</h3>
-                  <p className="text-xs text-white/50 font-mono mt-1">MAC: {kiosk.mac_address}</p>
-                </div>
-                <span className={`px-3 py-1 rounded-full text-xs font-bold ${kiosk.status === 'online' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
-                  {kiosk.status.toUpperCase()}
-                </span>
-              </div>
+      {/* Stats row */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">En linea</span>
+            <div className="text-xl font-bold text-white leading-tight">{online}<span className="text-white/20 text-xs ml-0.5">/{kiosks.length}</span></div>
+          </div>
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+        </div>
 
-              <div className="space-y-3 mt-6">
-                <div className="flex justify-between items-center text-sm border-t border-white/5 pt-3">
-                  <span className="text-white/50">Impresora</span>
-                  <span className={kiosk.paper_level === 'ok' ? 'text-green-400' : 'text-orange-400'}>
-                    {kiosk.paper_level === 'ok' ? 'Con Papel' : 'Revisar Papel'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-sm border-t border-white/5 pt-3">
-                  <span className="text-white/50">Último Ping</span>
-                  <span className="text-white/70">
-                    {kiosk.last_ping ? new Date(kiosk.last_ping).toLocaleTimeString() : 'Nunca'}
-                  </span>
-                </div>
-              </div>
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Offline</span>
+            <div className={`text-xl font-bold leading-tight ${offline > 0 ? 'text-red-400' : 'text-white'}`}>{offline}</div>
+          </div>
+          <span className="w-2 h-2 rounded-full bg-red-500" />
+        </div>
+
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Tiendas</span>
+            <div className="text-xl font-bold text-white leading-tight">{stores}</div>
+          </div>
+          <svg className="w-3.5 h-3.5 text-white/15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" /></svg>
+        </div>
+
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Campanas</span>
+            <div className="text-xl font-bold text-white leading-tight">{campaigns}</div>
+          </div>
+          <svg className="w-3.5 h-3.5 text-white/15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+        </div>
+      </div>
+
+      {/* Alerts bar */}
+      {(offline > 0 || paperIssues > 0) && (
+        <div className="flex flex-wrap gap-3">
+          {offline > 0 && (
+            <div className="flex items-center gap-2 bg-red-500/5 border border-red-500/20 rounded-lg px-4 py-2.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              <span className="text-red-400 text-sm">{offline} kiosco{offline > 1 ? 's' : ''} sin conexion</span>
             </div>
-          ))}
+          )}
+          {paperIssues > 0 && (
+            <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-2.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              <span className="text-amber-400 text-sm">{paperIssues} kiosco{paperIssues > 1 ? 's' : ''} con alerta de papel</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Kiosk grid */}
+      {kiosks.length === 0 ? (
+        <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
+          <svg className="w-10 h-10 text-white/10 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+          <p className="text-white/30 text-sm">No hay kioscos registrados</p>
+          <p className="text-white/15 text-xs mt-1">Agrega kioscos desde el Directorio de Kioscos</p>
+        </div>
+      ) : (
+        <div>
+          <p className="text-white/30 text-xs font-medium uppercase tracking-wider mb-4">Kioscos registrados</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {kiosks.map((kiosk) => {
+              const isOnline = kiosk.status === 'online';
+              return (
+                <div
+                  key={kiosk.id}
+                  className="bg-[#111] border border-white/5 rounded-xl p-5 hover:border-white/10 transition-colors group"
+                >
+                  {/* Top row: name + status */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-semibold text-white text-sm truncate">
+                        {kiosk.location_name || 'Kiosco sin nombre'}
+                      </h3>
+                      <p className="text-white/20 text-xs font-mono mt-0.5 truncate">{kiosk.mac_address}</p>
+                    </div>
+                    <span className={`shrink-0 ml-3 flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md ${
+                      isOnline
+                        ? 'text-emerald-400 bg-emerald-500/10'
+                        : 'text-red-400 bg-red-500/10'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                      {isOnline ? 'Online' : 'Offline'}
+                    </span>
+                  </div>
+
+                  {/* Details */}
+                  <div className="space-y-2.5">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-white/30">Impresora</span>
+                      <span className={`font-medium ${kiosk.paper_level === 'ok' ? 'text-white/60' : 'text-amber-400'}`}>
+                        {kiosk.paper_level === 'ok' ? 'OK' : 'Revisar papel'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-white/30">Ultimo ping</span>
+                      <span className="text-white/40 font-mono">
+                        {kiosk.last_ping ? getTimeSince(kiosk.last_ping) : '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

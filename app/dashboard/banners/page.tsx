@@ -7,8 +7,9 @@ export default function BannersCRUD() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Estados del formulario
   const [brandName, setBrandName] = useState('');
   const [planType, setPlanType] = useState('ORO');
   const [file, setFile] = useState<File | null>(null);
@@ -21,7 +22,7 @@ export default function BannersCRUD() {
   }, []);
 
   const fetchCampaigns = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('ad_campaigns')
       .select('*')
       .order('created_at', { ascending: false });
@@ -30,217 +31,401 @@ export default function BannersCRUD() {
     setLoading(false);
   };
 
-  const handleAddCampaign = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setEditingId(null);
+    setBrandName('');
+    setPlanType('ORO');
+    setFile(null);
+    setDuration('15');
+    setStartDate('');
+    setEndDate('');
+    setShowForm(false);
+  };
+
+  const handleEdit = (camp: any) => {
+    setEditingId(camp.id);
+    setBrandName(camp.brand_name || '');
+    setPlanType(camp.plan_type || 'ORO');
+    setDuration(String(camp.duration_seconds || 15));
+    setStartDate(camp.start_date || '');
+    setEndDate(camp.end_date || '');
+    setFile(null);
+    setShowForm(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) {
-      alert('Por favor selecciona un archivo (Imagen o Video vertical).');
+
+    if (!editingId && !file) {
+      alert('Selecciona un archivo (imagen o video vertical).');
       return;
     }
-    
+
     setUploading(true);
 
     try {
-      // 1. Nombre estandarizado para sobreescribir basura (Upsert)
-      const fileExt = file.name.split('.').pop();
-      // Nombre limpio: ej. "mcdonalds_banner.mp4"
-      const cleanBrandName = brandName.replace(/\s+/g, '_').toLowerCase();
-      const fileName = `${cleanBrandName}_banner.${fileExt}`;
-      const filePath = `campaigns/${fileName}`;
+      let mediaUrl: string | undefined;
+      let mediaType: string | undefined;
 
-      // 2. Subimos a Supabase con la magia de "upsert: true" (Si existe, lo chanca)
-      const { error: uploadError } = await supabase.storage
-        .from('publicidad')
-        .upload(filePath, file, { 
-          upsert: true, 
-          cacheControl: '3600' 
-        });
+      // Upload file if provided (new campaign or replacing file on edit)
+      if (file) {
+        const fileExt = file.name.split('.').pop();
+        const cleanBrandName = brandName.replace(/\s+/g, '_').toLowerCase();
+        const fileName = `${cleanBrandName}_banner.${fileExt}`;
+        const filePath = `campaigns/${fileName}`;
 
-      if (uploadError) throw uploadError;
+        const { error: uploadError } = await supabase.storage
+          .from('publicidad')
+          .upload(filePath, file, { upsert: true, cacheControl: '3600' });
 
-      // 3. Obtener el Link Público
-      const { data: { publicUrl } } = supabase.storage
-        .from('publicidad')
-        .getPublicUrl(filePath);
+        if (uploadError) throw uploadError;
 
-      // 4. Guardar en la Base de Datos
-      const mediaType = file.type.startsWith('video/') ? 'video' : 'image';
-      
-      const { error: dbError } = await supabase.from('ad_campaigns').insert([{
-        brand_name: brandName,
-        plan_type: planType,
-        media_url: publicUrl,
-        media_type: mediaType,
-        duration_seconds: parseInt(duration),
-        start_date: startDate || new Date().toISOString().split('T')[0],
-        end_date: endDate || null,
-        is_active: true
-      }]);
+        const { data: { publicUrl } } = supabase.storage
+          .from('publicidad')
+          .getPublicUrl(filePath);
 
-      if (dbError) throw dbError;
+        mediaUrl = publicUrl;
+        mediaType = file.type.startsWith('video/') ? 'video' : 'image';
+      }
 
-      // Limpiar y recargar
-      setBrandName('');
-      setPlanType('ORO');
-      setFile(null);
-      setDuration('15');
-      setStartDate('');
-      setEndDate('');
+      if (editingId) {
+        // Update existing
+        const updateData: any = {
+          brand_name: brandName,
+          plan_type: planType,
+          duration_seconds: parseInt(duration),
+          start_date: startDate || new Date().toISOString().split('T')[0],
+          end_date: endDate || null,
+        };
+        if (mediaUrl) {
+          updateData.media_url = mediaUrl;
+          updateData.media_type = mediaType;
+        }
+
+        const { error } = await supabase.from('ad_campaigns').update(updateData).eq('id', editingId);
+        if (error) throw error;
+      } else {
+        // Insert new
+        const { error } = await supabase.from('ad_campaigns').insert([{
+          brand_name: brandName,
+          plan_type: planType,
+          media_url: mediaUrl,
+          media_type: mediaType,
+          duration_seconds: parseInt(duration),
+          start_date: startDate || new Date().toISOString().split('T')[0],
+          end_date: endDate || null,
+          is_active: true
+        }]);
+        if (error) throw error;
+      }
+
+      resetForm();
       fetchCampaigns();
-
     } catch (error: any) {
-      alert('Error al subir campaña: ' + error.message);
+      alert('Error: ' + error.message);
     } finally {
       setUploading(false);
     }
   };
 
   const handleDelete = async (id: string, mediaUrl: string) => {
-    if (confirm('¿Eliminar esta campaña y borrar su archivo de la nube?')) {
+    if (confirm('Eliminar esta campana y su archivo de la nube?')) {
       try {
-        // 1. Extraemos la ruta exacta del archivo desde el URL público
-        // Buscamos todo lo que está después de "campaigns/"
         const pathToRemove = mediaUrl.substring(mediaUrl.indexOf('campaigns/'));
-        
-        // 2. Borramos el archivo físico del bucket para no pagar basura
         if (pathToRemove) {
           await supabase.storage.from('publicidad').remove([pathToRemove]);
         }
-
-        // 3. Borramos el registro de la base de datos
         await supabase.from('ad_campaigns').delete().eq('id', id);
-        
         fetchCampaigns();
-      } catch (error) {
-        alert('Error al eliminar: Verifica los permisos del bucket.');
+      } catch {
+        alert('Error al eliminar. Verifica los permisos del bucket.');
       }
     }
   };
 
-  const planColors: Record<string, string> = {
-    'DIAMANTE': 'text-cyan-400 bg-cyan-400/10 border-cyan-400/20',
-    'ORO': 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20',
-    'SOCIOS': 'text-purple-400 bg-purple-400/10 border-purple-400/20',
-    'BONO_FLASH': 'text-pink-400 bg-pink-400/10 border-pink-400/20',
+  const handleToggleActive = async (id: string, current: boolean) => {
+    const { error } = await supabase.from('ad_campaigns').update({ is_active: !current }).eq('id', id);
+    if (error) {
+      alert('Error al cambiar estado: ' + error.message);
+      return;
+    }
+    setCampaigns(prev => prev.map(c => c.id === id ? { ...c, is_active: !current } : c));
   };
+
+  const planColors: Record<string, string> = {
+    'DIAMANTE': 'text-cyan-400 bg-cyan-500/10',
+    'ORO': 'text-amber-400 bg-amber-500/10',
+    'SOCIOS': 'text-purple-400 bg-purple-500/10',
+    'BONO_FLASH': 'text-pink-400 bg-pink-500/10',
+  };
+
+  const planLabels: Record<string, string> = {
+    'DIAMANTE': 'Diamante',
+    'ORO': 'Oro',
+    'SOCIOS': 'Socios',
+    'BONO_FLASH': 'Flash',
+  };
+
+  const active = campaigns.filter(c => c.is_active).length;
+  const inactive = campaigns.filter(c => !c.is_active).length;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="w-8 h-8 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold text-white">Ad-Server Morna</h2>
-        <p className="text-white/50 mt-2">Gestiona la publicidad. Si creas una campaña con la misma marca, el archivo viejo se reemplazará automáticamente.</p>
+      {/* Header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Publicidad</p>
+          <h2 className="text-2xl font-bold text-white">Campanas</h2>
+        </div>
+        <button
+          onClick={() => { resetForm(); setShowForm(true); }}
+          className="flex items-center gap-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white rounded-lg px-4 py-2 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+          Nueva campana
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* FORMULARIO */}
-        <div className="xl:col-span-1 bg-[#111111] border border-white/10 rounded-2xl p-6 h-fit">
-          <h3 className="text-xl font-bold text-white mb-6 border-b border-white/10 pb-4">Nueva Campaña</h3>
-          <form onSubmit={handleAddCampaign} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-1">Marca / Cliente</label>
-              <input type="text" required value={brandName} onChange={(e) => setBrandName(e.target.value)}
-                className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-pink-500" placeholder="Ej: KFC" />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-1">Plan</label>
-                <select required value={planType} onChange={(e) => setPlanType(e.target.value)}
-                  className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-pink-500">
-                  <option value="DIAMANTE">Diamante (90s)</option>
-                  <option value="ORO">Oro (3m)</option>
-                  <option value="SOCIOS">Socios Fijos</option>
-                  <option value="BONO_FLASH">Bono Flash</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-1">Duración (Seg)</label>
-                <input type="number" max="15" required value={duration} onChange={(e) => setDuration(e.target.value)}
-                  className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-pink-500" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-1">Archivo (Video/Imagen vertical)</label>
-              <input type="file" accept="video/mp4,image/png,image/jpeg" onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white/70 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-500/10 file:text-pink-500 hover:file:bg-pink-500/20 cursor-pointer" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-1">Inicio</label>
-                <input type="date" required value={startDate} onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-pink-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-1">Fin (Opcional)</label>
-                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-pink-500" />
-              </div>
-            </div>
-            
-            <button type="submit" disabled={uploading}
-              className="w-full bg-gradient-to-r from-[#FF007A] to-[#FF5900] text-white font-bold rounded-xl px-4 py-3 hover:opacity-90 disabled:opacity-50 mt-4 shadow-[0_0_15px_rgba(255,0,122,0.2)]">
-              {uploading ? 'Procesando...' : 'Publicar Campaña'}
-            </button>
-          </form>
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Total</span>
+            <div className="text-xl font-bold text-white leading-tight">{campaigns.length}</div>
+          </div>
+          <svg className="w-4 h-4 text-white/15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
         </div>
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Activas</span>
+            <div className="text-xl font-bold text-emerald-400 leading-tight">{active}</div>
+          </div>
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+        </div>
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Pausadas</span>
+            <div className="text-xl font-bold text-white/40 leading-tight">{inactive}</div>
+          </div>
+          <span className="w-2 h-2 rounded-full bg-white/20" />
+        </div>
+      </div>
 
-        {/* LISTA DE CAMPAÑAS */}
-        <div className="xl:col-span-2">
-          <div className="bg-[#111111] border border-white/10 rounded-2xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-white/70">
-                <thead className="text-xs text-white/50 uppercase bg-white/5 border-b border-white/10">
-                  <tr>
-                    <th className="px-6 py-4">Campaña</th>
-                    <th className="px-6 py-4">Plan / Tipo</th>
-                    <th className="px-6 py-4">Fechas</th>
-                    <th className="px-6 py-4 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {campaigns.length === 0 && !loading && (
-                    <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-white/50">No hay campañas activas.</td>
-                    </tr>
-                  )}
-                  {campaigns.map((camp) => (
-                    <tr key={camp.id} className="border-b border-white/5 hover:bg-white/5">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-10 h-16 bg-[#1A1A1A] rounded overflow-hidden flex-shrink-0 border border-white/10">
-                            {camp.media_type === 'image' ? (
-                              <img src={camp.media_url} alt={camp.brand_name} className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-[10px] bg-pink-500/20 text-pink-500 font-bold">MP4</div>
-                            )}
-                          </div>
-                          <span className="font-bold text-white">{camp.brand_name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold border tracking-wider ${planColors[camp.plan_type]}`}>
-                          {camp.plan_type}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-[11px] font-mono">
-                        <div className="text-green-400">IN: {camp.start_date}</div>
-                        {camp.end_date && <div className="text-red-400">OUT: {camp.end_date}</div>}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button onClick={() => handleDelete(camp.id, camp.media_url)}
-                          className="text-red-500 hover:text-red-400 bg-red-500/10 px-3 py-1 rounded-lg font-medium transition-colors">
-                          Eliminar
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* Modal */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={resetForm} />
+          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-sm font-semibold text-white">
+                {editingId ? 'Editar campana' : 'Nueva campana publicitaria'}
+              </h3>
+              <button onClick={resetForm} className="text-white/30 hover:text-white/60 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
             </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Marca / Cliente</label>
+                  <input
+                    type="text"
+                    required
+                    value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                    placeholder="Ej: KFC"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan</label>
+                  <select
+                    required
+                    value={planType}
+                    onChange={(e) => setPlanType(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                  >
+                    <option value="DIAMANTE">Diamante (90s)</option>
+                    <option value="ORO">Oro (3m)</option>
+                    <option value="SOCIOS">Socios Fijos</option>
+                    <option value="BONO_FLASH">Bono Flash</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Duracion (seg)</label>
+                  <input
+                    type="number"
+                    max="15"
+                    required
+                    value={duration}
+                    onChange={(e) => setDuration(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+                    Archivo {editingId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
+                  </label>
+                  <input
+                    type="file"
+                    accept="video/mp4,image/png,image/jpeg"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fecha inicio</label>
+                  <input
+                    type="date"
+                    required
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fecha fin (opcional)</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="flex-1 px-4 py-2.5 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploading}
+                  className="flex-1 px-5 py-2.5 text-sm font-medium bg-pink-500/15 text-pink-400 hover:bg-pink-500/25 border border-pink-500/30 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {uploading ? 'Procesando...' : editingId ? 'Guardar cambios' : 'Publicar campana'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Campaigns list */}
+      {campaigns.length === 0 ? (
+        <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
+          <svg className="w-10 h-10 text-white/10 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+          <p className="text-white/30 text-sm">No hay campanas activas</p>
+          <p className="text-white/15 text-xs mt-1">Crea una nueva campana para empezar</p>
+        </div>
+      ) : (
+        <div className="bg-[#111] border border-white/5 rounded-xl overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-white/5">
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Campana</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Plan</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tipo</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Periodo</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Estado</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {campaigns.map((camp) => (
+                <tr key={camp.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors group">
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-12 bg-[#0A0A0A] rounded-md overflow-hidden shrink-0 border border-white/5">
+                        {camp.media_type === 'image' ? (
+                          <img src={camp.media_url} alt={camp.brand_name} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <svg className="w-3 h-3 text-white/20" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-white font-medium text-sm">{camp.brand_name}</span>
+                        <span className="block text-white/20 text-[10px] font-mono">{camp.duration_seconds}s</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${planColors[camp.plan_type] || 'text-white/40 bg-white/5'}`}>
+                      {planLabels[camp.plan_type] || camp.plan_type}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className="text-white/40 text-xs capitalize">{camp.media_type === 'video' ? 'Video' : 'Imagen'}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className="text-white/40 text-xs font-mono">{camp.start_date}</span>
+                    {camp.end_date && (
+                      <span className="text-white/20 text-xs font-mono"> — {camp.end_date}</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <button
+                      onClick={() => handleToggleActive(camp.id, camp.is_active)}
+                      className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
+                        camp.is_active
+                          ? 'text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20'
+                          : 'text-white/30 bg-white/5 hover:bg-white/10'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${camp.is_active ? 'bg-emerald-500' : 'bg-white/20'}`} />
+                      {camp.is_active ? 'Activa' : 'Pausada'}
+                    </button>
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <a
+                        href={camp.media_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Ver archivo"
+                        className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      </a>
+                      <button
+                        onClick={() => handleEdit(camp)}
+                        title="Editar"
+                        className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </button>
+                      <button
+                        onClick={() => handleDelete(camp.id, camp.media_url)}
+                        title="Eliminar"
+                        className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

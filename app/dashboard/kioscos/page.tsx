@@ -6,8 +6,9 @@ import { supabase } from '../../../lib/supabase';
 export default function KioscosCRUD() {
   const [kiosks, setKiosks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [showForm, setShowForm] = useState(false);
 
-  // Estados del formulario
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
@@ -17,7 +18,7 @@ export default function KioscosCRUD() {
   }, []);
 
   const fetchKiosks = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('kiosks')
       .select('*')
       .order('created_at', { ascending: false });
@@ -26,186 +27,246 @@ export default function KioscosCRUD() {
     setLoading(false);
   };
 
-  // 🚀 FUNCIÓN UNIFICADA: CREAR O ACTUALIZAR
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSubmitting(true);
 
     if (editingId) {
-      // ACTUALIZAR KIOSCO EXISTENTE
       const { error } = await supabase
         .from('kiosks')
         .update({ name, location })
         .eq('id', editingId);
 
-      if (!error) {
-        resetForm();
-        fetchKiosks();
-      } else {
-        alert('Error al actualizar el kiosco: ' + error.message);
-      }
+      if (error) alert('Error al actualizar: ' + error.message);
     } else {
-      // CREAR KIOSCO NUEVO
       const { error } = await supabase.from('kiosks').insert([{
         name,
         location,
-        status: 'offline', // Nace apagado hasta que el APK lo reclame
-        hardware_id: null  // Nace sin hardware asignado
+        status: 'offline',
+        hardware_id: null
       }]);
 
-      if (!error) {
-        resetForm();
-        fetchKiosks();
-      } else {
-        alert('Error al crear el kiosco: ' + error.message);
-      }
+      if (error) alert('Error al crear: ' + error.message);
     }
-    setLoading(false);
+
+    resetForm();
+    fetchKiosks();
+    setSubmitting(false);
   };
 
-  // 🚀 PREPARAR EL FORMULARIO PARA EDITAR
   const handleEdit = (kiosk: any) => {
     setEditingId(kiosk.id);
     setName(kiosk.name || '');
     setLocation(kiosk.location || '');
-    window.scrollTo({ top: 0, behavior: 'smooth' }); // Sube la pantalla suavemente
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 🚀 LIMPIAR EL FORMULARIO
   const resetForm = () => {
     setEditingId(null);
     setName('');
     setLocation('');
+    setShowForm(false);
   };
 
-  // 🚀 FUNCIÓN MDM: Permite liberar un perfil si la tablet física se daña
   const handleUnbind = async (id: string) => {
-    if (confirm('¿Estás seguro de desvincular el hardware de este kiosco? Dejará de registrar analíticas hasta que se vincule una nueva pantalla.')) {
+    if (confirm('Desvincular hardware de este kiosco? Dejara de registrar analiticas hasta vincular una nueva pantalla.')) {
       await supabase.from('kiosks').update({ hardware_id: null, status: 'offline' }).eq('id', id);
       fetchKiosks();
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('¿Eliminar este perfil de kiosco por completo? Perderás su historial asociado.')) {
+    if (confirm('Eliminar este kiosco por completo? Se perdera su historial asociado.')) {
       await supabase.from('kiosks').delete().eq('id', id);
       fetchKiosks();
     }
   };
 
+  const linked = kiosks.filter(k => k.hardware_id).length;
+  const waiting = kiosks.filter(k => !k.hardware_id).length;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold text-white">Flota de Kioscos</h2>
-        <p className="text-white/50 mt-2">Gestiona las ubicaciones y emparejamientos de tus pantallas Sunmi.</p>
+      {/* Header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Directorio</p>
+          <h2 className="text-2xl font-bold text-white">Flota de Kioscos</h2>
+        </div>
+        <button
+          onClick={() => { resetForm(); setShowForm(true); }}
+          className="flex items-center gap-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white rounded-lg px-4 py-2 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+          Nuevo kiosco
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* FORMULARIO PARA CREAR / EDITAR PERFIL */}
-        <div className="lg:col-span-1 bg-[#111111] border border-white/10 rounded-2xl p-6 h-fit">
-          <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
-            <h3 className="text-xl font-bold text-white">
-              {editingId ? 'Editar Kiosco' : 'Nuevo Kiosco'}
-            </h3>
-            {editingId && (
-              <button onClick={resetForm} className="text-xs text-white/50 hover:text-white transition-colors">
-                Cancelar edición
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Total</span>
+            <div className="text-xl font-bold text-white leading-tight">{kiosks.length}</div>
+          </div>
+          <svg className="w-4 h-4 text-white/15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+        </div>
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Vinculados</span>
+            <div className="text-xl font-bold text-emerald-400 leading-tight">{linked}</div>
+          </div>
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+        </div>
+        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
+          <div>
+            <span className="text-white/30 text-[10px] uppercase tracking-wider">Esperando</span>
+            <div className={`text-xl font-bold leading-tight ${waiting > 0 ? 'text-amber-400' : 'text-white'}`}>{waiting}</div>
+          </div>
+          <span className="w-2 h-2 rounded-full bg-amber-500" />
+        </div>
+      </div>
+
+      {/* Modal */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={resetForm} />
+          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-sm font-semibold text-white">
+                {editingId ? 'Editar kiosco' : 'Registrar nuevo kiosco'}
+              </h3>
+              <button onClick={resetForm} className="text-white/30 hover:text-white/60 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
-            )}
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-1">Identificador (Nombre)</label>
-              <input type="text" required value={name} onChange={(e) => setName(e.target.value)}
-                className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyan-500" 
-                placeholder="Ej: Totem Entrada Norte" />
             </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-1">Ubicación Física</label>
-              <input type="text" required value={location} onChange={(e) => setLocation(e.target.value)}
-                className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-cyan-500" 
-                placeholder="Ej: Nivel C2, frente a Arturo's" />
-            </div>
-            
-            <button type="submit" disabled={loading}
-              className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold rounded-xl px-4 py-3 hover:opacity-90 transition-opacity mt-4 shadow-[0_0_15px_rgba(6,182,212,0.2)]">
-              {loading ? 'Procesando...' : editingId ? 'Actualizar Kiosco' : 'Registrar Kiosco'}
-            </button>
-          </form>
-        </div>
-
-        {/* LISTA DE KIOSCOS Y ESTADO DE VINCULACIÓN */}
-        <div className="lg:col-span-2">
-          <div className="bg-[#111111] border border-white/10 rounded-2xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-white/70">
-                <thead className="text-xs text-white/50 uppercase bg-white/5 border-b border-white/10">
-                  <tr>
-                    <th className="px-6 py-4">Kiosco</th>
-                    <th className="px-6 py-4">Estado / Vinculación</th>
-                    <th className="px-6 py-4 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {kiosks.length === 0 && !loading && (
-                    <tr>
-                      <td colSpan={3} className="px-6 py-8 text-center text-white/50">
-                        No hay kioscos registrados. Crea uno para empezar.
-                      </td>
-                    </tr>
-                  )}
-                  {kiosks.map((kiosk) => (
-                    <tr key={kiosk.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-white text-base">{kiosk.name}</div>
-                        <div className="text-xs text-white/40 mt-1 flex items-center">
-                          <span className="material-icons text-[14px] mr-1">📍</span> {kiosk.location}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        {kiosk.hardware_id ? (
-                          <div className="flex flex-col space-y-1">
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 w-fit border border-green-500/20">
-                              <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 animate-pulse"></span>
-                              VINCULADO
-                            </span>
-                            <span className="text-[10px] font-mono text-white/30">ID: {kiosk.hardware_id.substring(0,8)}...</span>
-                          </div>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-400 w-fit border border-orange-500/20">
-                            ESPERANDO HARDWARE
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right space-x-2 whitespace-nowrap">
-                        {kiosk.hardware_id && (
-                          <button 
-                            onClick={() => handleUnbind(kiosk.id)}
-                            className="text-orange-400 hover:text-orange-300 bg-orange-500/10 px-3 py-1 rounded-lg transition-colors text-xs mr-2">
-                            Desvincular
-                          </button>
-                        )}
-                        <button 
-                          onClick={() => handleEdit(kiosk)}
-                          className="text-blue-400 hover:text-blue-300 bg-blue-500/10 px-3 py-1 rounded-lg transition-colors text-xs">
-                          Editar
-                        </button>
-                        <button 
-                          onClick={() => handleDelete(kiosk.id)}
-                          className="text-red-500 hover:text-red-400 bg-red-500/10 px-3 py-1 rounded-lg transition-colors text-xs ml-2">
-                          Eliminar
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Nombre</label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                  placeholder="Ej: Totem Entrada Norte"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Ubicacion</label>
+                <input
+                  type="text"
+                  required
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                  placeholder="Ej: Nivel C2, frente a Arturo's"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="flex-1 px-4 py-2.5 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 px-5 py-2.5 text-sm font-medium bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/30 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {submitting ? 'Guardando...' : editingId ? 'Actualizar' : 'Registrar'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Table */}
+      {kiosks.length === 0 ? (
+        <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
+          <svg className="w-10 h-10 text-white/10 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+          <p className="text-white/30 text-sm">No hay kioscos registrados</p>
+          <p className="text-white/15 text-xs mt-1">Haz clic en "Nuevo kiosco" para empezar</p>
+        </div>
+      ) : (
+        <div className="bg-[#111] border border-white/5 rounded-xl overflow-hidden">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-white/5">
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Kiosco</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Ubicacion</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Vinculacion</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {kiosks.map((kiosk) => (
+                <tr key={kiosk.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors group">
+                  <td className="px-5 py-3.5">
+                    <span className="text-white font-medium text-sm">{kiosk.name || 'Sin nombre'}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className="text-white/40 text-sm">{kiosk.location || '—'}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {kiosk.hardware_id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span className="text-emerald-400 text-xs font-medium">Vinculado</span>
+                        <span className="text-white/20 text-[10px] font-mono">{kiosk.hardware_id.substring(0, 8)}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        <span className="text-amber-400/70 text-xs">Esperando hardware</span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {kiosk.hardware_id && (
+                        <button
+                          onClick={() => handleUnbind(kiosk.id)}
+                          title="Desvincular hardware"
+                          className="p-1.5 rounded-md text-amber-400/60 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleEdit(kiosk)}
+                        title="Editar"
+                        className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </button>
+                      <button
+                        onClick={() => handleDelete(kiosk.id)}
+                        title="Eliminar"
+                        className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
