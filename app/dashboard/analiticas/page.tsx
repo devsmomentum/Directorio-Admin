@@ -63,9 +63,9 @@ export default function AnalyticsDashboard() {
         let clicksTodayCounter = 0;
 
         analytics.forEach(event => {
-          // --- A) Contar los clics de HOY ---
+          // --- A) Contar los clics de HOY (Corregido con toLocaleDateString) ---
           const eventDate = new Date(event.created_at);
-          if (eventDate.toDateString() === now.toDateString()) {
+          if (eventDate.toLocaleDateString() === now.toLocaleDateString()) {
             clicksTodayCounter++;
           }
 
@@ -74,9 +74,18 @@ export default function AnalyticsDashboard() {
             kioskActivity[event.kiosk_id] = (kioskActivity[event.kiosk_id] || 0) + 1;
           }
 
-          // --- C) Parseo Inteligente del JSONB / String ---
+          // --- C) Parseo Inteligente del JSONB / String (Corregido) ---
           let dataStr = '';
-          const rawData = event.event_data || event.item_name; // Soportamos ambos formatos
+          let rawData = event.event_data || event.item_name; // Soportamos ambos formatos
+
+          // Intentar parsear si Supabase lo mandó como un string JSON
+          if (typeof rawData === 'string') {
+            try {
+              rawData = JSON.parse(rawData);
+            } catch (e) {
+              // Si falla el parseo, significa que es un string normal (ej. "Categoría: Ropa")
+            }
+          }
 
           if (typeof rawData === 'object' && rawData !== null) {
             dataStr = rawData.store_name || '';
@@ -138,12 +147,15 @@ export default function AnalyticsDashboard() {
 
         transactions.forEach(t => {
           if (t.status === 'completed') {
-            totalUSD += Number(t.amount_usd);
+            // (Corregido: Prevenir NaN si amount_usd es nulo/vacío)
+            const amount = Number(t.amount_usd) || 0; 
+            
+            totalUSD += amount;
             completedSales += 1;
             
             if (!itemSales[t.item_name]) itemSales[t.item_name] = { count: 0, revenue: 0 };
             itemSales[t.item_name].count += 1;
-            itemSales[t.item_name].revenue += Number(t.amount_usd);
+            itemSales[t.item_name].revenue += amount;
           }
         });
 
@@ -171,7 +183,15 @@ export default function AnalyticsDashboard() {
     const headers = ["ID Evento", "Tipo Evento", "Módulo", "Elemento Interes (Tienda/Categoría)", "Kiosco ID", "Fecha y Hora"];
     const csvRows = allAnalyticsEvents.map(e => {
       let dataStr = '';
-      const rawData = e.event_data || e.item_name;
+      
+      // Mismo fix de parseo para la exportación
+      let rawData = e.event_data || e.item_name;
+      if (typeof rawData === 'string') {
+        try {
+          rawData = JSON.parse(rawData);
+        } catch (err) {}
+      }
+
       if (typeof rawData === 'object' && rawData !== null) {
         dataStr = rawData.store_name || JSON.stringify(rawData);
       } else if (typeof rawData === 'string') {
@@ -205,7 +225,7 @@ export default function AnalyticsDashboard() {
     
     const headers = ["ID", "Tipo", "Articulo", "Monto USD", "Monto Bs", "Tasa BCV", "Metodo Pago", "Email", "Kiosco", "Fecha"];
     const csvRows = allTransactions.map(t => [
-      t.id, t.transaction_type, `"${t.item_name}"`, t.amount_usd, t.amount_bs, t.exchange_rate, 
+      t.id, t.transaction_type, `"${t.item_name}"`, t.amount_usd || 0, t.amount_bs || 0, t.exchange_rate, 
       t.payment_method, t.user_email || 'N/A', t.kiosk_id, new Date(t.created_at).toLocaleString()
     ]);
 
@@ -256,12 +276,11 @@ export default function AnalyticsDashboard() {
       </div>
 
       {/* =========================================================
-          PESTAÑA 1: PUBLICIDAD Y TRÁFICO (El código original + Excel) 
+          PESTAÑA 1: PUBLICIDAD Y TRÁFICO
           ========================================================= */}
       {activeTab === 'trafico' && (
         <div className="space-y-8 animate-fade-in">
           
-          {/* 🚀 NUEVO BOTÓN EXPORTAR TRÁFICO */}
           <div className="flex justify-end">
             <button onClick={handleExportTrafficCSV} className="bg-pink-600 hover:bg-pink-500 text-white px-6 py-2 rounded-xl font-bold flex items-center shadow-[0_0_15px_rgba(236,72,153,0.4)] transition-all">
               <span className="material-icons mr-2">download</span> Exportar Interacciones
