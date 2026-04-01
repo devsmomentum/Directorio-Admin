@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import Pagination, { usePagination } from '../../components/Pagination';
 
 export default function BannersCRUD() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -9,6 +10,8 @@ export default function BannersCRUD() {
   const [uploading, setUploading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState('');
 
   const [brandName, setBrandName] = useState('');
   const [planType, setPlanType] = useState('ORO');
@@ -22,6 +25,7 @@ export default function BannersCRUD() {
   }, []);
 
   const fetchCampaigns = async () => {
+    setRefreshing(true);
     const { data } = await supabase
       .from('ad_campaigns')
       .select('*')
@@ -29,6 +33,7 @@ export default function BannersCRUD() {
 
     if (data) setCampaigns(data);
     setLoading(false);
+    setRefreshing(false);
   };
 
   const resetForm = () => {
@@ -166,8 +171,12 @@ export default function BannersCRUD() {
     'BONO_FLASH': 'Flash',
   };
 
-  const active = campaigns.filter(c => c.is_active).length;
-  const inactive = campaigns.filter(c => !c.is_active).length;
+  const filtered = campaigns.filter(c => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (c.brand_name || '').toLowerCase().includes(q) || (c.plan_type || '').toLowerCase().includes(q);
+  });
+  const pg = usePagination(filtered);
 
   if (loading) {
     return (
@@ -185,38 +194,35 @@ export default function BannersCRUD() {
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Publicidad</p>
           <h2 className="text-2xl font-bold text-white">Campanas</h2>
         </div>
-        <button
-          onClick={() => { resetForm(); setShowForm(true); }}
-          className="flex items-center gap-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white rounded-lg px-4 py-2 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
-          Nueva campana
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchCampaigns}
+            disabled={refreshing}
+            className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 transition-colors bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 disabled:opacity-50"
+          >
+            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            {refreshing ? 'Actualizando...' : 'Actualizar'}
+          </button>
+          <button
+            onClick={() => { resetForm(); setShowForm(true); }}
+            className="flex items-center gap-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white rounded-lg px-4 py-2 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+            Nueva campana
+          </button>
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
-          <div>
-            <span className="text-white/30 text-[10px] uppercase tracking-wider">Total</span>
-            <div className="text-xl font-bold text-white leading-tight">{campaigns.length}</div>
-          </div>
-          <svg className="w-4 h-4 text-white/15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-        </div>
-        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
-          <div>
-            <span className="text-white/30 text-[10px] uppercase tracking-wider">Activas</span>
-            <div className="text-xl font-bold text-emerald-400 leading-tight">{active}</div>
-          </div>
-          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-        </div>
-        <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5 flex items-center justify-between">
-          <div>
-            <span className="text-white/30 text-[10px] uppercase tracking-wider">Pausadas</span>
-            <div className="text-xl font-bold text-white/40 leading-tight">{inactive}</div>
-          </div>
-          <span className="w-2 h-2 rounded-full bg-white/20" />
-        </div>
+      {/* Search */}
+      <div className="relative">
+        <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por marca o plan..."
+          className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10 transition-colors"
+        />
       </div>
 
       {/* Modal */}
@@ -347,7 +353,7 @@ export default function BannersCRUD() {
               </tr>
             </thead>
             <tbody>
-              {campaigns.map((camp) => (
+              {pg.paginated.map((camp) => (
                 <tr key={camp.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors group">
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
@@ -424,6 +430,18 @@ export default function BannersCRUD() {
               ))}
             </tbody>
           </table>
+
+          {pg.totalPages > 1 && (
+            <Pagination
+              page={pg.page}
+              totalPages={pg.totalPages}
+              total={pg.total}
+              perPage={pg.perPage}
+              label="campanas"
+              onPageChange={pg.setPage}
+              onPerPageChange={pg.changePerPage}
+            />
+          )}
         </div>
       )}
     </div>
