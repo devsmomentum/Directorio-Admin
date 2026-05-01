@@ -41,7 +41,13 @@ export default function AnalyticsDashboard() {
       setActiveKiosks(onlineCount);
       setTotalKiosks((kiosks || []).length);
 
-      const { data: analytics } = await supabase.from('analytics_events').select('*').order('created_at', { ascending: false });
+      // Limitamos a los últimos 2000 eventos para el dashboard (suficiente para KPIs y top 5).
+      // Para exportación completa se usa el botón CSV que trabaja sobre este snapshot.
+      const { data: analytics } = await supabase
+        .from('analytics_events')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(2000);
 
       if (analytics) {
         setAllAnalyticsEvents(analytics);
@@ -84,7 +90,13 @@ export default function AnalyticsDashboard() {
         );
       }
 
-      const { data: transactions } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
+      // Últimas 1000 transacciones — suficiente para KPIs financieros recientes
+      const { data: transactions } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1000);
+
       if (transactions) {
         setAllTransactions(transactions);
         let totalUSD = 0, completed = 0;

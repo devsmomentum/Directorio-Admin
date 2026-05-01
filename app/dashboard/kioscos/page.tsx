@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -25,7 +25,8 @@ export default function KioscosCRUD() {
     const { data } = await supabase
       .from('kiosks')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(500);
 
     if (data) setKiosks(data);
     setLoading(false);
@@ -88,11 +89,13 @@ export default function KioscosCRUD() {
     }
   };
 
-  const filtered = kiosks.filter(k => {
-    if (!search) return true;
+  const filtered = useMemo(() => {
+    if (!search) return kiosks;
     const q = search.toLowerCase();
-    return (k.name || '').toLowerCase().includes(q) || (k.location || '').toLowerCase().includes(q);
-  });
+    return kiosks.filter(k =>
+      (k.name || '').toLowerCase().includes(q) || (k.location || '').toLowerCase().includes(q)
+    );
+  }, [kiosks, search]);
   const pg = usePagination(filtered);
 
   if (loading) {

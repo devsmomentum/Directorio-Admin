@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -29,7 +29,8 @@ export default function BannersCRUD() {
     const { data } = await supabase
       .from('ad_campaigns')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(500);
 
     if (data) setCampaigns(data);
     setLoading(false);
@@ -171,11 +172,11 @@ export default function BannersCRUD() {
     'BONO_FLASH': 'Flash',
   };
 
-  const filtered = campaigns.filter(c => {
-    if (!search) return true;
+  const filtered = useMemo(() => {
+    if (!search) return campaigns;
     const q = search.toLowerCase();
-    return (c.brand_name || '').toLowerCase().includes(q) || (c.plan_type || '').toLowerCase().includes(q);
-  });
+    return campaigns.filter(c => (c.brand_name || '').toLowerCase().includes(q) || (c.plan_type || '').toLowerCase().includes(q));
+  }, [campaigns, search]);
   const pg = usePagination(filtered);
 
   if (loading) {

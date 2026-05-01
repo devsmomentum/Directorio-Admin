@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, ChangeEvent } from 'react';
+import { useState, useEffect, ChangeEvent, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -41,8 +41,8 @@ export default function CuponsAdminPage() {
   const fetchData = async () => {
     setRefreshing(true);
     const [storesRes, couponsRes] = await Promise.all([
-      supabase.from('stores').select('id, name').order('name'),
-      supabase.from('coupons').select('*, stores(name)').order('created_at', { ascending: false }),
+      supabase.from('stores').select('id, name').order('name').limit(500),
+      supabase.from('coupons').select('*, stores(name)').order('created_at', { ascending: false }).limit(500),
     ]);
     if (storesRes.data) setStores(storesRes.data);
     if (couponsRes.data) setCoupons(couponsRes.data as Coupon[]);
@@ -68,8 +68,10 @@ export default function CuponsAdminPage() {
     setStoreDropdownOpen(false);
   };
 
-  const filteredStores = stores.filter(s =>
-    !storeSearch || s.name.toLowerCase().includes(storeSearch.toLowerCase())
+  // Only re-filters when stores or search text change, not on price/stock edits.
+  const filteredStores = useMemo(() =>
+    !storeSearch ? stores : stores.filter(s => s.name.toLowerCase().includes(storeSearch.toLowerCase())),
+    [stores, storeSearch]
   );
 
   const handleEditClick = (coupon: Coupon) => {
@@ -132,11 +134,11 @@ export default function CuponsAdminPage() {
     }
   };
 
-  const filtered = coupons.filter(c => {
-    if (!search) return true;
+  const filtered = useMemo(() => {
+    if (!search) return coupons;
     const q = search.toLowerCase();
-    return c.title.toLowerCase().includes(q) || c.stores?.name?.toLowerCase().includes(q);
-  });
+    return coupons.filter(c => c.title.toLowerCase().includes(q) || c.stores?.name?.toLowerCase().includes(q));
+  }, [coupons, search]);
   const pg = usePagination(filtered);
 
   if (loading) {
@@ -340,7 +342,7 @@ export default function CuponsAdminPage() {
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-md bg-[#0A0A0A] border border-white/5 overflow-hidden shrink-0">
                         {coupon.image_url ? (
-                          <img src={coupon.image_url} alt={coupon.title} className="w-full h-full object-cover" />
+                          <img src={coupon.image_url} alt={coupon.title} className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-white/10 text-[8px]">N/A</div>
                         )}

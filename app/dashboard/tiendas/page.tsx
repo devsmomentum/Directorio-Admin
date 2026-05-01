@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -29,8 +29,8 @@ export default function TiendasCRUD() {
   const fetchData = async () => {
     setRefreshing(true);
     const [catsRes, storesRes] = await Promise.all([
-      supabase.from('categories').select('*').order('name', { ascending: true }),
-      supabase.from('stores').select('*').order('created_at', { ascending: false }),
+      supabase.from('categories').select('*').order('name', { ascending: true }).limit(200),
+      supabase.from('stores').select('*').order('created_at', { ascending: false }).limit(500),
     ]);
     if (catsRes.data) setCategoriesList(catsRes.data);
     if (storesRes.data) setStores(storesRes.data);
@@ -155,19 +155,28 @@ export default function TiendasCRUD() {
     setShowForm(false);
   };
 
-  const getCategoryName = (store: any) => {
-    if (store.category_id) {
-      const cat = categoriesList.find(c => c.id === store.category_id);
-      return cat ? cat.name : store.category;
-    }
-    return store.category || 'Sin categoria';
-  };
+  // O(1) map: category id → name. Rebuilt only when categories change.
+  const categoryMap = useMemo(
+    () => Object.fromEntries(categoriesList.map((c: any) => [c.id, c.name])),
+    [categoriesList]
+  );
 
-  const filtered = stores.filter(s => {
-    if (!search) return true;
+  const getCategoryName = useCallback((store: any) => {
+    if (store.category_id) return categoryMap[store.category_id] || store.category || 'Sin categoria';
+    return store.category || 'Sin categoria';
+  }, [categoryMap]);
+
+  // Recomputed only when stores or search changes — NOT on every form keystroke.
+  const filtered = useMemo(() => {
+    if (!search) return stores;
     const q = search.toLowerCase();
-    return (s.name || '').toLowerCase().includes(q) || (s.floor || '').toLowerCase().includes(q) || getCategoryName(s).toLowerCase().includes(q);
-  });
+    return stores.filter(s =>
+      (s.name || '').toLowerCase().includes(q) ||
+      (s.floor || '').toLowerCase().includes(q) ||
+      getCategoryName(s).toLowerCase().includes(q)
+    );
+  }, [stores, search, getCategoryName]);
+
   const pg = usePagination(filtered);
 
   if (loading) {
@@ -365,7 +374,7 @@ export default function TiendasCRUD() {
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-md bg-[#0A0A0A] border border-white/5 overflow-hidden shrink-0">
                         {store.logo_url ? (
-                          <img src={store.logo_url} alt={store.name} className="w-full h-full object-cover" />
+                          <img src={store.logo_url} alt={store.name} className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-white/10 text-[8px]">N/A</div>
                         )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, ChangeEvent } from 'react';
+import { useState, useEffect, ChangeEvent, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -33,7 +33,7 @@ export default function ServicesAdminPage() {
 
   const fetchServices = async () => {
     setRefreshing(true);
-    const { data } = await supabase.from('services').select('*').order('created_at', { ascending: false });
+    const { data } = await supabase.from('services').select('*').order('created_at', { ascending: false }).limit(500);
     if (data) setServices(data as Service[]);
     setLoading(false);
     setRefreshing(false);
@@ -109,11 +109,11 @@ export default function ServicesAdminPage() {
     }
   };
 
-  const filtered = services.filter(s => {
-    if (!search) return true;
+  const filtered = useMemo(() => {
+    if (!search) return services;
     const q = search.toLowerCase();
-    return s.title.toLowerCase().includes(q) || s.provider.toLowerCase().includes(q);
-  });
+    return services.filter(s => s.title.toLowerCase().includes(q) || s.provider.toLowerCase().includes(q));
+  }, [services, search]);
   const pg = usePagination(filtered);
 
   if (loading) {
@@ -267,7 +267,7 @@ export default function ServicesAdminPage() {
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-md bg-white/5 border border-white/5 overflow-hidden shrink-0">
                         {srv.image_url ? (
-                          <img src={srv.image_url} alt={srv.title} className="w-full h-full object-cover" />
+                          <img src={srv.image_url} alt={srv.title} className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-white/10 text-[8px]">N/A</div>
                         )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 const LS_KEY = 'millennium_per_page';
 const PER_PAGE_OPTIONS = [5, 10, 20, 50];
@@ -14,11 +14,9 @@ function getStoredPerPage(): number {
 
 export function usePagination<T>(items: T[]) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
-
-  useEffect(() => {
-    setPerPage(getStoredPerPage());
-  }, []);
+  // Lazy initialization: reads localStorage synchronously on first render.
+  // Eliminates the double-render that the previous useEffect caused.
+  const [perPage, setPerPage] = useState<number>(getStoredPerPage);
 
   const totalPages = Math.max(1, Math.ceil(items.length / perPage));
   const safePage = Math.min(page, totalPages);

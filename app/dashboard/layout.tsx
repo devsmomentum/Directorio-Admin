@@ -8,24 +8,21 @@ import { supabase } from '../../lib/supabase';
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [isAuthorized, setIsAuthorized] = useState(false); // Estado de seguridad
+  // null = aún no sabemos; false = sin sesión; true = autorizado
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   useEffect(() => {
-    checkSecurity();
-  }, []);
-
-  const checkSecurity = async () => {
-    // Le preguntamos a Supabase si hay alguien logueado en este navegador
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      // Si no hay sesión, lo expulsamos al login reemplazando el historial
-      router.replace('/login');
-    } else {
-      // Si hay sesión, le damos la llave para ver el contenido
-      setIsAuthorized(true);
-    }
-  };
+    // onAuthStateChange dispara inmediatamente con la sesión cacheada en la cookie
+    // (sin roundtrip de red si el token aún es válido), eliminando el spinner innecesario.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.replace('/login');
+      } else {
+        setIsAuthorized(true);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [router]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -62,8 +59,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )}
   ];
 
-  // Pantalla de carga de seguridad (evita que se vea el panel por 1 segundo)
-  if (!isAuthorized) {
+  // Solo mostramos el spinner cuando realmente no sabemos el estado (null = verificando)
+  if (isAuthorized === null) {
     return (
       <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center space-y-4">
         <div className="w-12 h-12 border-4 border-[#FF007A]/20 border-t-[#FF007A] rounded-full animate-spin"></div>
