@@ -144,13 +144,15 @@ Items del menú (en orden):
 
 1. Monitoreo Kioscos — `/dashboard`
 2. Directorio Kioscos — `/dashboard/kioscos`
-3. Gestion de Banners — `/dashboard/banners`
-4. Directorio Tiendas — `/dashboard/tiendas`
-5. Directorio Categorias — `/dashboard/categorias`
-6. Analiticas — `/dashboard/analiticas`
-7. Gestion de Cupones — `/dashboard/cupons`
-8. Mapas — `/dashboard/mapa`
-9. Directorio Servicios — `/dashboard/services`
+3. Directorio Tiendas — `/dashboard/tiendas`
+4. Directorio Categorias — `/dashboard/categorias`
+5. Cupones y Combos — `/dashboard/cupons`
+6. Planes — `/dashboard/planes` *(nuevo)*
+7. Banners — `/dashboard/banners` *(imágenes estáticas decorativas)*
+8. Campañas Publicitarias — `/dashboard/campanias` *(videos/imágenes de anunciantes)*
+9. Analiticas — `/dashboard/analiticas`
+10. Mapas — `/dashboard/mapa`
+11. Directorio Servicios — `/dashboard/services`
 
 Para añadir un módulo: crear la página y agregar el item al array de navegación del layout.
 
@@ -218,16 +220,31 @@ Columnas relevantes en `kiosks`: `id, name, location, status, hardware_id, paper
 - Vista previa del ícono en el formulario.
 - Eliminar puede dejar tiendas huérfanas (no hay cascada definida en el cliente).
 
-### 5. Gestión de Banners — `/dashboard/banners`
+### 5. Banners — `/dashboard/banners`
 
 **Archivo:** `app/dashboard/banners/page.tsx`
+**Tabla:** `banners`
+**Storage:** bucket `publicidad`, ruta `banners/{titulo_timestamp.ext}`.
+
+> ⚠️ **Diferencia con campañas:** Los banners son imágenes **estáticas decorativas** (fondos de pantalla, imágenes del mall, imágenes de bienvenida). No tienen plan de frecuencia ni son de anunciantes.
+
+- CRUD completo + toggle `is_active` + control de `sort_order`.
+- Campos: `title, image_url, screen, sort_order, is_active`.
+- `screen`: `principal | directorio | servicios | mapa` — indica en qué pantalla del kiosco aparece.
+- Máx 2MB. Formatos: PNG/JPEG/WebP/GIF.
+
+### 5b. Campañas Publicitarias — `/dashboard/campanias`
+
+**Archivo:** `app/dashboard/campanias/page.tsx`
 **Tabla:** `ad_campaigns`
 **Storage:** bucket `publicidad`, ruta `campaigns/{nombre_banner.ext}`.
+
+> ⚠️ **Diferencia con banners:** Las campañas son videos/imágenes de **anunciantes externos** que pagan un plan para aparecer en rotación en los kioscos.
 
 - CRUD + toggle `is_active` (pausar/activar).
 - Tipos de plan: `DIAMANTE`, `ORO`, `SOCIOS`, `BONO_FLASH` (cada uno con su badge).
 - Soporta imagen y video. `media_type` se infiere del archivo subido.
-- `duration_seconds` máx. 15. `start_date` requerido, `end_date` opcional.
+- `duration_seconds`: tiempo que se muestra por aparición. `start_date` requerido, `end_date` opcional.
 - Al **borrar** una campaña, también se elimina el archivo de Storage.
 - Subida con `upsert: true` para permitir reemplazar el media de una campaña existente.
 
@@ -284,10 +301,12 @@ Inferidas a partir de las queries en el código. Verifica la fuente de verdad en
 | Tabla | Campos clave | Usada por |
 |-------|--------------|-----------|
 | `kiosks` | `id, name, location, status, hardware_id, paper_level, last_ping, mac_address, created_at` | dashboard, kioscos, mapa, analíticas |
-| `stores` | `id, name, category_id, category, floor, local_number, description, logo_url, created_at` | tiendas, cupones, mapa, analíticas |
+| `stores` | `id, name, category_id, category, floor, local_number, description, logo_url, plan_key, plan_expires_at, created_at` | tiendas, cupones, mapa, analíticas |
 | `categories` | `id, name, icon` | categorías, tiendas |
-| `ad_campaigns` | `id, brand_name, plan_type, media_url, media_type, duration_seconds, start_date, end_date, is_active, created_at` | banners, dashboard |
-| `coupons` | `id, title, code, store_id, image_url, price_usd, amount_available, created_at` | cupones |
+| `plans` | `id, name, plan_key, description, duration_days, price_usd, applies_to, features, is_active, display_order, created_at` | planes, tiendas, cupones |
+| `ad_campaigns` | `id, brand_name, plan_type, media_url, media_type, duration_seconds, start_date, end_date, is_active, created_at` | campañas |
+| `banners` | `id, title, image_url, screen, sort_order, is_active, created_at` | banners |
+| `coupons` | `id, title, code, store_id, image_url, price_usd, amount_available, plan_key, validity_days, created_at` | cupones |
 | `services` | `id, title, provider, description, image_url, is_active, created_at` | services |
 | `analytics_events` | `id, event_type, module, event_data, item_name, kiosk_id, created_at` | analíticas |
 | `transactions` | `id, transaction_type, item_name, amount_usd, amount_bs, exchange_rate, payment_method, user_email, status, kiosk_id, created_at` | analíticas |

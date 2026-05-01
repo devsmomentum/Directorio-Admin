@@ -1,10 +1,31 @@
 'use client';
 
-import { useState, useEffect, ChangeEvent, useMemo } from 'react';
+import { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
+// Match real schema coupons.plan_type options
+const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'BONO_PREMIADO', 'PUBLI_PROMO'] as const;
+
+const PLAN_COLORS: Record<string, string> = {
+  DIAMANTE:       'text-cyan-400 bg-cyan-500/10',
+  ORO:            'text-amber-400 bg-amber-500/10',
+  IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
+  BONO_PREMIADO:  'text-pink-400 bg-pink-500/10',
+  PUBLI_PROMO:    'text-blue-400 bg-blue-500/10',
+};
+
+const PLAN_LABELS: Record<string, string> = {
+  DIAMANTE:       'Diamante',
+  ORO:            'Oro',
+  IA_PERFORMANCE: 'IA Performance',
+  BONO_PREMIADO:  'Bono Premiado',
+  PUBLI_PROMO:    'Publi Promo',
+};
+
 interface Store { id: string; name: string; }
+interface Campaign { id: string; brand_name: string; }
+
 interface Coupon {
   id: string;
   title: string;
@@ -14,25 +35,42 @@ interface Coupon {
   code: string;
   amount_available: number;
   price_usd: number;
+  plan_type: string;
+  category: string;
+  start_date: string;
+  end_date: string;
+  campaign_id: string;
 }
 
 export default function CuponsAdminPage() {
   const [stores, setStores] = useState<Store[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Combobox state
   const [storeSearch, setStoreSearch] = useState('');
   const [storeDropdownOpen, setStoreDropdownOpen] = useState(false);
 
+  // Form Fields
   const [editingCouponId, setEditingCouponId] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [couponTitle, setCouponTitle] = useState('');
   const [amountAvailable, setAmountAvailable] = useState<number>(0);
   const [priceUsd, setPriceUsd] = useState<number>(0);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>('');
+  
+  // New Schema fields
+  const [planType, setPlanType] = useState<string>('IA_PERFORMANCE');
+  const [category, setCategory] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState<string>('');
+  const [campaignId, setCampaignId] = useState<string>('');
 
   useEffect(() => {
     fetchData();
@@ -40,11 +78,13 @@ export default function CuponsAdminPage() {
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [storesRes, couponsRes] = await Promise.all([
+    const [storesRes, campaignsRes, couponsRes] = await Promise.all([
       supabase.from('stores').select('id, name').order('name').limit(500),
+      supabase.from('ad_campaigns').select('id, brand_name').order('brand_name').limit(200),
       supabase.from('coupons').select('*, stores(name)').order('created_at', { ascending: false }).limit(500),
     ]);
     if (storesRes.data) setStores(storesRes.data);
+    if (campaignsRes.data) setCampaigns(campaignsRes.data);
     if (couponsRes.data) setCoupons(couponsRes.data as Coupon[]);
     setLoading(false);
     setRefreshing(false);
@@ -59,87 +99,131 @@ export default function CuponsAdminPage() {
     setAmountAvailable(0);
     setPriceUsd(0);
     setImageFile(null);
+    setImagePreview('');
+    setPlanType('IA_PERFORMANCE');
+    setCategory('');
+    setStartDate(new Date().toISOString().split('T')[0]);
+    setEndDate('');
+    setCampaignId('');
     setShowForm(false);
   };
 
-  const selectStore = (store: Store) => {
-    setSelectedStoreId(store.id);
-    setStoreSearch(store.name);
-    setStoreDropdownOpen(false);
-  };
+  const filteredStores = useMemo(() => {
+    if (!storeSearch) return stores;
+    return stores.filter(s => s.name.toLowerCase().includes(storeSearch.toLowerCase()));
+  }, [stores, storeSearch]);
 
-  // Only re-filters when stores or search text change, not on price/stock edits.
-  const filteredStores = useMemo(() =>
-    !storeSearch ? stores : stores.filter(s => s.name.toLowerCase().includes(storeSearch.toLowerCase())),
-    [stores, storeSearch]
-  );
+  const filteredCoupons = useMemo(() => {
+    if (!search) return coupons;
+    const q = search.toLowerCase();
+    return coupons.filter(c => 
+      c.title.toLowerCase().includes(q) || 
+      c.code?.toLowerCase().includes(q) || 
+      (c.stores?.name || '').toLowerCase().includes(q) ||
+      (c.category || '').toLowerCase().includes(q)
+    );
+  }, [coupons, search]);
+
+  const pg = usePagination(filteredCoupons);
 
   const handleEditClick = (coupon: Coupon) => {
     setEditingCouponId(coupon.id);
-    setSelectedStoreId(coupon.store_id);
+    setSelectedStoreId(coupon.store_id || '');
     setStoreSearch(coupon.stores?.name || '');
-    setCouponTitle(coupon.title);
-    setAmountAvailable(coupon.amount_available);
-    setPriceUsd(coupon.price_usd);
+    setCouponTitle(coupon.title || '');
+    setAmountAvailable(coupon.amount_available || 0);
+    setPriceUsd(coupon.price_usd || 0);
+    setImagePreview(coupon.image_url || '');
     setImageFile(null);
+    setPlanType(coupon.plan_type || 'IA_PERFORMANCE');
+    setCategory(coupon.category || '');
+    setStartDate(coupon.start_date ? coupon.start_date.split('T')[0] : new Date().toISOString().split('T')[0]);
+    setEndDate(coupon.end_date ? coupon.end_date.split('T')[0] : '');
+    setCampaignId(coupon.campaign_id || '');
     setShowForm(true);
   };
 
-  const handleDeleteClick = async (id: string) => {
-    if (!confirm('Eliminar este combo? Esta accion no se puede deshacer.')) return;
-    await supabase.from('coupons').delete().eq('id', id);
-    fetchData();
+  const validateImage = (file: File): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (file.size > 500 * 1024) { alert('La imagen debe pesar menos de 500 KB.'); resolve(false); return; }
+      const img = new Image();
+      img.onload = () => {
+        if (img.width > 800 || img.height > 800) { alert(`Dimensiones excedidas (${img.width}x${img.height}). Máximo: 800x800px.`); resolve(false); }
+        else { resolve(true); }
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      const isValid = await validateImage(file);
+      if (isValid) {
+        setImageFile(file);
+        setImagePreview(URL.createObjectURL(file));
+      } else {
+        e.target.value = '';
+      }
+    }
   };
 
   const handleSaveCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStoreId || !couponTitle || amountAvailable <= 0 || priceUsd <= 0) {
-      alert('Completa todos los campos.');
-      return;
-    }
-    if (!editingCouponId && !imageFile) {
-      alert('Sube una imagen para el combo nuevo.');
-      return;
-    }
-
+    if (!selectedStoreId && !campaignId) { alert('Debes seleccionar una tienda o una campaña.'); return; }
+    if (!endDate) { alert('La fecha de vencimiento es requerida por el esquema.'); return; }
     setIsSaving(true);
+
     try {
-      let publicUrl: string | undefined;
+      let publicUrl = imagePreview || null;
       if (imageFile) {
         const fileExt = imageFile.name.split('.').pop();
-        const filePath = `coupon_images/${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('coupons').upload(filePath, imageFile);
+        const fileName = `coupon_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('publicidad').upload(`coupons/${fileName}`, imageFile, { upsert: true });
         if (uploadError) throw uploadError;
-        publicUrl = supabase.storage.from('coupons').getPublicUrl(filePath).data.publicUrl;
+        const { data: publicUrlData } = supabase.storage.from('publicidad').getPublicUrl(`coupons/${fileName}`);
+        publicUrl = publicUrlData.publicUrl;
       }
 
+      const couponData: any = {
+        store_id: selectedStoreId || null,
+        campaign_id: campaignId || null,
+        title: couponTitle,
+        amount_available: amountAvailable,
+        price_usd: priceUsd,
+        plan_type: planType,
+        category: category,
+        start_date: new Date(startDate).toISOString(),
+        end_date: new Date(endDate).toISOString(),
+      };
+      
+      if (publicUrl) couponData.image_url = publicUrl;
+
       if (editingCouponId) {
-        const updateData: any = { store_id: selectedStoreId, title: couponTitle, amount_available: amountAvailable, price_usd: priceUsd };
-        if (publicUrl) updateData.image_url = publicUrl;
-        const { error } = await supabase.from('coupons').update(updateData).eq('id', editingCouponId);
+        const { error } = await supabase.from('coupons').update(couponData).eq('id', editingCouponId);
         if (error) throw error;
       } else {
-        const storeName = stores.find(s => s.id === selectedStoreId)?.name || 'TIENDA';
-        const code = `CUPON-${storeName.substring(0, 3).toUpperCase()}-${Date.now().toString().substring(7)}`;
-        const { error } = await supabase.from('coupons').insert({ store_id: selectedStoreId, title: couponTitle, image_url: publicUrl, code, amount_available: amountAvailable, price_usd: priceUsd });
+        const storeName = stores.find(s => s.id === selectedStoreId)?.name || 'GENERICO';
+        couponData.code = `CUPON-${storeName.substring(0, 3).toUpperCase()}-${Date.now().toString().substring(7)}`;
+        const { error } = await supabase.from('coupons').insert([couponData]);
         if (error) throw error;
       }
 
       resetForm();
       fetchData();
-    } catch (error: any) {
-      alert('Error: ' + error.message);
+    } catch (err: any) {
+      alert(`Error al guardar: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const filtered = useMemo(() => {
-    if (!search) return coupons;
-    const q = search.toLowerCase();
-    return coupons.filter(c => c.title.toLowerCase().includes(q) || c.stores?.name?.toLowerCase().includes(q));
-  }, [coupons, search]);
-  const pg = usePagination(filtered);
+  const handleDelete = async (id: string) => {
+    if (!confirm('Eliminar este cupón permanentemente?')) return;
+    const { error } = await supabase.from('coupons').delete().eq('id', id);
+    if (error) alert(error.message);
+    else fetchData();
+  };
 
   if (loading) {
     return (
@@ -154,8 +238,8 @@ export default function CuponsAdminPage() {
       {/* Header */}
       <div className="flex items-end justify-between">
         <div>
-          <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Catalogo</p>
-          <h2 className="text-2xl font-bold text-white">Cupones y Combos</h2>
+          <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Publicidad y Promociones</p>
+          <h2 className="text-2xl font-bold text-white">Gestión de Cupones</h2>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -168,88 +252,107 @@ export default function CuponsAdminPage() {
           </button>
           <button
             onClick={() => { resetForm(); setShowForm(true); }}
-            className="flex items-center gap-2 text-sm font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white rounded-lg px-4 py-2 transition-colors"
+            className="flex items-center gap-2 text-sm font-medium bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 rounded-lg px-4 py-2 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
-            Nuevo combo
+            Nuevo Combo
           </button>
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search Bar */}
       <div className="relative">
         <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por titulo o tienda..."
+          placeholder="Buscar por titulo, codigo o tienda..."
           className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10 transition-colors"
         />
       </div>
 
-      {/* Modal */}
+      {/* Modal Form */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={resetForm} />
-          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-sm font-semibold text-white">
-                {editingCouponId ? 'Editar combo' : 'Nuevo combo'}
+                {editingCouponId ? 'Editar Combo/Cupón' : 'Nuevo Combo/Cupón'}
               </h3>
               <button onClick={resetForm} className="text-white/30 hover:text-white/60 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             <form onSubmit={handleSaveCoupon} className="space-y-4">
-              <div className="relative">
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tienda</label>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Store Combobox */}
                 <div className="relative">
-                  <svg className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                  <input
-                    type="text"
-                    value={storeSearch}
-                    onChange={e => {
-                      setStoreSearch(e.target.value);
-                      setStoreDropdownOpen(true);
-                      if (!e.target.value) setSelectedStoreId('');
-                    }}
-                    onFocus={() => setStoreDropdownOpen(true)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg pl-9 pr-8 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
-                    placeholder="Buscar tienda..."
-                  />
-                  {selectedStoreId && (
-                    <button
-                      type="button"
-                      onClick={() => { setSelectedStoreId(''); setStoreSearch(''); }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/20 hover:text-white/50 transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tienda asignada</label>
+                  <div 
+                    className="flex items-center justify-between w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm cursor-pointer"
+                    onClick={() => setStoreDropdownOpen(!storeDropdownOpen)}
+                  >
+                    <span className="text-white truncate">
+                      {selectedStoreId ? stores.find(s => s.id === selectedStoreId)?.name : 'Seleccionar tienda...'}
+                    </span>
+                    <svg className={`w-4 h-4 text-white/30 transition-transform ${storeDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                  {storeDropdownOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                      <div className="p-2 border-b border-white/5">
+                        <input
+                          type="text"
+                          value={storeSearch}
+                          onChange={e => setStoreSearch(e.target.value)}
+                          placeholder="Buscar tienda..."
+                          className="w-full bg-[#0A0A0A] border border-white/5 rounded-md px-2 py-1.5 text-xs text-white focus:outline-none"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto">
+                        <div
+                          className="px-3 py-2 text-sm text-white/40 hover:bg-white/5 cursor-pointer"
+                          onClick={() => { setSelectedStoreId(''); setStoreSearch(''); setStoreDropdownOpen(false); }}
+                        >
+                          Ninguna (Solo campaña)
+                        </div>
+                        {filteredStores.map(store => (
+                          <div
+                            key={store.id}
+                            className="px-3 py-2 text-sm text-white hover:bg-white/5 cursor-pointer truncate"
+                            onClick={() => {
+                              setSelectedStoreId(store.id);
+                              setStoreSearch(store.name);
+                              setStoreDropdownOpen(false);
+                            }}
+                          >
+                            {store.name}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-                {storeDropdownOpen && !selectedStoreId && (
-                  <div className="absolute z-10 mt-1 w-full bg-[#0A0A0A] border border-white/10 rounded-lg shadow-xl max-h-40 overflow-y-auto">
-                    {filteredStores.length === 0 ? (
-                      <div className="px-3 py-2.5 text-xs text-white/20">Sin resultados</div>
-                    ) : (
-                      filteredStores.map(s => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() => selectStore(s)}
-                          className="w-full text-left px-3 py-2 text-sm text-white/60 hover:text-white hover:bg-white/5 transition-colors"
-                        >
-                          {s.name}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-                <input type="hidden" required value={selectedStoreId} />
+
+                {/* Campaign Link */}
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Campaña (Opcional)</label>
+                  <select
+                    value={campaignId}
+                    onChange={e => setCampaignId(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                  >
+                    <option value="">Sin campaña</option>
+                    {campaigns.map(c => (
+                      <option key={c.id} value={c.id}>{c.brand_name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
+
               <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Titulo</label>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Título del Cupón / Oferta</label>
                 <input
                   type="text"
                   required
@@ -259,6 +362,7 @@ export default function CuponsAdminPage() {
                   placeholder="Ej: 20% Desc. en Cafe"
                 />
               </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Precio ($)</label>
@@ -273,7 +377,7 @@ export default function CuponsAdminPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Stock</label>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Stock Disponible</label>
                   <input
                     type="number"
                     required
@@ -284,17 +388,76 @@ export default function CuponsAdminPage() {
                   />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Categoría</label>
+                  <input
+                    type="text"
+                    value={category}
+                    onChange={e => setCategory(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    placeholder="Ej: Gastronomía"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de Visibilidad</label>
+                  <select
+                    value={planType}
+                    onChange={e => setPlanType(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                  >
+                    {PLAN_TYPES.map(pt => (
+                      <option key={pt} value={pt}>{PLAN_LABELS[pt] || pt}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fecha Inicio</label>
+                  <input
+                    type="date"
+                    required
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fecha Fin</label>
+                  <input
+                    type="date"
+                    required
+                    value={endDate}
+                    onChange={e => setEndDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
                   Imagen {editingCouponId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
                 </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => { if (e.target.files?.[0]) setImageFile(e.target.files[0]); }}
-                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
-                />
+                <div className="flex gap-3 items-center">
+                  <div className="w-12 h-12 rounded-lg bg-[#0A0A0A] border border-white/10 overflow-hidden flex-shrink-0">
+                    {imagePreview ? (
+                      <img src={imagePreview} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white/10 text-[8px]">N/A</div>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
+                  />
+                </div>
               </div>
+
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
@@ -329,9 +492,10 @@ export default function CuponsAdminPage() {
             <thead>
               <tr className="border-b border-white/5">
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Combo</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tienda</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Precio</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Stock</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tienda / Categoría</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Plan</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Vigencia</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Precio / Stock</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acciones</th>
               </tr>
             </thead>
@@ -354,21 +518,25 @@ export default function CuponsAdminPage() {
                     </div>
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className="text-white/40 text-xs">{coupon.stores?.name || '—'}</span>
+                    <span className="text-white/40 text-xs block">{coupon.stores?.name || 'GENERICO'}</span>
+                    {coupon.category && <span className="text-white/20 text-[10px] block mt-0.5">{coupon.category}</span>}
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className="text-emerald-400 text-sm font-medium">${coupon.price_usd?.toFixed(2) || '0.00'}</span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`text-sm font-medium ${coupon.amount_available <= 5 ? 'text-amber-400' : 'text-white/60'}`}>
-                      {coupon.amount_available}
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[coupon.plan_type] || 'text-white/40 bg-white/5'}`}>
+                      {PLAN_LABELS[coupon.plan_type] || coupon.plan_type}
                     </span>
-                    {coupon.amount_available <= 5 && coupon.amount_available > 0 && (
-                      <span className="text-amber-400/50 text-[10px] ml-1.5">bajo</span>
-                    )}
-                    {coupon.amount_available === 0 && (
-                      <span className="text-red-400/50 text-[10px] ml-1.5">agotado</span>
-                    )}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className="text-white/40 text-xs block">{new Date(coupon.start_date).toLocaleDateString()}</span>
+                    <span className="text-white/20 text-[10px] block mt-0.5">al {new Date(coupon.end_date).toLocaleDateString()}</span>
+                  </td>
+                  <td className="px-5 py-3.5 text-right">
+                    <span className="text-emerald-400 text-sm font-medium block">${coupon.price_usd?.toFixed(2) || '0.00'}</span>
+                    <div className="mt-0.5">
+                      <span className={`text-xs font-medium ${coupon.amount_available <= 5 ? 'text-amber-400' : 'text-white/60'}`}>
+                        {coupon.amount_available} disp.
+                      </span>
+                    </div>
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -380,7 +548,7 @@ export default function CuponsAdminPage() {
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                       </button>
                       <button
-                        onClick={() => handleDeleteClick(coupon.id)}
+                        onClick={() => handleDelete(coupon.id)}
                         title="Eliminar"
                         className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                       >

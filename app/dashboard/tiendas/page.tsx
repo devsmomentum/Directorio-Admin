@@ -4,6 +4,21 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
+// plan_type values from DB CHECK constraint
+const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE'] as const;
+
+const PLAN_COLORS: Record<string, string> = {
+  DIAMANTE:       'text-cyan-400 bg-cyan-500/10',
+  ORO:            'text-amber-400 bg-amber-500/10',
+  IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
+};
+
+const PLAN_LABELS: Record<string, string> = {
+  DIAMANTE:       'Diamante',
+  ORO:            'Oro',
+  IA_PERFORMANCE: 'IA Performance',
+};
+
 export default function TiendasCRUD() {
   const [stores, setStores] = useState<any[]>([]);
   const [categoriesList, setCategoriesList] = useState<any[]>([]);
@@ -13,12 +28,14 @@ export default function TiendasCRUD() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
 
+  // Form fields — match real schema exactly
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [floor, setFloor] = useState('');
+  const [floorLevel, setFloorLevel] = useState('');
   const [localNumber, setLocalNumber] = useState('');
   const [description, setDescription] = useState('');
+  const [planType, setPlanType] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string>('');
 
@@ -92,14 +109,15 @@ export default function TiendasCRUD() {
       }
 
       const selectedCat = categoriesList.find(c => c.id === categoryId);
-      const storeData = {
+      const storeData: any = {
         name,
-        category_id: categoryId,
+        category_id: categoryId || null,
         category: selectedCat?.name || '',
-        floor,
+        floor_level: floorLevel,         // real column name
         local_number: localNumber,
         description,
         logo_url: finalLogoUrl,
+        plan_type: planType || null,      // real column with CHECK constraint
       };
 
       if (editingId) {
@@ -128,9 +146,10 @@ export default function TiendasCRUD() {
       const matchedCat = categoriesList.find(c => c.name === store.category);
       setCategoryId(matchedCat ? matchedCat.id : '');
     }
-    setFloor(store.floor || '');
+    setFloorLevel(store.floor_level || '');
     setLocalNumber(store.local_number || '');
     setDescription(store.description || '');
+    setPlanType(store.plan_type || '');
     setLogoPreview(store.logo_url || '');
     setLogoFile(null);
     setShowForm(true);
@@ -147,15 +166,15 @@ export default function TiendasCRUD() {
     setEditingId(null);
     setName('');
     setCategoryId('');
-    setFloor('');
+    setFloorLevel('');
     setLocalNumber('');
     setDescription('');
+    setPlanType('');
     setLogoFile(null);
     setLogoPreview('');
     setShowForm(false);
   };
 
-  // O(1) map: category id → name. Rebuilt only when categories change.
   const categoryMap = useMemo(
     () => Object.fromEntries(categoriesList.map((c: any) => [c.id, c.name])),
     [categoriesList]
@@ -166,15 +185,32 @@ export default function TiendasCRUD() {
     return store.category || 'Sin categoria';
   }, [categoryMap]);
 
-  // Recomputed only when stores or search changes — NOT on every form keystroke.
   const filtered = useMemo(() => {
-    if (!search) return stores;
-    const q = search.toLowerCase();
-    return stores.filter(s =>
-      (s.name || '').toLowerCase().includes(q) ||
-      (s.floor || '').toLowerCase().includes(q) ||
-      getCategoryName(s).toLowerCase().includes(q)
-    );
+    let result = stores;
+    if (search) {
+      const q = search.toLowerCase();
+      result = stores.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.floor_level || '').toLowerCase().includes(q) ||
+        getCategoryName(s).toLowerCase().includes(q)
+      );
+    }
+    
+    const planWeight: Record<string, number> = {
+      'DIAMANTE': 3,
+      'ORO': 2,
+      'IA_PERFORMANCE': 1
+    };
+    
+    return [...result].sort((a, b) => {
+      const weightA = planWeight[a.plan_type] || 0;
+      const weightB = planWeight[b.plan_type] || 0;
+      
+      if (weightA !== weightB) {
+        return weightB - weightA;
+      }
+      return (a.name || '').localeCompare(b.name || '');
+    });
   }, [stores, search, getCategoryName]);
 
   const pg = usePagination(filtered);
@@ -270,8 +306,8 @@ export default function TiendasCRUD() {
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Piso</label>
                   <select
                     required
-                    value={floor}
-                    onChange={(e) => setFloor(e.target.value)}
+                    value={floorLevel}
+                    onChange={(e) => setFloorLevel(e.target.value)}
                     className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
                   >
                     <option value="">Elegir...</option>
@@ -305,6 +341,38 @@ export default function TiendasCRUD() {
                   placeholder="Breve descripcion del local..."
                 />
               </div>
+              {/* Plan de publicidad */}
+              <div className="border-t border-white/5 pt-4">
+                <p className="text-[11px] text-white/40 uppercase tracking-wider mb-3">Plan publicitario</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPlanType('')}
+                    className={`py-2 text-xs font-medium rounded-lg border transition-colors ${
+                      !planType
+                        ? 'bg-white/10 text-white border-white/20'
+                        : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    Sin plan
+                  </button>
+                  {PLAN_TYPES.map(pt => (
+                    <button
+                      key={pt}
+                      type="button"
+                      onClick={() => setPlanType(pt)}
+                      className={`py-2 text-xs font-medium rounded-lg border transition-colors ${
+                        planType === pt
+                          ? `${PLAN_COLORS[pt]} border-current`
+                          : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
+                      }`}
+                    >
+                      {PLAN_LABELS[pt]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Logo */}
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
                   Logo {editingId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
@@ -364,6 +432,7 @@ export default function TiendasCRUD() {
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tienda</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Categoria</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Ubicacion</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Plan</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acciones</th>
               </tr>
             </thead>
@@ -391,7 +460,16 @@ export default function TiendasCRUD() {
                     <span className="text-white/40 bg-white/5 px-2 py-0.5 rounded-md text-xs">{getCategoryName(store)}</span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className="text-white/50 text-xs font-mono">{store.floor} - {store.local_number}</span>
+                    <span className="text-white/50 text-xs font-mono">{store.floor_level} — {store.local_number}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {store.plan_type ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[store.plan_type] || 'text-white/40 bg-white/5'}`}>
+                        {PLAN_LABELS[store.plan_type] || store.plan_type}
+                      </span>
+                    ) : (
+                      <span className="text-white/15 text-xs">—</span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
