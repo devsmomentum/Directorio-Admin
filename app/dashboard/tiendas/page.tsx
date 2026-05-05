@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -47,7 +47,7 @@ export default function TiendasCRUD() {
     setRefreshing(true);
     const [catsRes, storesRes] = await Promise.all([
       supabase.from('categories').select('*').order('name', { ascending: true }).limit(200),
-      supabase.from('stores').select('*').order('created_at', { ascending: false }).limit(500),
+      supabase.from('stores').select('*, categories(id, name, icon)').order('created_at', { ascending: false }).limit(500),
     ]);
     if (catsRes.data) setCategoriesList(catsRes.data);
     if (storesRes.data) setStores(storesRes.data);
@@ -108,16 +108,14 @@ export default function TiendasCRUD() {
         finalLogoUrl = publicUrlData.publicUrl;
       }
 
-      const selectedCat = categoriesList.find(c => c.id === categoryId);
       const storeData: any = {
         name,
         category_id: categoryId || null,
-        category: selectedCat?.name || '',
-        floor_level: floorLevel,         // real column name
+        floor_level: floorLevel,
         local_number: localNumber,
         description,
         logo_url: finalLogoUrl,
-        plan_type: planType || null,      // real column with CHECK constraint
+        plan_type: planType || null,
       };
 
       if (editingId) {
@@ -140,12 +138,7 @@ export default function TiendasCRUD() {
   const handleEdit = (store: any) => {
     setEditingId(store.id);
     setName(store.name || '');
-    if (store.category_id) {
-      setCategoryId(store.category_id);
-    } else {
-      const matchedCat = categoriesList.find(c => c.name === store.category);
-      setCategoryId(matchedCat ? matchedCat.id : '');
-    }
+    setCategoryId(store.category_id || '');
     setFloorLevel(store.floor_level || '');
     setLocalNumber(store.local_number || '');
     setDescription(store.description || '');
@@ -175,15 +168,8 @@ export default function TiendasCRUD() {
     setShowForm(false);
   };
 
-  const categoryMap = useMemo(
-    () => Object.fromEntries(categoriesList.map((c: any) => [c.id, c.name])),
-    [categoriesList]
-  );
-
-  const getCategoryName = useCallback((store: any) => {
-    if (store.category_id) return categoryMap[store.category_id] || store.category || 'Sin categoria';
-    return store.category || 'Sin categoria';
-  }, [categoryMap]);
+  const getCategoryName = (store: any): string =>
+    store.categories?.name ?? 'Sin categoría';
 
   const filtered = useMemo(() => {
     let result = stores;
@@ -195,23 +181,13 @@ export default function TiendasCRUD() {
         getCategoryName(s).toLowerCase().includes(q)
       );
     }
-    
-    const planWeight: Record<string, number> = {
-      'DIAMANTE': 3,
-      'ORO': 2,
-      'IA_PERFORMANCE': 1
-    };
-    
+
+    const planWeight: Record<string, number> = { DIAMANTE: 3, ORO: 2, IA_PERFORMANCE: 1 };
     return [...result].sort((a, b) => {
-      const weightA = planWeight[a.plan_type] || 0;
-      const weightB = planWeight[b.plan_type] || 0;
-      
-      if (weightA !== weightB) {
-        return weightB - weightA;
-      }
-      return (a.name || '').localeCompare(b.name || '');
+      const diff = (planWeight[b.plan_type] || 0) - (planWeight[a.plan_type] || 0);
+      return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '');
     });
-  }, [stores, search, getCategoryName]);
+  }, [stores, search]);
 
   const pg = usePagination(filtered);
 
@@ -459,8 +435,13 @@ export default function TiendasCRUD() {
                   <td className="px-5 py-3.5">
                     <span className="text-white/40 bg-white/5 px-2 py-0.5 rounded-md text-xs">{getCategoryName(store)}</span>
                   </td>
-                  <td className="px-5 py-3.5">
-                    <span className="text-white/50 text-xs font-mono">{store.floor_level} — {store.local_number}</span>
+                  <td className="px-5 py-3.5 max-w-[160px]">
+                    <span
+                      title={`${store.floor_level} — ${store.local_number}`}
+                      className="text-white/50 text-xs font-mono block truncate"
+                    >
+                      {store.floor_level} — {store.local_number}
+                    </span>
                   </td>
                   <td className="px-5 py-3.5">
                     {store.plan_type ? (

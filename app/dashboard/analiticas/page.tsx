@@ -3,99 +3,52 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 
+type AnalyticsEvent = {
+  id: string;
+  kiosk_id: string;
+  event_type: string;
+  module: string;
+  item_name: string;
+  created_at: string;
+};
+
+type Kiosk = {
+  id: string;
+  name: string;
+  location: string;
+  status: string;
+  last_ping: string;
+};
+
+type RankItem = { name: string; count: number; location?: string };
+
 export default function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'trafico' | 'finanzas'>('trafico');
+  const [selectedKioskId, setSelectedKioskId] = useState<string>('all');
 
-  const [totalClicks, setTotalClicks] = useState(0);
-  const [todayClicks, setTodayClicks] = useState(0);
-  const [activeKiosks, setActiveKiosks] = useState(0);
-  const [totalKiosks, setTotalKiosks] = useState(0);
-  const [topStores, setTopStores] = useState<any[]>([]);
-  const [topCategories, setTopCategories] = useState<any[]>([]);
-  const [topKiosksActivity, setTopKiosksActivity] = useState<any[]>([]);
-  const [allAnalyticsEvents, setAllAnalyticsEvents] = useState<any[]>([]);
+  const [kiosks, setKiosks] = useState<Kiosk[]>([]);
+  const [allEvents, setAllEvents] = useState<AnalyticsEvent[]>([]);
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
 
   const [totalRevenueUSD, setTotalRevenueUSD] = useState(0);
   const [totalSalesCount, setTotalSalesCount] = useState(0);
   const [topSellingItems, setTopSellingItems] = useState<any[]>([]);
-  const [allTransactions, setAllTransactions] = useState<any[]>([]);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  useEffect(() => { fetchDashboardData(); }, []);
 
   const fetchDashboardData = async () => {
     setRefreshing(true);
     try {
-      const { data: kiosks } = await supabase.from('kiosks').select('*');
-      const now = new Date();
-      const fiveMinsAgo = new Date(now.getTime() - 5 * 60000);
+      const [{ data: ks }, { data: analytics }, { data: transactions }] = await Promise.all([
+        supabase.from('kiosks').select('*'),
+        supabase.from('analytics_events').select('id, kiosk_id, event_type, module, item_name, created_at').order('created_at', { ascending: false }).limit(3000),
+        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(1000),
+      ]);
 
-      let onlineCount = 0;
-      (kiosks || []).forEach(k => {
-        const lastPing = new Date(k.last_ping);
-        if (lastPing > fiveMinsAgo && k.status === 'online') onlineCount++;
-      });
-      setActiveKiosks(onlineCount);
-      setTotalKiosks((kiosks || []).length);
-
-      // Limitamos a los últimos 2000 eventos para el dashboard (suficiente para KPIs y top 5).
-      // Para exportación completa se usa el botón CSV que trabaja sobre este snapshot.
-      const { data: analytics } = await supabase
-        .from('analytics_events')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(2000);
-
-      if (analytics) {
-        setAllAnalyticsEvents(analytics);
-        setTotalClicks(analytics.length);
-
-        const storeCounts: Record<string, number> = {};
-        const categoryCounts: Record<string, number> = {};
-        const kioskActivity: Record<string, number> = {};
-        let clicksTodayCounter = 0;
-
-        analytics.forEach(event => {
-          const eventDate = new Date(event.created_at);
-          if (eventDate.toLocaleDateString() === now.toLocaleDateString()) clicksTodayCounter++;
-          if (event.kiosk_id) kioskActivity[event.kiosk_id] = (kioskActivity[event.kiosk_id] || 0) + 1;
-
-          let rawData = event.event_data || event.item_name;
-          if (typeof rawData === 'string') { try { rawData = JSON.parse(rawData); } catch {} }
-
-          let dataStr = '';
-          if (typeof rawData === 'object' && rawData !== null) dataStr = rawData.store_name || '';
-          else if (typeof rawData === 'string') dataStr = rawData;
-
-          if (dataStr) {
-            if (dataStr.startsWith('Categoría:')) {
-              categoryCounts[dataStr.replace('Categoría:', '').trim()] = (categoryCounts[dataStr.replace('Categoría:', '').trim()] || 0) + 1;
-            } else {
-              storeCounts[dataStr] = (storeCounts[dataStr] || 0) + 1;
-            }
-          }
-        });
-
-        setTodayClicks(clicksTodayCounter);
-        setTopStores(Object.entries(storeCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5));
-        setTopCategories(Object.entries(categoryCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5));
-        setTopKiosksActivity(
-          Object.entries(kioskActivity).map(([kId, count]) => {
-            const m = (kiosks || []).find(k => k.id === kId);
-            return { name: m?.name || 'Desconocido', location: m?.location || '', count };
-          }).sort((a, b) => b.count - a.count).slice(0, 5)
-        );
-      }
-
-      // Últimas 1000 transacciones — suficiente para KPIs financieros recientes
-      const { data: transactions } = await supabase
-        .from('transactions')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1000);
+      setKiosks(ks || []);
+      setAllEvents((analytics as AnalyticsEvent[]) || []);
 
       if (transactions) {
         setAllTransactions(transactions);
@@ -123,6 +76,58 @@ export default function AnalyticsDashboard() {
     }
   };
 
+  // Filtered events by selected kiosk
+  const filteredEvents = selectedKioskId === 'all'
+    ? allEvents
+    : allEvents.filter(e => e.kiosk_id === selectedKioskId);
+
+  // Derived stats from filtered events
+  const now = new Date();
+  const fiveMinsAgo = new Date(now.getTime() - 5 * 60000);
+  const activeKiosks = kiosks.filter(k => new Date(k.last_ping) > fiveMinsAgo && k.status === 'online').length;
+
+  const totalClicks = filteredEvents.length;
+  const todayClicks = filteredEvents.filter(e => new Date(e.created_at).toLocaleDateString() === now.toLocaleDateString()).length;
+
+  const storeCounts: Record<string, number> = {};
+  const sectionCounts: Record<string, number> = {};
+  const kioskActivity: Record<string, number> = {};
+
+  filteredEvents.forEach(event => {
+    if (event.kiosk_id) kioskActivity[event.kiosk_id] = (kioskActivity[event.kiosk_id] || 0) + 1;
+
+    if (event.module === 'navigation') {
+      sectionCounts[event.item_name] = (sectionCounts[event.item_name] || 0) + 1;
+    } else {
+      storeCounts[event.item_name] = (storeCounts[event.item_name] || 0) + 1;
+    }
+  });
+
+  const topStores: RankItem[] = Object.entries(storeCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+  const topSections: RankItem[] = Object.entries(sectionCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+  const topKiosksActivity: RankItem[] = Object.entries(kioskActivity).map(([kId, count]) => {
+    const m = kiosks.find(k => k.id === kId);
+    return { name: m?.name || 'Desconocido', location: m?.location || '', count };
+  }).sort((a, b) => b.count - a.count).slice(0, 5);
+
+  const recentEvents = filteredEvents.slice(0, 30);
+
+  const eventTypeLabel: Record<string, string> = {
+    click: 'Tienda',
+    filter: 'Categoría',
+    navigate: 'Sección',
+    view_modal: 'Servicio',
+    tap: 'Servicio',
+  };
+
+  const eventTypeColor: Record<string, string> = {
+    click: 'text-pink-400',
+    filter: 'text-cyan-400',
+    navigate: 'text-purple-400',
+    view_modal: 'text-amber-400',
+    tap: 'text-amber-400',
+  };
+
   const exportCSV = (headers: string[], rows: string[][], filename: string) => {
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -136,13 +141,11 @@ export default function AnalyticsDashboard() {
   };
 
   const handleExportTraffic = () => {
-    if (!allAnalyticsEvents.length) return alert('No hay eventos para exportar.');
-    const headers = ['ID', 'Tipo', 'Modulo', 'Elemento', 'Kiosco ID', 'Fecha'];
-    const rows = allAnalyticsEvents.map(e => {
-      let rawData = e.event_data || e.item_name;
-      if (typeof rawData === 'string') { try { rawData = JSON.parse(rawData); } catch {} }
-      const dataStr = typeof rawData === 'object' && rawData !== null ? rawData.store_name || '' : String(rawData || '');
-      return [e.id, e.event_type || 'click', e.module || 'directorio', `"${dataStr}"`, e.kiosk_id || 'N/A', new Date(e.created_at).toLocaleString()];
+    if (!filteredEvents.length) return alert('No hay eventos para exportar.');
+    const headers = ['ID', 'Tipo', 'Modulo', 'Elemento', 'Kiosco ID', 'Kiosco', 'Fecha'];
+    const rows = filteredEvents.map(e => {
+      const k = kiosks.find(k => k.id === e.kiosk_id);
+      return [e.id, e.event_type, e.module, `"${e.item_name}"`, e.kiosk_id || 'N/A', `"${k?.name || 'Desconocido'}"`, new Date(e.created_at).toLocaleString()];
     });
     exportCSV(headers, rows, `Trafico_${new Date().toISOString().split('T')[0]}.csv`);
   };
@@ -162,7 +165,7 @@ export default function AnalyticsDashboard() {
     );
   }
 
-  const RankingList = ({ items, color, valueLabel }: { items: { name: string; count: number; location?: string }[]; color: string; valueLabel: string }) => {
+  const RankingList = ({ items, color, valueLabel }: { items: RankItem[]; color: string; valueLabel: string }) => {
     if (!items.length) return <p className="text-white/20 text-sm py-4">Sin datos</p>;
     const max = items[0].count;
     return (
@@ -196,41 +199,40 @@ export default function AnalyticsDashboard() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Reportes</p>
           <h2 className="text-2xl font-bold text-white">Analiticas</h2>
         </div>
-        <button
-          onClick={fetchDashboardData}
-          disabled={refreshing}
-          className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 transition-colors bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 disabled:opacity-50"
-        >
-          <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-          {refreshing ? 'Actualizando...' : 'Actualizar'}
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Kiosk filter */}
+          <select
+            value={selectedKioskId}
+            onChange={e => setSelectedKioskId(e.target.value)}
+            className="text-xs bg-[#111] border border-white/10 text-white/70 rounded-lg px-3 py-2 focus:outline-none focus:border-pink-500"
+          >
+            <option value="all">Todos los kioscos</option>
+            {kiosks.map(k => (
+              <option key={k.id} value={k.id}>{k.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={fetchDashboardData}
+            disabled={refreshing}
+            className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 transition-colors bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 disabled:opacity-50"
+          >
+            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            {refreshing ? 'Actualizando...' : 'Actualizar'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-[#111] rounded-lg p-1 border border-white/5 w-fit">
-        <button
-          onClick={() => setActiveTab('trafico')}
-          className={`px-4 py-2 text-xs font-medium rounded-md transition-all ${
-            activeTab === 'trafico'
-              ? 'bg-white/10 text-white'
-              : 'text-white/30 hover:text-white/50'
-          }`}
-        >
+        <button onClick={() => setActiveTab('trafico')} className={`px-4 py-2 text-xs font-medium rounded-md transition-all ${activeTab === 'trafico' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/50'}`}>
           Trafico
         </button>
-        <button
-          onClick={() => setActiveTab('finanzas')}
-          className={`px-4 py-2 text-xs font-medium rounded-md transition-all ${
-            activeTab === 'finanzas'
-              ? 'bg-white/10 text-white'
-              : 'text-white/30 hover:text-white/50'
-          }`}
-        >
+        <button onClick={() => setActiveTab('finanzas')} className={`px-4 py-2 text-xs font-medium rounded-md transition-all ${activeTab === 'finanzas' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/50'}`}>
           Finanzas
         </button>
       </div>
@@ -239,7 +241,7 @@ export default function AnalyticsDashboard() {
       {activeTab === 'trafico' && (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
               <span className="text-white/30 text-[10px] uppercase tracking-wider">Total interacciones</span>
               <div className="text-xl font-bold text-white leading-tight mt-1">{totalClicks.toLocaleString()}</div>
@@ -251,7 +253,7 @@ export default function AnalyticsDashboard() {
             <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
               <span className="text-white/30 text-[10px] uppercase tracking-wider">Kioscos online</span>
               <div className="text-xl font-bold text-white leading-tight mt-1 flex items-center gap-1">
-                {activeKiosks}<span className="text-white/20 text-xs">/{totalKiosks}</span>
+                {activeKiosks}<span className="text-white/20 text-xs">/{kiosks.length}</span>
                 {activeKiosks > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 ml-1" />}
               </div>
             </div>
@@ -263,10 +265,7 @@ export default function AnalyticsDashboard() {
 
           {/* Export */}
           <div className="flex justify-end">
-            <button
-              onClick={handleExportTraffic}
-              className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors"
-            >
+            <button onClick={handleExportTraffic} className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               Exportar CSV
             </button>
@@ -275,17 +274,55 @@ export default function AnalyticsDashboard() {
           {/* Rankings */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top tiendas</h3>
+              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top tiendas / elementos</h3>
               <RankingList items={topStores} color="text-pink-400" valueLabel="clics" />
             </div>
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top categorias</h3>
-              <RankingList items={topCategories} color="text-cyan-400" valueLabel="busq." />
+              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Secciones visitadas</h3>
+              <RankingList items={topSections} color="text-purple-400" valueLabel="visitas" />
             </div>
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
               <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Trafico por kiosco</h3>
-              <RankingList items={topKiosksActivity} color="text-purple-400" valueLabel="usos" />
+              <RankingList items={topKiosksActivity} color="text-cyan-400" valueLabel="usos" />
             </div>
+          </div>
+
+          {/* Recent events feed */}
+          <div className="bg-[#111] border border-white/5 rounded-xl p-5">
+            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Eventos recientes</h3>
+            {recentEvents.length === 0 ? (
+              <p className="text-white/20 text-sm py-4">Sin eventos registrados</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-white/20 text-left border-b border-white/5">
+                      <th className="pb-2 font-medium pr-4">Tipo</th>
+                      <th className="pb-2 font-medium pr-4">Elemento</th>
+                      <th className="pb-2 font-medium pr-4">Kiosco</th>
+                      <th className="pb-2 font-medium">Hora</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {recentEvents.map(event => {
+                      const kiosk = kiosks.find(k => k.id === event.kiosk_id);
+                      const typeLabel = eventTypeLabel[event.event_type] || event.event_type;
+                      const typeColor = eventTypeColor[event.event_type] || 'text-white/40';
+                      return (
+                        <tr key={event.id} className="hover:bg-white/2">
+                          <td className="py-2 pr-4">
+                            <span className={`${typeColor} font-medium`}>{typeLabel}</span>
+                          </td>
+                          <td className="py-2 pr-4 text-white/60 max-w-[180px] truncate">{event.item_name}</td>
+                          <td className="py-2 pr-4 text-white/40">{kiosk?.name || event.kiosk_id || '—'}</td>
+                          <td className="py-2 text-white/25 whitespace-nowrap">{new Date(event.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {new Date(event.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -293,7 +330,6 @@ export default function AnalyticsDashboard() {
       {/* ===== FINANZAS ===== */}
       {activeTab === 'finanzas' && (
         <div className="space-y-6">
-          {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
               <span className="text-white/30 text-[10px] uppercase tracking-wider">Ingresos brutos</span>
@@ -311,18 +347,13 @@ export default function AnalyticsDashboard() {
             </div>
           </div>
 
-          {/* Export */}
           <div className="flex justify-end">
-            <button
-              onClick={handleExportSales}
-              className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors"
-            >
+            <button onClick={handleExportSales} className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               Exportar CSV
             </button>
           </div>
 
-          {/* Top selling */}
           <div className="bg-[#111] border border-white/5 rounded-xl p-5">
             <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top articulos por recaudacion</h3>
             {topSellingItems.length === 0 ? (

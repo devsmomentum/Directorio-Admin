@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabase';
 
 interface Store { id: string; name: string; local_number: string; node_id: string | null; }
 interface Kiosk { id: string; name: string; location: string; node_id: string | null; }
+interface Bathroom { id: string; name: string; floor_level: number; local_number: string | null; node_id: string | null; }
 interface MapNode { id: string; x: number; y: number; node_type: string; floor_level: number; }
 interface Polygon { id: string; name: string; color: string; points: Pt[]; floor_level: number; store_id?: string; }
 interface Route { id: string; name: string; color: string; points: Pt[]; floor_level: number; origin_type?: string; origin_id?: string; dest_type?: string; dest_id?: string; }
@@ -15,8 +16,9 @@ const FLOOR_LABELS: Record<number, string> = { 5: 'C4', 4: 'C3', 3: 'C2', 2: 'C1
 const FLOOR_DB: Record<number, string> = FLOOR_LABELS;
 
 const KIOSK_COLOR = '#a855f7';
+const BATHROOM_COLOR = '#06b6d4';
 
-type Tool = 'pan' | 'node' | 'polygon' | 'route' | 'select';
+type Tool = 'pan' | 'node' | 'polygon' | 'route' | 'select' | 'bathroom';
 
 export default function MapaEditorPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -34,6 +36,8 @@ export default function MapaEditorPage() {
   const [nodes, setNodes] = useState<MapNode[]>([]);
   const [polygons, setPolygons] = useState<Polygon[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
+
+  const [bathrooms, setBathrooms] = useState<Bathroom[]>([]);
 
   const [tool, setTool] = useState<Tool>('pan');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -67,6 +71,13 @@ export default function MapaEditorPage() {
   const [savingRoute, setSavingRoute] = useState(false);
   const [showRoutesPanel, setShowRoutesPanel] = useState(true);
 
+  // Bathroom modal
+  const [showBathroomModal, setShowBathroomModal] = useState(false);
+  const [bathroomModalMode, setBathroomModalMode] = useState<'create' | 'edit'>('create');
+  const [bathroomName, setBathroomName] = useState('');
+  const [bathroomLocalNumber, setBathroomLocalNumber] = useState('');
+  const [isSavingBathroom, setIsSavingBathroom] = useState(false);
+
   // Node (kiosk) modal
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -90,7 +101,7 @@ export default function MapaEditorPage() {
   const [zoomLabel, setZoomLabel] = useState('100%');
 
   // Refs for canvas
-  const nodesRef = useRef(nodes); const storesRef = useRef(stores); const kiosksRef = useRef(kiosks);
+  const nodesRef = useRef(nodes); const storesRef = useRef(stores); const kiosksRef = useRef(kiosks); const bathroomsRef = useRef(bathrooms);
   const toolRef = useRef(tool); const selectedNodeIdRef = useRef(selectedNodeId);
   const hoveredNodeIdRef = useRef(hoveredNodeId);
   const drawingPolyRef = useRef(drawingPoly); const polygonsRef = useRef(polygons);
@@ -109,6 +120,7 @@ export default function MapaEditorPage() {
   useEffect(() => { routesRef.current = routes; }, [routes]);
   useEffect(() => { selectedPolyIdRef.current = selectedPolyId; }, [selectedPolyId]);
   useEffect(() => { selectedRouteIdRef.current = selectedRouteId; }, [selectedRouteId]);
+  useEffect(() => { bathroomsRef.current = bathrooms; }, [bathrooms]);
 
   const showToast = useCallback((msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 2500); }, []);
   const screenToWorld = useCallback((sx: number, sy: number): Pt => ({ x: (sx - cam.current.x) / cam.current.zoom, y: (sy - cam.current.y) / cam.current.zoom }), []);
@@ -210,14 +222,16 @@ export default function MapaEditorPage() {
       if (dr.length > 0) drawMarker(ctx, dr[0].x, dr[0].y, '#22c55e', 'A', z);
     }
 
-    // Nodes (kiosks)
+    // Nodes (kiosks + bathrooms)
     cn.forEach(node => {
+      const bathMatch = bathroomsRef.current.find(b => b.node_id === node.id);
+      const isBathroom = !!bathMatch;
+      const nodeColor = isBathroom ? BATHROOM_COLOR : KIOSK_COLOR;
       const r = node.id === selNodeId ? 10 / z : node.id === hovId ? 8 / z : 6 / z;
-      if (node.id === selNodeId) { ctx.beginPath(); ctx.arc(node.x, node.y, r + 4 / z, 0, Math.PI * 2); ctx.fillStyle = hexToRgba(KIOSK_COLOR, 0.2); ctx.fill(); }
+      if (node.id === selNodeId) { ctx.beginPath(); ctx.arc(node.x, node.y, r + 4 / z, 0, Math.PI * 2); ctx.fillStyle = hexToRgba(nodeColor, 0.2); ctx.fill(); }
       ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = KIOSK_COLOR; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 2 / z; ctx.stroke();
-      const kiosk = kiosksRef.current.find(k => k.node_id === node.id);
-      const label = kiosk?.name || '';
+      ctx.fillStyle = nodeColor; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 2 / z; ctx.stroke();
+      const label = isBathroom ? (bathMatch?.name || 'Baño') : (kiosksRef.current.find(k => k.node_id === node.id)?.name || '');
       if (label && z > 0.4) { ctx.font = `${Math.max(10, 12 / z)}px system-ui`; ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(label, node.x, node.y + r + 4 / z); }
     });
 
@@ -249,6 +263,9 @@ export default function MapaEditorPage() {
 
       const routesRes = await supabase.from('map_routes').select('*').eq('floor_level', selectedFloor);
       setRoutes(routesRes.data || []);
+
+      const bathroomsRes = await supabase.from('bathrooms').select('*').eq('floor_level', selectedFloor);
+      setBathrooms(bathroomsRes.data || []);
     } catch {
       // Silenciar errores de tablas inexistentes
     }
@@ -280,7 +297,7 @@ export default function MapaEditorPage() {
     });
   }, [selectedFloor, loadBgFromUrl, draw]);
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { draw(); }, [nodes, polygons, routes, selectedNodeId, hoveredNodeId, drawingPoly, drawingRoute, selectedPolyId, selectedRouteId, draw]);
+  useEffect(() => { draw(); }, [nodes, polygons, routes, bathrooms, selectedNodeId, hoveredNodeId, drawingPoly, drawingRoute, selectedPolyId, selectedRouteId, draw]);
   useEffect(() => { resize(); window.addEventListener('resize', resize); return () => window.removeEventListener('resize', resize); }, [resize]);
 
   const handleUploadBg = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,6 +322,9 @@ export default function MapaEditorPage() {
       }
       if (toolRef.current === 'node') {
         setPendingCoords({ x: Math.round(w.x), y: Math.round(w.y) }); setModalMode('create'); setSelectedKioskId(''); setKioskSearch(''); setKioskDropdown(false); setShowModal(true); return;
+      }
+      if (toolRef.current === 'bathroom') {
+        setPendingCoords({ x: Math.round(w.x), y: Math.round(w.y) }); setBathroomModalMode('create'); setBathroomName(''); setBathroomLocalNumber(''); setShowBathroomModal(true); return;
       }
       if (toolRef.current === 'polygon') { setDrawingPoly(prev => [...prev, { x: Math.round(w.x), y: Math.round(w.y) }]); return; }
       if (toolRef.current === 'route') { setDrawingRoute(prev => [...prev, { x: Math.round(w.x), y: Math.round(w.y) }]); return; }
@@ -361,27 +381,36 @@ export default function MapaEditorPage() {
   // ── Keyboard ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (showModal || polyNameModal || routeModal) return;
-      if (e.key === '1') setTool('pan'); if (e.key === '2') setTool('node'); if (e.key === '3') setTool('polygon'); if (e.key === '4') setTool('route'); if (e.key === '5') setTool('select');
+      if (showModal || polyNameModal || routeModal || showBathroomModal) return;
+      if (e.key === '1') setTool('pan'); if (e.key === '2') setTool('node'); if (e.key === '3') setTool('polygon'); if (e.key === '4') setTool('route'); if (e.key === '5') setTool('select'); if (e.key === '6') setTool('bathroom');
       if (e.key === 'Escape') { setDrawingPoly([]); setDrawingRoute([]); setSelectedNodeId(null); setSelectedPolyId(null); setSelectedRouteId(null); walkerPos.current = null; }
       if (e.key === 'Enter') {
         if (toolRef.current === 'polygon' && drawingPolyRef.current.length >= 3) { setPolyName(''); setPolyStoreId(''); setPolyStoreSearch(''); setPolyColor('#4466ff'); setPolyNameModal(true); }
         if (toolRef.current === 'route' && drawingRouteRef.current.length >= 2) { setRouteName(''); setRouteColor('#22d3ee'); setRouteOriginSearch(''); setRouteOriginId(''); setRouteOriginType(''); setRouteDestSearch(''); setRouteDestId(''); setRouteDestType(''); setRouteModal(true); }
       }
       if (e.key === 'Delete') {
-        if (selectedNodeIdRef.current) handleDeleteNode(selectedNodeIdRef.current);
+        if (selectedNodeIdRef.current) {
+          if (bathroomsRef.current.find(b => b.node_id === selectedNodeIdRef.current)) handleDeleteBathroomNode(selectedNodeIdRef.current);
+          else handleDeleteNode(selectedNodeIdRef.current);
+        }
         else if (selectedPolyIdRef.current) handleDeletePoly(selectedPolyIdRef.current);
         else if (selectedRouteIdRef.current) handleDeleteRoute(selectedRouteIdRef.current);
       }
     };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
-  }, [showModal, polyNameModal, routeModal]);
+  }, [showModal, polyNameModal, routeModal, showBathroomModal]);
 
   // ── CRUD: Nodes ──
   const handleSaveNode = async () => { if (!pendingCoords) return; setIsSaving(true); try { const { data: ins, error } = await supabase.from('map_nodes').insert({ x: pendingCoords.x, y: pendingCoords.y, floor_level: selectedFloor, node_type: 'kiosk' }).select().single(); if (error) throw error; if (selectedKioskId && ins) await supabase.from('kiosks').update({ node_id: ins.id }).eq('id', selectedKioskId); setShowModal(false); showToast('Kiosco colocado'); fetchData(); } catch (err: any) { alert('Error: ' + err.message); } finally { setIsSaving(false); } };
   const handleUpdateNode = async () => { if (!selectedNodeId) return; setIsSaving(true); try { await supabase.from('kiosks').update({ node_id: null }).eq('node_id', selectedNodeId); if (selectedKioskId) await supabase.from('kiosks').update({ node_id: selectedNodeId }).eq('id', selectedKioskId); setShowModal(false); showToast('Kiosco actualizado'); fetchData(); } catch (err: any) { alert('Error: ' + err.message); } finally { setIsSaving(false); } };
   const handleDeleteNode = async (id: string) => { if (!confirm('Eliminar este kiosco del mapa?')) return; await supabase.from('kiosks').update({ node_id: null }).eq('node_id', id); await supabase.from('map_nodes').delete().eq('id', id); setSelectedNodeId(null); setShowModal(false); showToast('Kiosco eliminado'); fetchData(); };
   const openEditModal = () => { const node = nodes.find(n => n.id === selectedNodeId); if (!node) return; setModalMode('edit'); setPendingCoords({ x: node.x, y: node.y }); const k = kiosks.find(k => k.node_id === node.id); setSelectedKioskId(k?.id || ''); setKioskSearch(k?.name || ''); setKioskDropdown(false); setShowModal(true); };
+
+  // ── CRUD: Bathrooms ──
+  const handleSaveBathroom = async () => { if (!pendingCoords) return; setIsSavingBathroom(true); try { const { data: ins, error } = await supabase.from('map_nodes').insert({ x: pendingCoords.x, y: pendingCoords.y, floor_level: selectedFloor, node_type: 'bathroom' }).select().single(); if (error) throw error; if (ins) { const { error: bErr } = await supabase.from('bathrooms').insert({ name: bathroomName || 'Baño', floor_level: selectedFloor, local_number: bathroomLocalNumber || null, node_id: ins.id }); if (bErr) throw bErr; } setShowBathroomModal(false); showToast('Baño colocado'); fetchData(); } catch (err: any) { alert('Error: ' + err.message); } finally { setIsSavingBathroom(false); } };
+  const handleUpdateBathroom = async () => { if (!selectedNodeId) return; setIsSavingBathroom(true); try { const bath = bathroomsRef.current.find(b => b.node_id === selectedNodeId); if (bath) { await supabase.from('bathrooms').update({ name: bathroomName, local_number: bathroomLocalNumber || null }).eq('id', bath.id); } setShowBathroomModal(false); showToast('Baño actualizado'); fetchData(); } catch (err: any) { alert('Error: ' + err.message); } finally { setIsSavingBathroom(false); } };
+  const handleDeleteBathroomNode = async (nodeId: string) => { if (!confirm('Eliminar este baño del mapa?')) return; const bath = bathroomsRef.current.find(b => b.node_id === nodeId); if (bath) await supabase.from('bathrooms').delete().eq('id', bath.id); await supabase.from('map_nodes').delete().eq('id', nodeId); setSelectedNodeId(null); setShowBathroomModal(false); showToast('Baño eliminado'); fetchData(); };
+  const openEditBathroomModal = () => { const node = nodes.find(n => n.id === selectedNodeId); if (!node) return; setBathroomModalMode('edit'); setPendingCoords({ x: node.x, y: node.y }); const bath = bathrooms.find(b => b.node_id === node.id); setBathroomName(bath?.name || ''); setBathroomLocalNumber(bath?.local_number || ''); setShowBathroomModal(true); };
 
   // ── CRUD: Polygons ──
   const handleSavePoly = async () => { if (drawingPoly.length < 3 || savingPoly) return; setSavingPoly(true); try { await supabase.from('map_polygons').insert({ name: polyName || 'Sin nombre', color: polyColor, points: drawingPoly, floor_level: selectedFloor, store_id: polyStoreId || null }); setDrawingPoly([]); setPolyNameModal(false); showToast('Area creada'); fetchData(); } catch { showToast('Error: crea la tabla map_polygons en Supabase'); setPolyNameModal(false); } finally { setSavingPoly(false); } };
@@ -417,6 +446,7 @@ export default function MapaEditorPage() {
   const TOOLS: { key: Tool; label: string; sc: string; icon: JSX.Element }[] = [
     { key: 'pan', label: 'Mover', sc: '1', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" /> },
     { key: 'node', label: 'Kiosco', sc: '2', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /> },
+    { key: 'bathroom', label: 'Baño', sc: '6', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /> },
     { key: 'polygon', label: 'Area', sc: '3', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm10 0a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" /> },
     { key: 'route', label: 'Ruta', sc: '4', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /> },
     { key: 'select', label: 'Seleccionar', sc: '5', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" /> },
@@ -448,6 +478,7 @@ export default function MapaEditorPage() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: KIOSK_COLOR }} /><span className="text-[9px] text-white/20">Kiosco</span></div>
+            <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: BATHROOM_COLOR }} /><span className="text-[9px] text-white/20">Baño</span></div>
             <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-blue-500" /><span className="text-[9px] text-white/20">Area</span></div>
             <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-cyan-400" /><span className="text-[9px] text-white/20">Ruta</span></div>
           </div>
@@ -462,12 +493,13 @@ export default function MapaEditorPage() {
           {(loadingMap || loadingBg) && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#1e1e2a]/80 backdrop-blur-sm pointer-events-none"><div className="w-8 h-8 border-2 border-white/20 border-t-white/60 rounded-full animate-spin mb-3" /><span className="text-[11px] text-white/30">{loadingBg ? 'Cargando plano...' : 'Cargando elementos...'}</span></div>}
           {toastMsg && <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-lg pointer-events-none z-20">{toastMsg}</div>}
           {tool === 'node' && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[11px] px-3 py-1.5 rounded-lg z-20">Clic para colocar un kiosco</div>}
+          {tool === 'bathroom' && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[11px] px-3 py-1.5 rounded-lg z-20">Clic para colocar un baño — Piso: {FLOOR_LABELS[selectedFloor]}</div>}
           {tool === 'polygon' && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[11px] px-3 py-1.5 rounded-lg z-20">{drawingPoly.length === 0 ? 'Clic para dibujar un area' : `${drawingPoly.length} puntos — Doble-clic o Enter para cerrar`}</div>}
           {tool === 'route' && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[11px] px-3 py-1.5 rounded-lg z-20">{drawingRoute.length === 0 ? 'Clic para trazar una ruta punto a punto' : `${drawingRoute.length} puntos — Doble-clic o Enter para terminar`}</div>}
         </div>
 
-        {/* Side panel: Node */}
-        {selectedNode && tool === 'select' && (
+        {/* Side panel: Kiosk node */}
+        {selectedNode && tool === 'select' && !bathrooms.find(b => b.node_id === selectedNode.id) && (
           <div className="w-56 bg-[#111] border-l border-white/5 p-4 space-y-4 shrink-0">
             <div><p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Kiosco</p><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: KIOSK_COLOR }} /><span className="text-sm text-white font-medium">{kiosks.find(k => k.node_id === selectedNode.id)?.name || 'Sin vincular'}</span></div></div>
             <div className="space-y-1"><p className="text-[10px] text-white/20 font-mono">x:{selectedNode.x} y:{selectedNode.y}</p><p className="text-[10px] text-white/20 font-mono">Piso: {FLOOR_LABELS[selectedNode.floor_level]}</p></div>
@@ -477,6 +509,18 @@ export default function MapaEditorPage() {
             </div>
           </div>
         )}
+        {/* Side panel: Bathroom node */}
+        {selectedNode && tool === 'select' && (() => { const bath = bathrooms.find(b => b.node_id === selectedNode.id); if (!bath) return null; return (
+          <div className="w-56 bg-[#111] border-l border-white/5 p-4 space-y-4 shrink-0">
+            <div><p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Baño</p><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: BATHROOM_COLOR }} /><span className="text-sm text-white font-medium">{bath.name}</span></div></div>
+            {bath.local_number && <p className="text-[10px] text-white/30">Local: {bath.local_number}</p>}
+            <div className="space-y-1"><p className="text-[10px] text-white/20 font-mono">x:{selectedNode.x} y:{selectedNode.y}</p><p className="text-[10px] text-white/20 font-mono">Piso: {FLOOR_LABELS[selectedNode.floor_level]}</p></div>
+            <div className="space-y-2 pt-2 border-t border-white/5">
+              <button onClick={openEditBathroomModal} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors">Editar</button>
+              <button onClick={() => handleDeleteBathroomNode(selectedNode.id)} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-red-400/50 hover:text-red-400 bg-red-500/5 hover:bg-red-500/10 rounded-lg transition-colors">Eliminar</button>
+            </div>
+          </div>
+        ); })()}
         {/* Side panel: Polygon */}
         {selectedPoly && tool === 'select' && (
           <div className="w-56 bg-[#111] border-l border-white/5 p-4 space-y-4 shrink-0">
@@ -554,6 +598,28 @@ export default function MapaEditorPage() {
                 {modalMode === 'edit' && <button onClick={() => selectedNodeId && handleDeleteNode(selectedNodeId)} disabled={isSaving} className="px-3 py-2.5 text-sm text-red-400 bg-red-500/10 rounded-lg disabled:opacity-50">Eliminar</button>}
                 <button onClick={() => setShowModal(false)} className="flex-1 px-4 py-2.5 text-sm text-white/40 bg-white/5 hover:bg-white/10 rounded-lg">Cancelar</button>
                 <button onClick={modalMode === 'edit' ? handleUpdateNode : handleSaveNode} disabled={isSaving} className="flex-1 px-5 py-2.5 text-sm font-medium bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 border border-purple-500/30 rounded-lg disabled:opacity-50">{isSaving ? 'Guardando...' : 'Guardar'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bathroom modal */}
+      {showBathroomModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowBathroomModal(false)} />
+          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-sm font-semibold text-white">{bathroomModalMode === 'edit' ? 'Editar baño' : 'Colocar baño'} <span className="text-white/20 font-normal">— {FLOOR_LABELS[selectedFloor]}</span></h3>
+              <div className="flex items-center gap-2">{pendingCoords && <span className="text-[10px] text-white/20 font-mono">{pendingCoords.x}, {pendingCoords.y}</span>}<button onClick={() => setShowBathroomModal(false)} className="text-white/30 hover:text-white/60"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
+            </div>
+            <div className="space-y-4">
+              <div><label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Nombre</label><input type="text" autoFocus value={bathroomName} onChange={e => setBathroomName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') bathroomModalMode === 'edit' ? handleUpdateBathroom() : handleSaveBathroom(); }} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/40" placeholder="Ej: Baño Planta Baja" /></div>
+              <div><label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Local (opcional)</label><input type="text" value={bathroomLocalNumber} onChange={e => setBathroomLocalNumber(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/40" placeholder="Ej: L-42" /></div>
+              <div className="flex gap-2 pt-2">
+                {bathroomModalMode === 'edit' && <button onClick={() => selectedNodeId && handleDeleteBathroomNode(selectedNodeId)} disabled={isSavingBathroom} className="px-3 py-2.5 text-sm text-red-400 bg-red-500/10 rounded-lg disabled:opacity-50">Eliminar</button>}
+                <button onClick={() => setShowBathroomModal(false)} className="flex-1 px-4 py-2.5 text-sm text-white/40 bg-white/5 hover:bg-white/10 rounded-lg">Cancelar</button>
+                <button onClick={bathroomModalMode === 'edit' ? handleUpdateBathroom : handleSaveBathroom} disabled={isSavingBathroom} className="flex-1 px-5 py-2.5 text-sm font-medium bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/30 rounded-lg disabled:opacity-50">{isSavingBathroom ? 'Guardando...' : 'Guardar'}</button>
               </div>
             </div>
           </div>

@@ -12,16 +12,39 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // onAuthStateChange dispara inmediatamente con la sesión cacheada en la cookie
-    // (sin roundtrip de red si el token aún es válido), eliminando el spinner innecesario.
+    let mounted = true;
+
+    // 1. Obtener la sesión actual de forma asíncrona para asegurar
+    // que el cliente de Supabase ha hidratado el token desde localStorage.
+    const initializeAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (mounted) {
+        if (!session) {
+          router.replace('/login');
+        } else {
+          setIsAuthorized(true);
+        }
+      }
+    };
+
+    initializeAuth();
+
+    // 2. Suscribirse a cambios futuros (login/logout en otras pestañas, expiración)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        router.replace('/login');
-      } else {
-        setIsAuthorized(true);
+      if (mounted) {
+        if (!session) {
+          router.replace('/login');
+        } else {
+          setIsAuthorized(true);
+        }
       }
     });
-    return () => subscription.unsubscribe();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [router]);
 
   const handleLogout = async () => {

@@ -91,6 +91,14 @@ CREATE TABLE public.coupons (
   CONSTRAINT coupons_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id),
   CONSTRAINT coupons_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.ad_campaigns(id)
 );
+CREATE TABLE public.kiosk_campaigns (
+  kiosk_id uuid NOT NULL,
+  campaign_id uuid NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT kiosk_campaigns_pkey PRIMARY KEY (kiosk_id, campaign_id),
+  CONSTRAINT kiosk_campaigns_kiosk_id_fkey FOREIGN KEY (kiosk_id) REFERENCES public.kiosks(id),
+  CONSTRAINT kiosk_campaigns_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.ad_campaigns(id)
+);
 CREATE TABLE public.kiosks (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   name character varying NOT NULL,

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
+import KioskAssignment from './KioskAssignment';
 
 const PLAN_TYPES = ['DIAMANTE', 'ORO', 'SOCIOS', 'BONO_FLASH'] as const;
 
@@ -33,7 +34,10 @@ interface Campaign {
   stores?: { name: string };
 }
 
+type Tab = 'campaigns' | 'kioscos';
+
 export default function CampaniasAdminPage() {
+  const [activeTab, setActiveTab] = useState<Tab>('campaigns');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
@@ -226,6 +230,7 @@ export default function CampaniasAdminPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-end justify-between">
         <div>
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Publicidad</p>
@@ -236,16 +241,49 @@ export default function CampaniasAdminPage() {
             <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             {refreshing ? 'Actualizando...' : 'Actualizar'}
           </button>
-          <button onClick={() => { resetForm(); setShowForm(true); }} className="flex items-center gap-2 text-sm font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 rounded-lg px-4 py-2">
-            Nueva Campaña
-          </button>
+          {activeTab === 'campaigns' && (
+            <button onClick={() => { resetForm(); setShowForm(true); }} className="flex items-center gap-2 text-sm font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 rounded-lg px-4 py-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+              Nueva Campaña
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="relative">
-        <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por marca o plan..." className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10" />
+      {/* Tabs */}
+      <div className="flex gap-1 bg-white/[0.03] border border-white/5 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('campaigns')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'campaigns'
+              ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25'
+              : 'text-white/40 hover:text-white/70'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.069A1 1 0 0121 8.882V15a1 1 0 01-1.447.894L15 13.5M4 6a2 2 0 012-2h9a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" /></svg>
+          Campañas
+          <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded font-mono">{campaigns.length}</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('kioscos')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'kioscos'
+              ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25'
+              : 'text-white/40 hover:text-white/70'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+          Asignación por Kiosco
+        </button>
       </div>
+
+      {/* Tab: Campañas — search bar */}
+      {activeTab === 'campaigns' && (
+        <div className="relative">
+          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por marca o plan..." className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10" />
+        </div>
+      )}
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -334,11 +372,15 @@ export default function CampaniasAdminPage() {
         </div>
       )}
 
-      {campaigns.length === 0 ? (
+      {/* Tab: Kiosco assignment */}
+      {activeTab === 'kioscos' && <KioskAssignment />}
+
+      {/* Tab: Campaigns list */}
+      {activeTab === 'campaigns' && campaigns.length === 0 ? (
         <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
           <p className="text-white/30 text-sm">No hay campañas registradas</p>
         </div>
-      ) : (
+      ) : activeTab === 'campaigns' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {pg.paginated.map((c) => {
             const isVideo = c.media_type === 'video';
@@ -392,9 +434,9 @@ export default function CampaniasAdminPage() {
             );
           })}
         </div>
-      )}
-      
-      {pg.totalPages > 1 && (
+      ) : null}
+
+      {activeTab === 'campaigns' && pg.totalPages > 1 && (
         <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} perPage={pg.perPage} label="campañas" onPageChange={pg.setPage} onPerPageChange={pg.changePerPage} />
       )}
     </div>

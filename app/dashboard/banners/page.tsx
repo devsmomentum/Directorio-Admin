@@ -86,8 +86,20 @@ export default function BannersAdminPage() {
       supabase.from('banners').select('*, ad_campaigns(brand_name)').order('ui_position').order('slot_position', { ascending: true }),
       supabase.from('ad_campaigns').select('id, brand_name').order('brand_name'),
     ]);
-    if (bannersRes.data) setBanners(bannersRes.data as Banner[]);
-    if (campsRes.data) setCampaigns(campsRes.data);
+    
+    if (bannersRes.error) {
+      console.error("Error fetching banners:", bannersRes.error);
+      alert("Error al cargar banners: " + bannersRes.error.message);
+    } else if (bannersRes.data) {
+      setBanners(bannersRes.data as Banner[]);
+    }
+
+    if (campsRes.error) {
+      console.error("Error fetching campaigns:", campsRes.error);
+    } else if (campsRes.data) {
+      setCampaigns(campsRes.data);
+    }
+    
     setLoading(false);
     setRefreshing(false);
   };
