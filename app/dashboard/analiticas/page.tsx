@@ -110,24 +110,6 @@ export default function AnalyticsDashboard() {
     return { name: m?.name || 'Desconocido', location: m?.location || '', count };
   }).sort((a, b) => b.count - a.count).slice(0, 5);
 
-  const recentEvents = filteredEvents.slice(0, 30);
-
-  const eventTypeLabel: Record<string, string> = {
-    click: 'Tienda',
-    filter: 'Categoría',
-    navigate: 'Sección',
-    view_modal: 'Servicio',
-    tap: 'Servicio',
-  };
-
-  const eventTypeColor: Record<string, string> = {
-    click: 'text-pink-400',
-    filter: 'text-cyan-400',
-    navigate: 'text-purple-400',
-    view_modal: 'text-amber-400',
-    tap: 'text-amber-400',
-  };
-
   const exportCSV = (headers: string[], rows: string[][], filename: string) => {
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -240,29 +222,6 @@ export default function AnalyticsDashboard() {
       {/* ===== TRAFICO ===== */}
       {activeTab === 'trafico' && (
         <div className="space-y-6">
-          {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
-              <span className="text-white/30 text-[10px] uppercase tracking-wider">Total interacciones</span>
-              <div className="text-xl font-bold text-white leading-tight mt-1">{totalClicks.toLocaleString()}</div>
-            </div>
-            <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
-              <span className="text-white/30 text-[10px] uppercase tracking-wider">Hoy</span>
-              <div className="text-xl font-bold text-white leading-tight mt-1">{todayClicks.toLocaleString()}</div>
-            </div>
-            <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
-              <span className="text-white/30 text-[10px] uppercase tracking-wider">Kioscos online</span>
-              <div className="text-xl font-bold text-white leading-tight mt-1 flex items-center gap-1">
-                {activeKiosks}<span className="text-white/20 text-xs">/{kiosks.length}</span>
-                {activeKiosks > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 ml-1" />}
-              </div>
-            </div>
-            <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
-              <span className="text-white/30 text-[10px] uppercase tracking-wider">Mas buscada</span>
-              <div className="text-sm font-bold text-white leading-tight mt-1 truncate">{topStores[0]?.name || '—'}</div>
-            </div>
-          </div>
-
           {/* Export */}
           <div className="flex justify-end">
             <button onClick={handleExportTraffic} className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
@@ -287,66 +246,12 @@ export default function AnalyticsDashboard() {
             </div>
           </div>
 
-          {/* Recent events feed */}
-          <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Eventos recientes</h3>
-            {recentEvents.length === 0 ? (
-              <p className="text-white/20 text-sm py-4">Sin eventos registrados</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-white/20 text-left border-b border-white/5">
-                      <th className="pb-2 font-medium pr-4">Tipo</th>
-                      <th className="pb-2 font-medium pr-4">Elemento</th>
-                      <th className="pb-2 font-medium pr-4">Kiosco</th>
-                      <th className="pb-2 font-medium">Hora</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {recentEvents.map(event => {
-                      const kiosk = kiosks.find(k => k.id === event.kiosk_id);
-                      const typeLabel = eventTypeLabel[event.event_type] || event.event_type;
-                      const typeColor = eventTypeColor[event.event_type] || 'text-white/40';
-                      return (
-                        <tr key={event.id} className="hover:bg-white/2">
-                          <td className="py-2 pr-4">
-                            <span className={`${typeColor} font-medium`}>{typeLabel}</span>
-                          </td>
-                          <td className="py-2 pr-4 text-white/60 max-w-[180px] truncate">{event.item_name}</td>
-                          <td className="py-2 pr-4 text-white/40">{kiosk?.name || event.kiosk_id || '—'}</td>
-                          <td className="py-2 text-white/25 whitespace-nowrap">{new Date(event.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {new Date(event.created_at).toLocaleDateString()}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
       {/* ===== FINANZAS ===== */}
       {activeTab === 'finanzas' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
-              <span className="text-white/30 text-[10px] uppercase tracking-wider">Ingresos brutos</span>
-              <div className="text-xl font-bold text-emerald-400 leading-tight mt-1">${totalRevenueUSD.toFixed(2)}</div>
-            </div>
-            <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
-              <span className="text-white/30 text-[10px] uppercase tracking-wider">Operaciones</span>
-              <div className="text-xl font-bold text-white leading-tight mt-1">{totalSalesCount}</div>
-            </div>
-            <div className="bg-[#111] rounded-lg px-4 py-3 border border-white/5">
-              <span className="text-white/30 text-[10px] uppercase tracking-wider">Ticket promedio</span>
-              <div className="text-xl font-bold text-white leading-tight mt-1">
-                ${totalSalesCount > 0 ? (totalRevenueUSD / totalSalesCount).toFixed(2) : '0.00'}
-              </div>
-            </div>
-          </div>
-
           <div className="flex justify-end">
             <button onClick={handleExportSales} className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>

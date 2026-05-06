@@ -89,6 +89,11 @@ export default function KioscosCRUD() {
     }
   };
 
+  const handleToggleKioskMode = async (id: string, current: boolean) => {
+    await supabase.from('kiosks').update({ kiosk_mode: !current }).eq('id', id);
+    setKiosks(prev => prev.map(k => k.id === id ? { ...k, kiosk_mode: !current } : k));
+  };
+
   const filtered = useMemo(() => {
     if (!search) return kiosks;
     const q = search.toLowerCase();
@@ -217,6 +222,7 @@ export default function KioscosCRUD() {
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Kiosco</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Ubicacion</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Vinculacion</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Modo kiosco</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acciones</th>
               </tr>
             </thead>
@@ -242,6 +248,15 @@ export default function KioscosCRUD() {
                         <span className="text-amber-400/70 text-xs">Esperando hardware</span>
                       </div>
                     )}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <button
+                      onClick={() => handleToggleKioskMode(kiosk.id, kiosk.kiosk_mode ?? true)}
+                      title={kiosk.kiosk_mode !== false ? 'Desactivar modo kiosco' : 'Activar modo kiosco'}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${kiosk.kiosk_mode !== false ? 'bg-cyan-500/40 border border-cyan-500/50' : 'bg-white/10 border border-white/10'}`}
+                    >
+                      <span className={`inline-block h-3.5 w-3.5 rounded-full transition-transform ${kiosk.kiosk_mode !== false ? 'translate-x-4 bg-cyan-400' : 'translate-x-0.5 bg-white/30'}`} />
+                    </button>
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
