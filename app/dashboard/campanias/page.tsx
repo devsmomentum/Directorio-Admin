@@ -5,7 +5,14 @@ import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 import KioskAssignment from './KioskAssignment';
 
-const PLAN_TYPES = ['DIAMANTE', 'ORO', 'SOCIOS', 'BONO_FLASH'] as const;
+const PLAN_TYPES = ['DIAMANTE', 'ORO'] as const;
+
+const PLAN_FREQUENCY_SECONDS: Record<string, number> = {
+  DIAMANTE: 90,
+  ORO: 180,
+};
+
+const CAMPAIGN_DURATION_SECONDS = 15;
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
@@ -51,13 +58,11 @@ export default function CampaniasAdminPage() {
   const [brandName, setBrandName] = useState('');
   const [planType, setPlanType] = useState<string>('ORO');
   const [description, setDescription] = useState('');
-  const [durationSecs, setDurationSecs] = useState<number>(15);
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState<string>('');
   const [storeId, setStoreId] = useState<string>('');
   const [priorityLevel, setPriorityLevel] = useState<number>(1);
   const [slotLimitGroup, setSlotLimitGroup] = useState<string>('');
-  const [targetFrequency, setTargetFrequency] = useState<number | ''>('');
   const [isActive, setIsActive] = useState<boolean>(true);
 
   // File handling
@@ -86,13 +91,12 @@ export default function CampaniasAdminPage() {
     setBrandName('');
     setPlanType('ORO');
     setDescription('');
-    setDurationSecs(15);
+    // duration is fixed by plan, keep as constant
     setStartDate(new Date().toISOString().split('T')[0]);
     setEndDate('');
     setStoreId('');
     setPriorityLevel(1);
     setSlotLimitGroup('');
-    setTargetFrequency('');
     setIsActive(true);
     setMediaFile(null);
     setMediaPreview('');
@@ -115,15 +119,13 @@ export default function CampaniasAdminPage() {
   const handleEdit = (c: Campaign) => {
     setEditingId(c.id);
     setBrandName(c.brand_name);
-    setPlanType(c.plan_type);
+    setPlanType(PLAN_FREQUENCY_SECONDS[c.plan_type] ? c.plan_type : 'ORO');
     setDescription(c.description || '');
-    setDurationSecs(c.duration_seconds || 15);
     setStartDate(c.start_date || '');
     setEndDate(c.end_date || '');
     setStoreId(c.store_id || '');
     setPriorityLevel(c.priority_level || 1);
     setSlotLimitGroup(c.slot_limit_group || '');
-    setTargetFrequency(c.target_frequency_seconds || '');
     setIsActive(c.is_active);
     setMediaPreview(c.media_url);
     setMediaType(c.media_type as 'image'|'video');
@@ -170,14 +172,14 @@ export default function CampaniasAdminPage() {
         plan_type: planType,
         media_url: finalUrl,
         media_type: mediaType,
-        duration_seconds: durationSecs,
+        duration_seconds: CAMPAIGN_DURATION_SECONDS,
         start_date: startDate ? new Date(startDate).toISOString().split('T')[0] : null,
         end_date: endDate ? new Date(endDate).toISOString().split('T')[0] : null,
         is_active: isActive,
         description: description,
         priority_level: priorityLevel,
         slot_limit_group: slotLimitGroup || null,
-        target_frequency_seconds: targetFrequency === '' ? null : Number(targetFrequency),
+        target_frequency_seconds: PLAN_FREQUENCY_SECONDS[planType] || null,
         store_id: storeId || null
       };
 
@@ -214,6 +216,12 @@ export default function CampaniasAdminPage() {
   };
 
   const handleToggleActive = async (id: string, current: boolean) => {
+    if (current) {
+      const first = confirm('¿Deseas pausar esta campaña?');
+      if (!first) return;
+      const second = confirm('¿Confirmas pausar la campaña?');
+      if (!second) return;
+    }
     const { error } = await supabase.from('ad_campaigns').update({ is_active: !current }).eq('id', id);
     if (!error) {
       setCampaigns(prev => prev.map(c => c.id === id ? { ...c, is_active: !current } : c));
@@ -310,7 +318,7 @@ export default function CampaniasAdminPage() {
                 <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de pauta</label>
                   <select required value={planType} onChange={e => setPlanType(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none">
@@ -321,17 +329,9 @@ export default function CampaniasAdminPage() {
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Prioridad (1 = Mayor)</label>
                   <input type="number" min="1" value={priorityLevel} onChange={e => setPriorityLevel(parseInt(e.target.value) || 1)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
                 </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Duración (seg)</label>
-                  <input type="number" required min="1" max="60" value={durationSecs} onChange={e => setDurationSecs(parseInt(e.target.value) || 15)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
-                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Frecuencia Obj. (seg)</label>
-                  <input type="number" min="1" value={targetFrequency} onChange={e => setTargetFrequency(e.target.value)} placeholder="Ej: 180" className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
-                </div>
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Grupo Limitación Slot</label>
                   <input type="text" value={slotLimitGroup} onChange={e => setSlotLimitGroup(e.target.value)} placeholder="Ej: FOOD_COURT" className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
@@ -351,7 +351,7 @@ export default function CampaniasAdminPage() {
 
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                  Media {editingId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
+                  Media (1920x1080 pixels ) {editingId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
                 </label>
                 <input type="file" accept="image/*,video/*" onChange={handleFileChange} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white" />
                 {mediaPreview && (
@@ -384,7 +384,15 @@ export default function CampaniasAdminPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {pg.paginated.map((c) => {
             const isVideo = c.media_type === 'video';
-            const isActiveState = c.is_active && (!c.end_date || new Date(c.end_date) >= new Date());
+            const isExpired = !!c.end_date && new Date(c.end_date) < new Date();
+            const isActiveState = c.is_active && !isExpired;
+            const statusLabel = isExpired ? 'Vencida' : (c.is_active ? 'Activo' : 'Pausado');
+            const statusClasses = isExpired
+              ? 'bg-white/5 text-white/30'
+              : (c.is_active ? 'bg-orange-500/10 text-orange-400' : 'bg-white/5 text-white/30');
+            const dotClasses = isExpired
+              ? 'bg-white/20'
+              : (c.is_active ? 'bg-orange-400' : 'bg-white/20');
             
             return (
               <div key={c.id} className={`bg-[#111] border rounded-xl overflow-hidden group transition-all ${isActiveState ? 'border-white/10' : 'border-white/5 opacity-70'}`}>
@@ -415,9 +423,9 @@ export default function CampaniasAdminPage() {
                   </div>
 
                   <div className="pt-3 border-t border-white/5 flex items-center justify-between">
-                    <button onClick={() => handleToggleActive(c.id, c.is_active)} className={`text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${c.is_active ? 'bg-orange-500/10 text-orange-400' : 'bg-white/5 text-white/30'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${c.is_active ? 'bg-orange-400' : 'bg-white/20'}`} />
-                      {c.is_active ? 'Activo' : 'Pausado'}
+                    <button onClick={() => handleToggleActive(c.id, c.is_active)} className={`text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${statusClasses}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
+                      {statusLabel}
                     </button>
                     
                     <div className="flex gap-1">
