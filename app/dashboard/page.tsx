@@ -7,6 +7,7 @@ export default function DashboardPage() {
   const [kiosks, setKiosks] = useState<any[]>([]);
   const [stores, setStores] = useState<number>(0);
   const [campaigns, setCampaigns] = useState<number>(0);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -16,15 +17,17 @@ export default function DashboardPage() {
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [kiosksRes, storesRes, campaignsRes] = await Promise.all([
+    const [kiosksRes, storesRes, campaignsRes, notifRes] = await Promise.all([
       supabase.from('kiosks').select('*').order('created_at', { ascending: false }),
       supabase.from('stores').select('id', { count: 'exact', head: true }),
       supabase.from('ad_campaigns').select('id', { count: 'exact', head: true }),
+      supabase.from('admin_notifications').select('*').is('read_at', null).order('created_at', { ascending: false }).limit(5),
     ]);
 
     if (kiosksRes.data) setKiosks(kiosksRes.data);
     if (storesRes.count != null) setStores(storesRes.count);
     if (campaignsRes.count != null) setCampaigns(campaignsRes.count);
+    if (notifRes.data) setNotifications(notifRes.data);
     setLoading(false);
     setRefreshing(false);
   };
@@ -105,7 +108,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Alerts bar */}
-      {(offline > 0 || paperIssues > 0) && (
+      {(offline > 0 || paperIssues > 0 || notifications.length > 0) && (
         <div className="flex flex-wrap gap-3">
           {offline > 0 && (
             <div className="flex items-center gap-2 bg-red-500/5 border border-red-500/20 rounded-lg px-4 py-2.5">
@@ -117,6 +120,17 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-2.5">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
               <span className="text-amber-400 text-sm">{paperIssues} kiosco{paperIssues > 1 ? 's' : ''} con alerta de papel</span>
+            </div>
+          )}
+          {notifications.length > 0 && (
+            <div className="flex items-start gap-2 bg-purple-500/5 border border-purple-500/20 rounded-lg px-4 py-2.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1" />
+              <div className="space-y-1">
+                <p className="text-purple-300 text-sm font-medium">Campanas por vencer</p>
+                {notifications.map(n => (
+                  <p key={n.id} className="text-purple-200/80 text-xs">{n.title || n.message}</p>
+                ))}
+              </div>
             </div>
           )}
         </div>

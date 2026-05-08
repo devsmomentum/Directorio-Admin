@@ -8,8 +8,10 @@ type AnalyticsEvent = {
   kiosk_id: string;
   event_type: string;
   module: string;
+  item_id?: string | null;
   item_name: string;
   created_at: string;
+  event_data?: unknown;
 };
 
 type Kiosk = {
@@ -18,6 +20,14 @@ type Kiosk = {
   location: string;
   status: string;
   last_ping: string;
+};
+
+type Campaign = {
+  id: string;
+  brand_name: string;
+  start_date: string | null;
+  end_date: string | null;
+  is_active: boolean;
 };
 
 type RankItem = { name: string; count: number; location?: string };
@@ -31,6 +41,8 @@ export default function AnalyticsDashboard() {
   const [kiosks, setKiosks] = useState<Kiosk[]>([]);
   const [allEvents, setAllEvents] = useState<AnalyticsEvent[]>([]);
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('top');
 
   const [totalRevenueUSD, setTotalRevenueUSD] = useState(0);
   const [totalSalesCount, setTotalSalesCount] = useState(0);
@@ -41,14 +53,16 @@ export default function AnalyticsDashboard() {
   const fetchDashboardData = async () => {
     setRefreshing(true);
     try {
-      const [{ data: ks }, { data: analytics }, { data: transactions }] = await Promise.all([
+      const [{ data: ks }, { data: analytics }, { data: transactions }, { data: campData }] = await Promise.all([
         supabase.from('kiosks').select('*'),
-        supabase.from('analytics_events').select('id, kiosk_id, event_type, module, item_name, created_at').order('created_at', { ascending: false }).limit(3000),
+        supabase.from('analytics_events').select('id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data').order('created_at', { ascending: false }).limit(3000),
         supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(1000),
+        supabase.from('ad_campaigns').select('id, brand_name, start_date, end_date, is_active').order('brand_name').limit(500),
       ]);
 
       setKiosks(ks || []);
       setAllEvents((analytics as AnalyticsEvent[]) || []);
+      setCampaigns((campData as Campaign[]) || []);
 
       if (transactions) {
         setAllTransactions(transactions);
@@ -109,6 +123,112 @@ export default function AnalyticsDashboard() {
     const m = kiosks.find(k => k.id === kId);
     return { name: m?.name || 'Desconocido', location: m?.location || '', count };
   }).sort((a, b) => b.count - a.count).slice(0, 5);
+
+  const toDateKey = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-CA');
+  };
+
+  const parseEventData = (data: AnalyticsEvent['event_data']) => {
+    if (!data) return null;
+    if (typeof data === 'string') {
+      try {
+        return JSON.parse(data) as Record<string, any>;
+      } catch {
+        return null;
+      }
+    }
+    if (typeof data === 'object') return data as Record<string, any>;
+    return null;
+  };
+
+  const campaignById = new Map(campaigns.map(c => [c.id, c]));
+  const campaignNameToId = new Map(campaigns.map(c => [c.brand_name.toLowerCase().trim(), c.id]));
+
+  const resolveCampaignId = (event: AnalyticsEvent) => {
+    if (event.item_id && campaignById.has(event.item_id)) return event.item_id;
+    const data = parseEventData(event.event_data);
+    const dataCampaignId = data?.campaign_id || data?.campaignId || data?.ad_campaign_id || data?.adCampaignId;
+    if (dataCampaignId && campaignById.has(dataCampaignId)) return dataCampaignId as string;
+    const dataName = String(data?.brand_name || data?.campaign_name || data?.campaignName || '').trim().toLowerCase();
+    if (dataName && campaignNameToId.has(dataName)) return campaignNameToId.get(dataName) || null;
+    const itemName = String(event.item_name || '').trim().toLowerCase();
+    if (itemName && campaignNameToId.has(itemName)) return campaignNameToId.get(itemName) || null;
+    return null;
+  };
+
+  const isLikelyImpression = (event: AnalyticsEvent) => {
+    const eventType = (event.event_type || '').toLowerCase();
+    if (eventType.includes('click')) return false;
+    const moduleName = (event.module || '').toLowerCase();
+    const impressionHints = ['impression', 'view', 'show', 'display'];
+    const moduleHints = ['campaign', 'ad', 'banner', 'promo'];
+    return impressionHints.some(h => eventType.includes(h)) || moduleHints.some(h => moduleName.includes(h));
+  };
+
+  const isWithinReportingHours = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return false;
+    const hour = d.getHours();
+    return hour >= 10 && hour <= 21;
+  };
+
+  const campaignRangeById = new Map<string, { start: Date | null; end: Date | null }>();
+  campaigns.forEach(c => {
+    const start = c.start_date ? new Date(`${c.start_date}T00:00:00`) : null;
+    const end = c.end_date ? new Date(`${c.end_date}T23:59:59`) : null;
+    campaignRangeById.set(c.id, { start, end });
+  });
+
+  const todayKey = toDateKey(now.toISOString());
+  const campaignStatsById: Record<string, { total: number; today: number; daily: Record<string, number> }> = {};
+
+  filteredEvents.forEach(event => {
+    if (!isLikelyImpression(event)) return;
+    const campaignId = resolveCampaignId(event);
+    if (!campaignId) return;
+
+    const range = campaignRangeById.get(campaignId);
+    const eventDate = new Date(event.created_at);
+    if (range?.start && eventDate < range.start) return;
+    if (range?.end && eventDate > range.end) return;
+    if (!isWithinReportingHours(event.created_at)) return;
+
+    if (!campaignStatsById[campaignId]) {
+      campaignStatsById[campaignId] = { total: 0, today: 0, daily: {} };
+    }
+    const dateKey = toDateKey(event.created_at);
+    if (!dateKey) return;
+    const stats = campaignStatsById[campaignId];
+    stats.total += 1;
+    stats.daily[dateKey] = (stats.daily[dateKey] || 0) + 1;
+    if (dateKey === todayKey) stats.today += 1;
+  });
+
+  const campaignTotals = campaigns
+    .map(c => ({
+      id: c.id,
+      name: c.brand_name,
+      total: campaignStatsById[c.id]?.total || 0,
+    }))
+    .filter(c => c.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5)
+    .map(c => ({ name: c.name, count: c.total }));
+
+  const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId);
+  const selectedStats = selectedCampaign ? (campaignStatsById[selectedCampaign.id] || { total: 0, today: 0, daily: {} }) : null;
+  const selectedDailyRows = selectedStats
+    ? Object.entries(selectedStats.daily).sort((a, b) => b[0].localeCompare(a[0]))
+    : [];
+  const selectedRange = selectedCampaign ? campaignRangeById.get(selectedCampaign.id) : null;
+  const rangeEnd = selectedRange?.end || now;
+  const rangeStart = selectedRange?.start || null;
+  const activeDays = rangeStart
+    ? Math.max(1, Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / (24 * 60 * 60 * 1000)) + 1)
+    : null;
+  const avgPerDay = selectedStats && activeDays ? (selectedStats.total / activeDays).toFixed(2) : null;
 
   const exportCSV = (headers: string[], rows: string[][], filename: string) => {
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -243,6 +363,72 @@ export default function AnalyticsDashboard() {
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
               <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Trafico por kiosco</h3>
               <RankingList items={topKiosksActivity} color="text-cyan-400" valueLabel="usos" />
+            </div>
+          </div>
+
+          <div className="bg-[#111] border border-white/5 rounded-xl p-5">
+            <div className="flex items-start justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium">Campanas: impresiones</h3>
+                <p className="text-white/20 text-xs mt-1">Veces mostradas por dia dentro del periodo activo.</p>
+              </div>
+              <select
+                value={selectedCampaignId}
+                onChange={e => setSelectedCampaignId(e.target.value)}
+                className="text-xs bg-[#0f0f0f] border border-white/10 text-white/70 rounded-lg px-3 py-2 focus:outline-none focus:border-pink-500"
+              >
+                <option value="top">Top 5</option>
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>{c.brand_name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+              <div className="bg-white/5 rounded-lg p-4">
+                <h4 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-3">Top por impresiones</h4>
+                <RankingList items={campaignTotals} color="text-emerald-400" valueLabel="impresiones" />
+              </div>
+
+              <div className="bg-white/5 rounded-lg p-4">
+                <h4 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-3">Detalle diario</h4>
+                {!selectedCampaign || selectedCampaignId === 'top' ? (
+                  <p className="text-white/20 text-sm py-4">Selecciona una campana para ver el detalle diario.</p>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-white/40">
+                      <span>Periodo: {selectedCampaign.start_date || '—'} → {selectedCampaign.end_date || 'hoy'}</span>
+                      {activeDays && <span>Dias activos: {activeDays}</span>}
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-black/20 rounded-lg px-3 py-2">
+                        <p className="text-white/30 text-[10px] uppercase tracking-wider">Total</p>
+                        <p className="text-white text-sm font-semibold">{selectedStats?.total || 0}</p>
+                      </div>
+                      <div className="bg-black/20 rounded-lg px-3 py-2">
+                        <p className="text-white/30 text-[10px] uppercase tracking-wider">Hoy</p>
+                        <p className="text-white text-sm font-semibold">{selectedStats?.today || 0}</p>
+                      </div>
+                      <div className="bg-black/20 rounded-lg px-3 py-2">
+                        <p className="text-white/30 text-[10px] uppercase tracking-wider">Promedio/dia</p>
+                        <p className="text-white text-sm font-semibold">{avgPerDay || '—'}</p>
+                      </div>
+                    </div>
+                    {selectedDailyRows.length === 0 ? (
+                      <p className="text-white/20 text-sm py-2">Sin impresiones registradas.</p>
+                    ) : (
+                      <div className="max-h-56 overflow-auto space-y-2 pr-1">
+                        {selectedDailyRows.map(([day, count]) => (
+                          <div key={day} className="flex items-center justify-between text-xs">
+                            <span className="text-white/50 font-mono">{day}</span>
+                            <span className="text-emerald-300 font-semibold">{count} impresiones</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
