@@ -48,8 +48,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [router]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/login');
+    try {
+      setIsAuthorized(false);
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) {
+        console.error('Logout failed:', error);
+      }
+    } finally {
+      router.replace('/login');
+    }
   };
 
   const menuItems = [

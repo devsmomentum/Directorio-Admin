@@ -8,7 +8,7 @@ const BANNER_W = 80;
 const BANNER_H = 192;
 const SCALE = 2;
 
-const UI_POSITIONS = ['top', 'bottom', 'home_hero', 'sidebar'] as const;
+const UI_POSITIONS = ['top', 'bottom'] as const;
 
 interface Campaign { id: string; brand_name: string; }
 
@@ -231,19 +231,6 @@ export default function BannersAdminPage() {
                         {UI_POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Slot / Orden</label>
-                      <input type="number" min="1" value={slotPosition} onChange={e => setSlotPosition(parseInt(e.target.value) || 1)}
-                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Vincular Campaña</label>
-                    <select value={campaignId} onChange={e => setCampaignId(e.target.value)}
-                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500/50">
-                      <option value="">Sin vincular</option>
-                      {campaigns.map(c => <option key={c.id} value={c.id}>{c.brand_name}</option>)}
-                    </select>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
