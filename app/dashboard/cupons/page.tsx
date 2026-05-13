@@ -5,13 +5,12 @@ import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
 // Match real schema coupons.plan_type options
-const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'BONO_PREMIADO', 'PUBLI_PROMO'] as const;
+const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PUBLI_PROMO'] as const;
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE:       'text-cyan-400 bg-cyan-500/10',
   ORO:            'text-amber-400 bg-amber-500/10',
   IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
-  BONO_PREMIADO:  'text-pink-400 bg-pink-500/10',
   PUBLI_PROMO:    'text-blue-400 bg-blue-500/10',
 };
 
@@ -19,7 +18,6 @@ const PLAN_LABELS: Record<string, string> = {
   DIAMANTE:       'Diamante',
   ORO:            'Oro',
   IA_PERFORMANCE: 'IA Performance',
-  BONO_PREMIADO:  'Bono Premiado',
   PUBLI_PROMO:    'Publi Promo',
 };
 
@@ -335,20 +333,19 @@ export default function CuponsAdminPage() {
                   )}
                 </div>
 
-                {/* Campaign Link */}
                 <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Campaña (Opcional)</label>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de Visibilidad</label>
                   <select
-                    value={campaignId}
-                    onChange={e => setCampaignId(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    value={planType}
+                    onChange={e => setPlanType(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
                   >
-                    <option value="">Sin campaña</option>
-                    {campaigns.map(c => (
-                      <option key={c.id} value={c.id}>{c.brand_name}</option>
+                    {PLAN_TYPES.map(pt => (
+                      <option key={pt} value={pt}>{PLAN_LABELS[pt] || pt}</option>
                     ))}
                   </select>
                 </div>
+
               </div>
 
               <div>
@@ -363,56 +360,7 @@ export default function CuponsAdminPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Precio ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={priceUsd === 0 ? '' : priceUsd}
-                    onChange={e => setPriceUsd(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
-                    placeholder="5.50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Stock Disponible</label>
-                  <input
-                    type="number"
-                    required
-                    value={amountAvailable === 0 ? '' : amountAvailable}
-                    onChange={e => setAmountAvailable(parseInt(e.target.value) || 0)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
-                    placeholder="100"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Categoría</label>
-                  <input
-                    type="text"
-                    value={category}
-                    onChange={e => setCategory(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
-                    placeholder="Ej: Gastronomía"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de Visibilidad</label>
-                  <select
-                    value={planType}
-                    onChange={e => setPlanType(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
-                  >
-                    {PLAN_TYPES.map(pt => (
-                      <option key={pt} value={pt}>{PLAN_LABELS[pt] || pt}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -437,18 +385,23 @@ export default function CuponsAdminPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                  Imagen {editingCouponId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
-                </label>
-                <div className="flex gap-3 items-center">
-                  <div className="w-12 h-12 rounded-lg bg-[#0A0A0A] border border-white/10 overflow-hidden flex-shrink-0">
-                    {imagePreview ? (
-                      <img src={imagePreview} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white/10 text-[8px]">N/A</div>
-                    )}
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Stock Disponible</label>
+                  <input
+                    type="number"
+                    required
+                    value={amountAvailable === 0 ? '' : amountAvailable}
+                    onChange={e => setAmountAvailable(parseInt(e.target.value) || 0)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    placeholder="100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+                    Imagen {editingCouponId && <span className="normal-case tracking-normal">(dejar vacío para mantener)</span>}
+                  </label>
                   <input
                     type="file"
                     accept="image/*"
@@ -457,6 +410,16 @@ export default function CuponsAdminPage() {
                   />
                 </div>
               </div>
+
+              {imagePreview && (
+                <div className="flex justify-center">
+                  <div className="w-32 h-32 rounded-xl bg-[#0A0A0A] border border-white/10 overflow-hidden">
+                    <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
+                  </div>
+                </div>
+              )}
+
+              
 
               <div className="flex gap-2 pt-2">
                 <button
