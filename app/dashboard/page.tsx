@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 
 export default function DashboardPage() {
@@ -32,9 +33,17 @@ export default function DashboardPage() {
     setRefreshing(false);
   };
 
-  const online = kiosks.filter(k => k.status === 'online').length;
-  const offline = kiosks.filter(k => k.status !== 'online').length;
-  const paperIssues = kiosks.filter(k => k.paper_level !== 'ok').length;
+  // Un kiosco se considera online solo si la app Flutter sigue reportando:
+  // status='online' lo escribe el TelemetryService mientras la app esta en
+  // primer plano y last_ping debe ser reciente (ping cada 1 min, toleramos
+  // hasta 3 min por si se pierde algun ping puntual).
+  const onlineCutoff = Date.now() - 3 * 60_000;
+  const isKioskOnline = (k: any) =>
+    k.status === 'online' &&
+    !!k.last_ping &&
+    new Date(k.last_ping).getTime() > onlineCutoff;
+  const online = kiosks.filter(isKioskOnline).length;
+  const offline = kiosks.length - online;
 
   const getTimeSince = (date: string) => {
     const diff = Date.now() - new Date(date).getTime();
@@ -108,7 +117,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Alerts bar */}
-      {(offline > 0 || paperIssues > 0 || notifications.length > 0) && (
+      {(offline > 0 || notifications.length > 0) && (
         <div className="flex flex-wrap gap-3">
           {offline > 0 && (
             <div className="flex items-center gap-2 bg-red-500/5 border border-red-500/20 rounded-lg px-4 py-2.5">
@@ -116,22 +125,24 @@ export default function DashboardPage() {
               <span className="text-red-400 text-sm">{offline} kiosco{offline > 1 ? 's' : ''} sin conexion</span>
             </div>
           )}
-          {paperIssues > 0 && (
-            <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-2.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-              <span className="text-amber-400 text-sm">{paperIssues} kiosco{paperIssues > 1 ? 's' : ''} con alerta de papel</span>
-            </div>
-          )}
           {notifications.length > 0 && (
-            <div className="flex items-start gap-2 bg-purple-500/5 border border-purple-500/20 rounded-lg px-4 py-2.5">
+            <Link
+              href="/dashboard/campanias"
+              className="flex items-start gap-2 bg-purple-500/5 hover:bg-purple-500/10 border border-purple-500/20 hover:border-purple-500/40 rounded-lg px-4 py-2.5 transition-colors group"
+            >
               <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1" />
-              <div className="space-y-1">
-                <p className="text-purple-300 text-sm font-medium">Campanas por vencer</p>
+              <div className="space-y-1 flex-1 min-w-0">
+                <p className="text-purple-300 text-sm font-medium flex items-center gap-1.5">
+                  Campanas por vencer ({notifications.length})
+                  <svg className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
+                  </svg>
+                </p>
                 {notifications.map(n => (
-                  <p key={n.id} className="text-purple-200/80 text-xs">{n.title || n.message}</p>
+                  <p key={n.id} className="text-purple-200/80 text-xs truncate">{n.message || n.title}</p>
                 ))}
               </div>
-            </div>
+            </Link>
           )}
         </div>
       )}
@@ -148,7 +159,7 @@ export default function DashboardPage() {
           <p className="text-white/30 text-xs font-medium uppercase tracking-wider mb-4">Kioscos registrados</p>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {kiosks.map((kiosk) => {
-              const isOnline = kiosk.status === 'online';
+              const isOnline = isKioskOnline(kiosk);
               return (
                 <div
                   key={kiosk.id}
@@ -158,9 +169,9 @@ export default function DashboardPage() {
                   <div className="flex items-start justify-between mb-4">
                     <div className="min-w-0 flex-1">
                       <h3 className="font-semibold text-white text-sm truncate">
-                        {kiosk.location_name || 'Kiosco sin nombre'}
+                        {kiosk.name || 'Kiosco sin nombre'}
                       </h3>
-                      <p className="text-white/20 text-xs font-mono mt-0.5 truncate">{kiosk.mac_address}</p>
+                      <p className="text-white/30 text-xs mt-0.5 truncate">{kiosk.location || 'Sin ubicacion'}</p>
                     </div>
                     <span className={`shrink-0 ml-3 flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md ${
                       isOnline
@@ -175,10 +186,12 @@ export default function DashboardPage() {
                   {/* Details */}
                   <div className="space-y-2.5">
                     <div className="flex justify-between items-center text-xs">
-                      <span className="text-white/30">Impresora</span>
-                      <span className={`font-medium ${kiosk.paper_level === 'ok' ? 'text-white/60' : 'text-amber-400'}`}>
-                        {kiosk.paper_level === 'ok' ? 'OK' : 'Revisar papel'}
-                      </span>
+                      <span className="text-white/30">Hardware</span>
+                      {kiosk.hardware_id ? (
+                        <span className="text-white/60 font-mono">{kiosk.hardware_id.substring(0, 8)}</span>
+                      ) : (
+                        <span className="text-amber-400/70">Sin vincular</span>
+                      )}
                     </div>
                     <div className="flex justify-between items-center text-xs">
                       <span className="text-white/30">Ultimo ping</span>
