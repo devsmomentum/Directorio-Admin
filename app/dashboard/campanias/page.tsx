@@ -1,9 +1,24 @@
 'use client';
 
 import { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 import KioskAssignment from './KioskAssignment';
+
+function getDaysUntilExpiry(endDate: string | null): number | null {
+  if (!endDate) return null;
+  const diff = new Date(endDate).getTime() - Date.now();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function getExpiryUrgency(endDate: string | null): 'critical' | 'warning' | null {
+  const days = getDaysUntilExpiry(endDate);
+  if (days === null || days < 0) return null;
+  if (days <= 3) return 'critical';
+  if (days <= 7) return 'warning';
+  return null;
+}
 
 const PLAN_TYPES = ['DIAMANTE', 'ORO'] as const;
 
@@ -44,6 +59,9 @@ interface Campaign {
 type Tab = 'campaigns' | 'kioscos';
 
 export default function CampaniasAdminPage() {
+  const searchParams = useSearchParams();
+  const highlightExpiring = searchParams.get('highlight') === 'expiring';
+
   const [activeTab, setActiveTab] = useState<Tab>('campaigns');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -104,15 +122,28 @@ export default function CampaniasAdminPage() {
     setShowForm(false);
   };
 
+  const urgencyRank = (c: Campaign) => {
+    const u = getExpiryUrgency(c.end_date);
+    if (u === 'critical') return 0;
+    if (u === 'warning') return 1;
+    return 2;
+  };
+
   const filtered = useMemo(() => {
-    if (!search) return campaigns;
-    const q = search.toLowerCase();
-    return campaigns.filter(c => 
-      c.brand_name.toLowerCase().includes(q) || 
-      c.plan_type.toLowerCase().includes(q) ||
-      (c.stores?.name || '').toLowerCase().includes(q)
-    );
-  }, [campaigns, search]);
+    let result = campaigns;
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(c =>
+        c.brand_name.toLowerCase().includes(q) ||
+        c.plan_type.toLowerCase().includes(q) ||
+        (c.stores?.name || '').toLowerCase().includes(q)
+      );
+    }
+    if (highlightExpiring) {
+      result = [...result].sort((a, b) => urgencyRank(a) - urgencyRank(b));
+    }
+    return result;
+  }, [campaigns, search, highlightExpiring]);
 
   const pg = usePagination(filtered);
 
@@ -293,6 +324,22 @@ export default function CampaniasAdminPage() {
         </div>
       )}
 
+      {/* Highlight expiring banner */}
+      {highlightExpiring && activeTab === 'campaigns' && (
+        <div className="flex items-center gap-3 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-3">
+          <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className="text-amber-400 text-sm font-medium">Mostrando campañas por vencer</p>
+            <p className="text-amber-300/50 text-xs mt-0.5">
+              <span className="text-red-400">Rojo</span> = vence en ≤3 días &nbsp;·&nbsp;
+              <span className="text-amber-400">Amarillo</span> = vence en ≤7 días
+            </p>
+          </div>
+        </div>
+      )}
+
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={resetForm} />
@@ -393,16 +440,35 @@ export default function CampaniasAdminPage() {
             const dotClasses = isExpired
               ? 'bg-white/20'
               : (c.is_active ? 'bg-orange-400' : 'bg-white/20');
-            
+
+            const urgency = getExpiryUrgency(c.end_date);
+            const daysLeft = getDaysUntilExpiry(c.end_date);
+
+            let cardClasses = `bg-[#111] border rounded-xl overflow-hidden group transition-all ${isActiveState ? 'border-white/10' : 'border-white/5 opacity-70'}`;
+            if (highlightExpiring && urgency === 'critical') {
+              cardClasses = 'bg-red-950/25 border border-red-500/50 ring-1 ring-red-500/20 rounded-xl overflow-hidden group transition-all';
+            } else if (highlightExpiring && urgency === 'warning') {
+              cardClasses = 'bg-amber-950/20 border border-amber-400/40 ring-1 ring-amber-400/10 rounded-xl overflow-hidden group transition-all';
+            }
+
             return (
-              <div key={c.id} className={`bg-[#111] border rounded-xl overflow-hidden group transition-all ${isActiveState ? 'border-white/10' : 'border-white/5 opacity-70'}`}>
+              <div key={c.id} className={cardClasses}>
                 <div className="h-40 bg-black relative">
                   {isVideo ? <video src={c.media_url} className="w-full h-full object-cover" muted autoPlay loop /> : <img src={c.media_url} className="w-full h-full object-cover" />}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                  <div className="absolute top-3 right-3">
+                  <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${PLAN_COLORS[c.plan_type] || 'text-white border-white'}`}>
                       {c.plan_type}
                     </span>
+                    {daysLeft !== null && daysLeft >= 0 && daysLeft <= 7 && (
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                        urgency === 'critical'
+                          ? 'text-red-400 bg-red-500/20 border-red-500/40'
+                          : 'text-amber-400 bg-amber-500/15 border-amber-400/30'
+                      }`}>
+                        {daysLeft === 0 ? 'Vence hoy' : `${daysLeft}d`}
+                      </span>
+                    )}
                   </div>
                   <div className="absolute bottom-3 left-3">
                     <h3 className="text-white font-semibold">{c.brand_name}</h3>

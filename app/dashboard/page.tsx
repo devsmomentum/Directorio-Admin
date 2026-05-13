@@ -127,7 +127,7 @@ export default function DashboardPage() {
           )}
           {notifications.length > 0 && (
             <Link
-              href="/dashboard/campanias"
+              href="/dashboard/campanias?highlight=expiring"
               className="flex items-start gap-2 bg-purple-500/5 hover:bg-purple-500/10 border border-purple-500/20 hover:border-purple-500/40 rounded-lg px-4 py-2.5 transition-colors group"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1" />
