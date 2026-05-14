@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { supabase } from '../../../lib/supabase';
 
 interface Store { id: string; name: string; local_number: string; node_id: string | null; }
@@ -443,7 +444,7 @@ export default function MapaEditorPage() {
   const selectedPoly = polygons.find(p => p.id === selectedPolyId);
   const selectedRoute = routes.find(r => r.id === selectedRouteId);
 
-  const TOOLS: { key: Tool; label: string; sc: string; icon: JSX.Element }[] = [
+  const TOOLS: { key: Tool; label: string; sc: string; icon: ReactNode }[] = [
     { key: 'pan', label: 'Mover', sc: '1', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" /> },
     { key: 'node', label: 'Kiosco', sc: '2', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /> },
     { key: 'bathroom', label: 'Baño', sc: '6', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /> },
