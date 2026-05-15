@@ -35,53 +35,30 @@ type RankItem = { name: string; count: number; location?: string };
 export default function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'trafico' | 'finanzas' | 'heatmap'>('trafico');
+  const [activeTab, setActiveTab] = useState<'trafico' | 'heatmap'>('trafico');
   const [selectedKioskId, setSelectedKioskId] = useState<string>('all');
 
   const [kiosks, setKiosks] = useState<Kiosk[]>([]);
   const [allEvents, setAllEvents] = useState<AnalyticsEvent[]>([]);
-  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('top');
 
-  const [totalRevenueUSD, setTotalRevenueUSD] = useState(0);
-  const [totalSalesCount, setTotalSalesCount] = useState(0);
-  const [topSellingItems, setTopSellingItems] = useState<any[]>([]);
 
   useEffect(() => { fetchDashboardData(); }, []);
 
   const fetchDashboardData = async () => {
     setRefreshing(true);
     try {
-      const [{ data: ks }, { data: analytics }, { data: transactions }, { data: campData }] = await Promise.all([
+      const [{ data: ks }, { data: analytics }, { data: campData }] = await Promise.all([
         supabase.from('kiosks').select('*'),
         supabase.from('analytics_events').select('id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data').order('created_at', { ascending: false }).limit(3000),
-        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(1000),
         supabase.from('ad_campaigns').select('id, brand_name, start_date, end_date, is_active').order('brand_name').limit(500),
       ]);
 
       setKiosks(ks || []);
       setAllEvents((analytics as AnalyticsEvent[]) || []);
       setCampaigns((campData as Campaign[]) || []);
-
-      if (transactions) {
-        setAllTransactions(transactions);
-        let totalUSD = 0, completed = 0;
-        const itemSales: Record<string, { count: number; revenue: number }> = {};
-        transactions.forEach(t => {
-          if (t.status === 'completed') {
-            const amount = Number(t.amount_usd) || 0;
-            totalUSD += amount;
-            completed++;
-            if (!itemSales[t.item_name]) itemSales[t.item_name] = { count: 0, revenue: 0 };
-            itemSales[t.item_name].count++;
-            itemSales[t.item_name].revenue += amount;
-          }
-        });
-        setTotalRevenueUSD(totalUSD);
-        setTotalSalesCount(completed);
-        setTopSellingItems(Object.entries(itemSales).map(([name, d]) => ({ name, count: d.count, revenue: d.revenue })).sort((a, b) => b.revenue - a.revenue).slice(0, 5));
-      }
     } catch (error) {
       console.error('Error cargando analiticas:', error);
     } finally {
@@ -306,12 +283,6 @@ export default function AnalyticsDashboard() {
     exportCSV(['Campana', 'Fecha', 'Impresiones'], rows, `Impresiones_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
-  const handleExportSales = () => {
-    if (!allTransactions.length) return alert('No hay transacciones para exportar.');
-    const headers = ['ID', 'Tipo', 'Articulo', 'USD', 'Bs', 'Tasa', 'Pago', 'Email', 'Kiosco', 'Fecha'];
-    const rows = allTransactions.map(t => [t.id, t.transaction_type, `"${t.item_name}"`, t.amount_usd || 0, t.amount_bs || 0, t.exchange_rate, t.payment_method, t.user_email || 'N/A', t.kiosk_id, new Date(t.created_at).toLocaleString()]);
-    exportCSV(headers, rows, `Ventas_${new Date().toISOString().split('T')[0]}.csv`);
-  };
 
   const handleExportHeatmap = () => {
     if (!heatmapData.rows.length) return alert('Sin datos de heatmap para exportar.');
@@ -407,7 +378,7 @@ export default function AnalyticsDashboard() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-[#111] rounded-lg p-1 border border-white/5 w-fit">
-        {(['trafico', 'finanzas', 'heatmap'] as const).map(tab => (
+        {(['trafico', 'heatmap'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -415,7 +386,7 @@ export default function AnalyticsDashboard() {
               activeTab === tab ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/50'
             }`}
           >
-            {tab === 'heatmap' ? 'Mapa de calor' : tab === 'trafico' ? 'Tráfico' : 'Finanzas'}
+            {tab === 'heatmap' ? 'Mapa de calor' : 'Tráfico'}
           </button>
         ))}
       </div>
@@ -525,46 +496,6 @@ export default function AnalyticsDashboard() {
                 )}
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== FINANZAS ===== */}
-      {activeTab === 'finanzas' && (
-        <div className="space-y-6">
-          <div className="flex justify-end">
-            <button onClick={handleExportSales} className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              Exportar CSV
-            </button>
-          </div>
-
-          <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top artículos por recaudación</h3>
-            {topSellingItems.length === 0 ? (
-              <p className="text-white/20 text-sm py-4">Sin ventas registradas</p>
-            ) : (
-              <div className="space-y-3">
-                {topSellingItems.map((item, i) => {
-                  const max = topSellingItems[0].revenue;
-                  return (
-                    <div key={i}>
-                      <div className="flex items-center justify-between text-xs mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-white/20 text-[10px] font-mono w-4">{i + 1}</span>
-                          <span className="text-white/70">{item.name}</span>
-                          <span className="text-white/15 text-[10px]">{item.count} ventas</span>
-                        </div>
-                        <span className="text-emerald-400 font-semibold">${item.revenue.toFixed(2)}</span>
-                      </div>
-                      <div className="w-full bg-white/5 rounded-full h-1">
-                        <div className="h-1 rounded-full bg-emerald-500/60 transition-all duration-700" style={{ width: `${(item.revenue / max) * 100}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
         </div>
       )}
