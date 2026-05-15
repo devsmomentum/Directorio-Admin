@@ -5,18 +5,20 @@ import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
 // plan_type values from DB CHECK constraint
-const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE'] as const;
+const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PROMO_FLASH'] as const;
 
 const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE:       'text-cyan-400 bg-cyan-500/10',
-  ORO:            'text-amber-400 bg-amber-500/10',
+  DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
+  ORO: 'text-amber-400 bg-amber-500/10',
   IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
+  PROMO_FLASH: 'text-pink-400 bg-pink-500/10',
 };
 
 const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE:       'Diamante',
-  ORO:            'Oro',
+  DIAMANTE: 'Diamante',
+  ORO: 'Oro',
   IA_PERFORMANCE: 'IA Performance',
+  PROMO_FLASH: 'Promo Flash',
 };
 
 export default function TiendasCRUD() {
@@ -182,7 +184,7 @@ export default function TiendasCRUD() {
       );
     }
 
-    const planWeight: Record<string, number> = { DIAMANTE: 3, ORO: 2, IA_PERFORMANCE: 1 };
+    const planWeight: Record<string, number> = { PROMO_FLASH: 4, DIAMANTE: 3, ORO: 2, IA_PERFORMANCE: 1 };
     return [...result].sort((a, b) => {
       const diff = (planWeight[b.plan_type] || 0) - (planWeight[a.plan_type] || 0);
       return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '');
@@ -324,11 +326,10 @@ export default function TiendasCRUD() {
                   <button
                     type="button"
                     onClick={() => setPlanType('')}
-                    className={`py-2 text-xs font-medium rounded-lg border transition-colors ${
-                      !planType
-                        ? 'bg-white/10 text-white border-white/20'
-                        : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
-                    }`}
+                    className={`py-2 text-xs font-medium rounded-lg border transition-colors ${!planType
+                      ? 'bg-white/10 text-white border-white/20'
+                      : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
+                      }`}
                   >
                     Sin plan
                   </button>
@@ -337,11 +338,10 @@ export default function TiendasCRUD() {
                       key={pt}
                       type="button"
                       onClick={() => setPlanType(pt)}
-                      className={`py-2 text-xs font-medium rounded-lg border transition-colors ${
-                        planType === pt
-                          ? `${PLAN_COLORS[pt]} border-current`
-                          : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
-                      }`}
+                      className={`py-2 text-xs font-medium rounded-lg border transition-colors ${planType === pt
+                        ? `${PLAN_COLORS[pt]} border-current`
+                        : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
+                        }`}
                     >
                       {PLAN_LABELS[pt]}
                     </button>

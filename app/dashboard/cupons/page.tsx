@@ -8,20 +8,20 @@ import Pagination, { usePagination } from '../../components/Pagination';
 const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PUBLI_PROMO'] as const;
 
 const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE:       'text-cyan-400 bg-cyan-500/10',
-  ORO:            'text-amber-400 bg-amber-500/10',
+  DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
+  ORO: 'text-amber-400 bg-amber-500/10',
   IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
-  PUBLI_PROMO:    'text-blue-400 bg-blue-500/10',
+  PUBLI_PROMO: 'text-blue-400 bg-blue-500/10',
 };
 
 const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE:       'Diamante',
-  ORO:            'Oro',
+  DIAMANTE: 'Diamante',
+  ORO: 'Oro',
   IA_PERFORMANCE: 'IA Performance',
-  PUBLI_PROMO:    'Publi Promo',
+  PUBLI_PROMO: 'Publi Promo',
 };
 
-interface Store { id: string; name: string; }
+interface Store { id: string; name: string; plan_type: string | null; }
 interface Campaign { id: string; brand_name: string; }
 
 interface Coupon {
@@ -62,7 +62,7 @@ export default function CuponsAdminPage() {
   const [priceUsd, setPriceUsd] = useState<number>(0);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
-  
+
   // New Schema fields
   const [planType, setPlanType] = useState<string>('IA_PERFORMANCE');
   const [category, setCategory] = useState<string>('');
@@ -77,7 +77,7 @@ export default function CuponsAdminPage() {
   const fetchData = async () => {
     setRefreshing(true);
     const [storesRes, campaignsRes, couponsRes] = await Promise.all([
-      supabase.from('stores').select('id, name').order('name').limit(500),
+      supabase.from('stores').select('id, name, plan_type').order('name').limit(500),
       supabase.from('ad_campaigns').select('id, brand_name').order('brand_name').limit(200),
       supabase.from('coupons').select('*, stores(name)').order('created_at', { ascending: false }).limit(500),
     ]);
@@ -114,9 +114,9 @@ export default function CuponsAdminPage() {
   const filteredCoupons = useMemo(() => {
     if (!search) return coupons;
     const q = search.toLowerCase();
-    return coupons.filter(c => 
-      c.title.toLowerCase().includes(q) || 
-      c.code?.toLowerCase().includes(q) || 
+    return coupons.filter(c =>
+      c.title.toLowerCase().includes(q) ||
+      c.code?.toLowerCase().includes(q) ||
       (c.stores?.name || '').toLowerCase().includes(q) ||
       (c.category || '').toLowerCase().includes(q)
     );
@@ -125,6 +125,7 @@ export default function CuponsAdminPage() {
   const pg = usePagination(filteredCoupons);
 
   const handleEditClick = (coupon: Coupon) => {
+    const store = stores.find(s => s.id === coupon.store_id);
     setEditingCouponId(coupon.id);
     setSelectedStoreId(coupon.store_id || '');
     setStoreSearch(coupon.stores?.name || '');
@@ -133,7 +134,7 @@ export default function CuponsAdminPage() {
     setPriceUsd(coupon.price_usd || 0);
     setImagePreview(coupon.image_url || '');
     setImageFile(null);
-    setPlanType(coupon.plan_type || 'IA_PERFORMANCE');
+    setPlanType(store?.plan_type || '');
     setCategory(coupon.category || '');
     setStartDate(coupon.start_date ? coupon.start_date.split('T')[0] : new Date().toISOString().split('T')[0]);
     setEndDate(coupon.end_date ? coupon.end_date.split('T')[0] : '');
@@ -168,7 +169,7 @@ export default function CuponsAdminPage() {
 
   const handleSaveCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStoreId && !campaignId) { alert('Debes seleccionar una tienda o una campaña.'); return; }
+    if (!selectedStoreId) { alert('Debes seleccionar una tienda.'); return; }
     if (!endDate) { alert('La fecha de vencimiento es requerida por el esquema.'); return; }
     setIsSaving(true);
 
@@ -194,7 +195,7 @@ export default function CuponsAdminPage() {
         start_date: new Date(startDate).toISOString(),
         end_date: new Date(endDate).toISOString(),
       };
-      
+
       if (publicUrl) couponData.image_url = publicUrl;
 
       if (editingCouponId) {
@@ -288,9 +289,9 @@ export default function CuponsAdminPage() {
                 {/* Store Combobox */}
                 <div className="relative">
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tienda asignada</label>
-                  <div 
+                  <div
                     className="flex items-center justify-between w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm cursor-pointer"
-                    onClick={() => setStoreDropdownOpen(!storeDropdownOpen)}
+                    onClick={() => { if (!storeDropdownOpen) setStoreSearch(''); setStoreDropdownOpen(!storeDropdownOpen); }}
                   >
                     <span className="text-white truncate">
                       {selectedStoreId ? stores.find(s => s.id === selectedStoreId)?.name : 'Seleccionar tienda...'}
@@ -309,18 +310,13 @@ export default function CuponsAdminPage() {
                         />
                       </div>
                       <div className="max-h-48 overflow-y-auto">
-                        <div
-                          className="px-3 py-2 text-sm text-white/40 hover:bg-white/5 cursor-pointer"
-                          onClick={() => { setSelectedStoreId(''); setStoreSearch(''); setStoreDropdownOpen(false); }}
-                        >
-                          Ninguna (Solo campaña)
-                        </div>
                         {filteredStores.map(store => (
                           <div
                             key={store.id}
                             className="px-3 py-2 text-sm text-white hover:bg-white/5 cursor-pointer truncate"
                             onClick={() => {
                               setSelectedStoreId(store.id);
+                              setPlanType(store.plan_type || '');
                               setStoreSearch(store.name);
                               setStoreDropdownOpen(false);
                             }}
@@ -334,16 +330,18 @@ export default function CuponsAdminPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de Visibilidad</label>
-                  <select
-                    value={planType}
-                    onChange={e => setPlanType(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
-                  >
-                    {PLAN_TYPES.map(pt => (
-                      <option key={pt} value={pt}>{PLAN_LABELS[pt] || pt}</option>
-                    ))}
-                  </select>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de la Tienda</label>
+                  <div className="w-full bg-[#0A0A0A] border border-white/5 rounded-lg px-3 py-2.5 text-sm flex items-center min-h-[42px] cursor-default select-none">
+                    {planType ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[planType] || 'text-white/40 bg-white/5'}`}>
+                        {PLAN_LABELS[planType] || planType}
+                      </span>
+                    ) : (
+                      <span className="text-white/20 text-xs">
+                        {selectedStoreId ? 'Sin plan asignado' : 'Selecciona una tienda'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
               </div>
@@ -360,7 +358,7 @@ export default function CuponsAdminPage() {
                 />
               </div>
 
-              
+
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -419,7 +417,7 @@ export default function CuponsAdminPage() {
                 </div>
               )}
 
-              
+
 
               <div className="flex gap-2 pt-2">
                 <button
