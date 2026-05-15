@@ -1,0 +1,31 @@
+# Supabase project configuration
+# Docs: https://supabase.com/docs/guides/cli/config
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+
+# ── Edge Functions ──────────────────────────────────────────────────────────────
+
+# kill-switch: no requiere JWT porque lo llama pg_cron con x-cron-secret
+[functions.kill-switch]
+verify_jwt = false

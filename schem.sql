@@ -20,6 +20,17 @@ CREATE TABLE public.ad_campaigns (
   CONSTRAINT ad_campaigns_pkey PRIMARY KEY (id),
   CONSTRAINT ad_campaigns_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id)
 );
+CREATE TABLE public.admin_notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  type text NOT NULL DEFAULT 'info'::text,
+  title text,
+  message text,
+  metadata jsonb,
+  unique_key text UNIQUE,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  read_at timestamp with time zone,
+  CONSTRAINT admin_notifications_pkey PRIMARY KEY (id)
+);
 CREATE TABLE public.analytics_events (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   event_type text NOT NULL,
@@ -91,6 +102,16 @@ CREATE TABLE public.coupons (
   CONSTRAINT coupons_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id),
   CONSTRAINT coupons_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.ad_campaigns(id)
 );
+CREATE TABLE public.exits (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  floor_level integer NOT NULL,
+  is_emergency boolean DEFAULT false,
+  node_id uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT exits_pkey PRIMARY KEY (id),
+  CONSTRAINT exits_node_fk FOREIGN KEY (node_id) REFERENCES public.map_nodes(id)
+);
 CREATE TABLE public.kiosk_campaigns (
   kiosk_id uuid NOT NULL,
   campaign_id uuid NOT NULL,
@@ -112,6 +133,8 @@ CREATE TABLE public.kiosks (
   last_ping timestamp with time zone DEFAULT now(),
   is_emergency_active boolean NOT NULL DEFAULT false,
   floor_level text,
+  kiosk_mode boolean DEFAULT true,
+  binding_enabled boolean DEFAULT false,
   CONSTRAINT kiosks_pkey PRIMARY KEY (id),
   CONSTRAINT kiosks_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.map_nodes(id)
 );
@@ -217,7 +240,6 @@ CREATE TABLE public.services (
 CREATE TABLE public.stores (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   name character varying NOT NULL,
-  category character varying,
   description text,
   logo_url text,
   node_id uuid,
@@ -226,6 +248,13 @@ CREATE TABLE public.stores (
   floor_level text,
   category_id uuid,
   plan_type text CHECK (plan_type = ANY (ARRAY['DIAMANTE'::text, 'ORO'::text, 'IA_PERFORMANCE'::text])),
+  rif text,
+  representative_name text,
+  contact_phone text,
+  contact_email text,
+  contract_url text,
+  mercantil_url text,
+  contract_expiry_date date,
   CONSTRAINT stores_pkey PRIMARY KEY (id),
   CONSTRAINT stores_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.map_nodes(id),
   CONSTRAINT stores_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)

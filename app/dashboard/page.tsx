@@ -9,6 +9,8 @@ export default function DashboardPage() {
   const [stores, setStores] = useState<number>(0);
   const [campaigns, setCampaigns] = useState<number>(0);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [cobrosAlert, setCobrosAlert] = useState<any[]>([]);
+  const [contractsAlert, setContractsAlert] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -18,17 +20,37 @@ export default function DashboardPage() {
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [kiosksRes, storesRes, campaignsRes, notifRes] = await Promise.all([
+    const today = new Date().toISOString().split('T')[0];
+    const in3days = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const in30days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const [kiosksRes, storesRes, campaignsRes, notifRes, cobrosRes, contractsRes] = await Promise.all([
       supabase.from('kiosks').select('*').order('created_at', { ascending: false }),
       supabase.from('stores').select('id', { count: 'exact', head: true }),
       supabase.from('ad_campaigns').select('id', { count: 'exact', head: true }),
       supabase.from('admin_notifications').select('*').is('read_at', null).order('created_at', { ascending: false }).limit(5),
+      supabase.from('ad_campaigns')
+        .select('id, brand_name, end_date, payment_status')
+        .gte('end_date', today)
+        .lte('end_date', in3days)
+        .eq('is_active', true)
+        .neq('payment_status', 'paid')
+        .limit(10),
+      supabase.from('stores')
+        .select('id, name, contract_expiry_date')
+        .not('contract_expiry_date', 'is', null)
+        .gte('contract_expiry_date', today)
+        .lte('contract_expiry_date', in30days)
+        .order('contract_expiry_date', { ascending: true })
+        .limit(10),
     ]);
 
     if (kiosksRes.data) setKiosks(kiosksRes.data);
     if (storesRes.count != null) setStores(storesRes.count);
     if (campaignsRes.count != null) setCampaigns(campaignsRes.count);
     if (notifRes.data) setNotifications(notifRes.data);
+    if (cobrosRes.data) setCobrosAlert(cobrosRes.data);
+    if (contractsRes.data) setContractsAlert(contractsRes.data);
     setLoading(false);
     setRefreshing(false);
   };
@@ -117,33 +139,72 @@ export default function DashboardPage() {
       </div>
 
       {/* Alerts bar */}
-      {(offline > 0 || notifications.length > 0) && (
-        <div className="flex flex-wrap gap-3">
-          {offline > 0 && (
-            <div className="flex items-center gap-2 bg-red-500/5 border border-red-500/20 rounded-lg px-4 py-2.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-              <span className="text-red-400 text-sm">{offline} kiosco{offline > 1 ? 's' : ''} sin conexion</span>
-            </div>
-          )}
-          {notifications.length > 0 && (
+      {(offline > 0 || notifications.length > 0 || cobrosAlert.length > 0 || contractsAlert.length > 0) && (
+        <div className="flex flex-col gap-3">
+          {/* Cobros alert — highest priority */}
+          {cobrosAlert.length > 0 && (
             <Link
-              href="/dashboard/campanias?highlight=expiring"
-              className="flex items-start gap-2 bg-purple-500/5 hover:bg-purple-500/10 border border-purple-500/20 hover:border-purple-500/40 rounded-lg px-4 py-2.5 transition-colors group"
+              href="/dashboard/campanias"
+              className="flex items-start gap-3 bg-red-950/20 hover:bg-red-950/30 border border-red-500/25 hover:border-red-500/40 rounded-lg px-4 py-3 transition-colors group"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1" />
-              <div className="space-y-1 flex-1 min-w-0">
-                <p className="text-purple-300 text-sm font-medium flex items-center gap-1.5">
-                  Campanas por vencer ({notifications.length})
-                  <svg className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-                  </svg>
+              <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-red-400 text-sm font-semibold flex items-center gap-1.5">
+                  Alerta Cobranzas — {cobrosAlert.length} campaña{cobrosAlert.length > 1 ? 's' : ''} por vencer sin pago
+                  <svg className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" /></svg>
                 </p>
-                {notifications.map(n => (
-                  <p key={n.id} className="text-purple-200/80 text-xs truncate">{n.message || n.title}</p>
-                ))}
+                <p className="text-red-300/50 text-xs mt-0.5 truncate">
+                  {cobrosAlert.map((c: any) => c.brand_name).join(', ')} — vencen en ≤3 días
+                </p>
               </div>
             </Link>
           )}
+          {/* Contratos por vencer ≤30 días */}
+          {contractsAlert.length > 0 && (
+            <Link
+              href="/dashboard/tiendas"
+              className="flex items-start gap-3 bg-amber-950/20 hover:bg-amber-950/30 border border-amber-500/20 hover:border-amber-500/35 rounded-lg px-4 py-3 transition-colors group"
+            >
+              <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-amber-400 text-sm font-semibold flex items-center gap-1.5">
+                  Contratos por vencer — {contractsAlert.length} tienda{contractsAlert.length > 1 ? 's' : ''} en ≤30 días
+                  <svg className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" /></svg>
+                </p>
+                <p className="text-amber-300/50 text-xs mt-0.5 truncate">
+                  {contractsAlert.map((s: any) => `${s.name} (${new Date(s.contract_expiry_date).toLocaleDateString()})`).join(', ')}
+                </p>
+              </div>
+            </Link>
+          )}
+
+          <div className="flex flex-wrap gap-3">
+            {offline > 0 && (
+              <div className="flex items-center gap-2 bg-red-500/5 border border-red-500/20 rounded-lg px-4 py-2.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                <span className="text-red-400 text-sm">{offline} kiosco{offline > 1 ? 's' : ''} sin conexion</span>
+              </div>
+            )}
+            {notifications.length > 0 && (
+              <Link
+                href="/dashboard/campanias?highlight=expiring"
+                className="flex items-start gap-2 bg-purple-500/5 hover:bg-purple-500/10 border border-purple-500/20 hover:border-purple-500/40 rounded-lg px-4 py-2.5 transition-colors group"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1" />
+                <div className="space-y-1 flex-1 min-w-0">
+                  <p className="text-purple-300 text-sm font-medium flex items-center gap-1.5">
+                    Campanas por vencer ({notifications.length})
+                    <svg className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </p>
+                  {notifications.map(n => (
+                    <p key={n.id} className="text-purple-200/80 text-xs truncate">{n.message || n.title}</p>
+                  ))}
+                </div>
+              </Link>
+            )}
+          </div>
         </div>
       )}
 

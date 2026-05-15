@@ -36,6 +36,8 @@ const PLAN_COLORS: Record<string, string> = {
   BONO_FLASH: 'text-pink-400 bg-pink-500/10 border-pink-500/30',
 };
 
+type PaymentStatus = 'pending' | 'paid' | 'overdue';
+
 interface Store { id: string; name: string; }
 
 interface Campaign {
@@ -54,6 +56,8 @@ interface Campaign {
   target_frequency_seconds: number | null;
   store_id: string | null;
   stores?: { name: string };
+  payment_status: PaymentStatus | null;
+  suspended_at: string | null;
 }
 
 type Tab = 'campaigns' | 'kioscos';
@@ -70,6 +74,11 @@ export default function CampaniasAdminPage() {
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Kill-switch state
+  const [killSwitchCandidates, setKillSwitchCandidates] = useState<Campaign[]>([]);
+  const [applyingKillSwitch, setApplyingKillSwitch] = useState(false);
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
   // Form Fields
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -88,9 +97,7 @@ export default function CampaniasAdminPage() {
   const [mediaPreview, setMediaPreview] = useState('');
   const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     setRefreshing(true);
@@ -98,27 +105,43 @@ export default function CampaniasAdminPage() {
       supabase.from('ad_campaigns').select('*, stores(name)').order('created_at', { ascending: false }).limit(200),
       supabase.from('stores').select('id, name').order('name').limit(500)
     ]);
-    if (campRes.data) setCampaigns(campRes.data as Campaign[]);
+    if (campRes.data) {
+      const data = campRes.data as Campaign[];
+      setCampaigns(data);
+      // Detect overdue: end_date passed + no payment + still active
+      const today = new Date().toISOString().split('T')[0];
+      const overdue = data.filter(c =>
+        c.end_date && c.end_date < today &&
+        (c.payment_status ?? 'pending') !== 'paid' &&
+        c.is_active
+      );
+      setKillSwitchCandidates(overdue);
+    }
     if (storesRes.data) setStores(storesRes.data);
     setLoading(false);
     setRefreshing(false);
   };
 
+  // Campaigns expiring in ≤3 days with unpaid status (cobranzas warning)
+  const cobrosWarning = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const in3days = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    return campaigns.filter(c =>
+      c.end_date &&
+      c.end_date >= today &&
+      c.end_date <= in3days &&
+      (c.payment_status ?? 'pending') !== 'paid' &&
+      c.is_active
+    );
+  }, [campaigns]);
+
   const resetForm = () => {
     setEditingId(null);
-    setBrandName('');
-    setPlanType('ORO');
-    setDescription('');
-    // duration is fixed by plan, keep as constant
+    setBrandName(''); setPlanType('ORO'); setDescription('');
     setStartDate(new Date().toISOString().split('T')[0]);
-    setEndDate('');
-    setStoreId('');
-    setPriorityLevel(1);
-    setSlotLimitGroup('');
-    setIsActive(true);
-    setMediaFile(null);
-    setMediaPreview('');
-    setMediaType('image');
+    setEndDate(''); setStoreId(''); setPriorityLevel(1);
+    setSlotLimitGroup(''); setIsActive(true);
+    setMediaFile(null); setMediaPreview(''); setMediaType('image');
     setShowForm(false);
   };
 
@@ -159,7 +182,7 @@ export default function CampaniasAdminPage() {
     setSlotLimitGroup(c.slot_limit_group || '');
     setIsActive(c.is_active);
     setMediaPreview(c.media_url);
-    setMediaType(c.media_type as 'image'|'video');
+    setMediaType(c.media_type as 'image' | 'video');
     setMediaFile(null);
     setShowForm(true);
   };
@@ -169,7 +192,6 @@ export default function CampaniasAdminPage() {
       const file = e.target.files[0];
       const isVideo = file.type.startsWith('video/');
       const maxSize = isVideo ? 50 * 1024 * 1024 : 5 * 1024 * 1024;
-      
       if (file.size > maxSize) {
         alert(`El archivo excede el límite (${isVideo ? '50MB para video' : '5MB para imagen'}).`);
         e.target.value = '';
@@ -211,8 +233,13 @@ export default function CampaniasAdminPage() {
         priority_level: priorityLevel,
         slot_limit_group: slotLimitGroup || null,
         target_frequency_seconds: PLAN_FREQUENCY_SECONDS[planType] || null,
-        store_id: storeId || null
+        store_id: storeId || null,
       };
+
+      // Only set payment_status on creation; edits don't reset it
+      if (!editingId) {
+        payload.payment_status = 'pending';
+      }
 
       if (editingId) {
         const { error } = await supabase.from('ad_campaigns').update(payload).eq('id', editingId);
@@ -235,7 +262,7 @@ export default function CampaniasAdminPage() {
     if (!confirm('Eliminar campaña permanentemente?')) return;
     try {
       const match = url.match(/campaigns\/(.+)$/);
-      if (match && match[1]) {
+      if (match?.[1]) {
         await supabase.storage.from('publicidad').remove([`campaigns/${match[1]}`]);
       }
       const { error } = await supabase.from('ad_campaigns').delete().eq('id', id);
@@ -248,14 +275,55 @@ export default function CampaniasAdminPage() {
 
   const handleToggleActive = async (id: string, current: boolean) => {
     if (current) {
-      const first = confirm('¿Deseas pausar esta campaña?');
-      if (!first) return;
-      const second = confirm('¿Confirmas pausar la campaña?');
-      if (!second) return;
+      if (!confirm('¿Deseas pausar esta campaña?')) return;
+      if (!confirm('¿Confirmas pausar la campaña?')) return;
     }
     const { error } = await supabase.from('ad_campaigns').update({ is_active: !current }).eq('id', id);
     if (!error) {
       setCampaigns(prev => prev.map(c => c.id === id ? { ...c, is_active: !current } : c));
+    }
+  };
+
+  const handleMarkPaid = async (id: string) => {
+    setMarkingPaidId(id);
+    try {
+      const { error } = await supabase
+        .from('ad_campaigns')
+        .update({ payment_status: 'paid', suspended_at: null })
+        .eq('id', id);
+      if (error) throw error;
+      setCampaigns(prev => prev.map(c => c.id === id ? { ...c, payment_status: 'paid', suspended_at: null } : c));
+      setKillSwitchCandidates(prev => prev.filter(c => c.id !== id));
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    } finally {
+      setMarkingPaidId(null);
+    }
+  };
+
+  const handleApplyKillSwitch = async () => {
+    if (!killSwitchCandidates.length) return;
+    const names = killSwitchCandidates.map(c => `• ${c.brand_name}`).join('\n');
+    if (!confirm(`Aplicar Smart Kill-Switch a ${killSwitchCandidates.length} campaña(s):\n\n${names}\n\nSe desactivarán del loop de pantallas.`)) return;
+
+    setApplyingKillSwitch(true);
+    try {
+      const ids = killSwitchCandidates.map(c => c.id);
+      const { error } = await supabase
+        .from('ad_campaigns')
+        .update({
+          is_active: false,
+          payment_status: 'overdue',
+          suspended_at: new Date().toISOString(),
+        })
+        .in('id', ids);
+      if (error) throw error;
+      setKillSwitchCandidates([]);
+      fetchData();
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    } finally {
+      setApplyingKillSwitch(false);
     }
   };
 
@@ -276,7 +344,7 @@ export default function CampaniasAdminPage() {
           <h2 className="text-2xl font-bold text-white">Campañas Publicitarias</h2>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={fetchData} disabled={refreshing} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2">
+          <button onClick={fetchData} disabled={refreshing} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 disabled:opacity-50">
             <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             {refreshing ? 'Actualizando...' : 'Actualizar'}
           </button>
@@ -293,11 +361,7 @@ export default function CampaniasAdminPage() {
       <div className="flex gap-1 bg-white/[0.03] border border-white/5 rounded-lg p-1 w-fit">
         <button
           onClick={() => setActiveTab('campaigns')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'campaigns'
-              ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25'
-              : 'text-white/40 hover:text-white/70'
-          }`}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'campaigns' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25' : 'text-white/40 hover:text-white/70'}`}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.069A1 1 0 0121 8.882V15a1 1 0 01-1.447.894L15 13.5M4 6a2 2 0 012-2h9a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" /></svg>
           Campañas
@@ -305,41 +369,227 @@ export default function CampaniasAdminPage() {
         </button>
         <button
           onClick={() => setActiveTab('kioscos')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'kioscos'
-              ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25'
-              : 'text-white/40 hover:text-white/70'
-          }`}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'kioscos' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25' : 'text-white/40 hover:text-white/70'}`}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
           Asignación por Kiosco
         </button>
       </div>
 
-      {/* Tab: Campañas — search bar */}
       {activeTab === 'campaigns' && (
-        <div className="relative">
-          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por marca o plan..." className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10" />
-        </div>
-      )}
+        <>
+          {/* ── Smart Kill-Switch Alert ── */}
+          {killSwitchCandidates.length > 0 && (
+            <div className="bg-red-950/30 border border-red-500/30 rounded-xl p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    <p className="text-red-400 font-semibold text-sm">Smart Kill-Switch — {killSwitchCandidates.length} campaña{killSwitchCandidates.length > 1 ? 's' : ''} vencida{killSwitchCandidates.length > 1 ? 's' : ''} sin pago</p>
+                  </div>
+                  <p className="text-red-300/50 text-xs mb-3">Estas campañas superaron su fecha de corte sin registro de pago. Confirma o marca cada una como pagada.</p>
+                  <div className="space-y-1.5">
+                    {killSwitchCandidates.map(c => (
+                      <div key={c.id} className="flex items-center justify-between bg-red-500/5 rounded-lg px-3 py-1.5">
+                        <div>
+                          <span className="text-white/70 text-xs font-medium">{c.brand_name}</span>
+                          {c.end_date && (
+                            <span className="text-red-300/50 text-[10px] ml-2">
+                              Venció: {new Date(c.end_date).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleMarkPaid(c.id)}
+                          disabled={markingPaidId === c.id}
+                          className="text-[10px] text-green-400 hover:text-green-300 bg-green-500/10 hover:bg-green-500/20 px-2 py-1 rounded-md transition-colors disabled:opacity-50"
+                        >
+                          {markingPaidId === c.id ? '...' : 'Marcar pagado'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={handleApplyKillSwitch}
+                  disabled={applyingKillSwitch}
+                  className="shrink-0 px-4 py-2 text-sm font-semibold bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  {applyingKillSwitch ? 'Aplicando...' : 'Aplicar Kill-Switch'}
+                </button>
+              </div>
+            </div>
+          )}
 
-      {/* Highlight expiring banner */}
-      {highlightExpiring && activeTab === 'campaigns' && (
-        <div className="flex items-center gap-3 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-3">
-          <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <div className="flex-1 min-w-0">
-            <p className="text-amber-400 text-sm font-medium">Mostrando campañas por vencer</p>
-            <p className="text-amber-300/50 text-xs mt-0.5">
-              <span className="text-red-400">Rojo</span> = vence en ≤3 días &nbsp;·&nbsp;
-              <span className="text-amber-400">Amarillo</span> = vence en ≤7 días
-            </p>
+          {/* ── Cobranzas 3-day warning ── */}
+          {cobrosWarning.length > 0 && (
+            <div className="flex items-start gap-3 bg-amber-950/20 border border-amber-500/20 rounded-xl px-4 py-3">
+              <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <div>
+                <p className="text-amber-400 text-sm font-medium">Alerta Cobranzas — {cobrosWarning.length} campaña{cobrosWarning.length > 1 ? 's' : ''} por vencer en 3 días</p>
+                <p className="text-amber-300/50 text-xs mt-0.5">
+                  {cobrosWarning.map(c => c.brand_name).join(', ')} — sin pago registrado
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Search */}
+          <div className="relative">
+            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por marca o plan..." className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10" />
           </div>
-        </div>
+
+          {/* Highlight expiring banner */}
+          {highlightExpiring && (
+            <div className="flex items-center gap-3 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-3">
+              <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+              <p className="text-amber-400 text-sm font-medium">
+                Mostrando campañas por vencer &nbsp;·&nbsp;
+                <span className="text-red-400 font-normal">Rojo</span> = ≤3 días &nbsp;·&nbsp;
+                <span className="text-amber-400 font-normal">Amarillo</span> = ≤7 días
+              </p>
+            </div>
+          )}
+
+          {/* Campaign grid */}
+          {campaigns.length === 0 ? (
+            <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
+              <p className="text-white/30 text-sm">No hay campañas registradas</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {pg.paginated.map((c) => {
+                const isVideo = c.media_type === 'video';
+                const isExpired = !!c.end_date && new Date(c.end_date) < new Date();
+                const isActiveState = c.is_active && !isExpired;
+                const payStatus: PaymentStatus = c.payment_status ?? 'pending';
+
+                const statusLabel = isExpired ? 'Vencida' : (c.is_active ? 'Activo' : 'Pausado');
+                const statusClasses = isExpired
+                  ? 'bg-white/5 text-white/30'
+                  : (c.is_active ? 'bg-orange-500/10 text-orange-400' : 'bg-white/5 text-white/30');
+                const dotClasses = isExpired
+                  ? 'bg-white/20'
+                  : (c.is_active ? 'bg-orange-400' : 'bg-white/20');
+
+                const urgency = getExpiryUrgency(c.end_date);
+                const daysLeft = getDaysUntilExpiry(c.end_date);
+
+                let cardClasses = `bg-[#111] border rounded-xl overflow-hidden group transition-all ${isActiveState ? 'border-white/10' : 'border-white/5 opacity-70'}`;
+                if (payStatus === 'overdue') {
+                  cardClasses = 'bg-red-950/20 border border-red-500/30 rounded-xl overflow-hidden group transition-all opacity-80';
+                } else if (highlightExpiring && urgency === 'critical') {
+                  cardClasses = 'bg-red-950/25 border border-red-500/50 ring-1 ring-red-500/20 rounded-xl overflow-hidden group transition-all';
+                } else if (highlightExpiring && urgency === 'warning') {
+                  cardClasses = 'bg-amber-950/20 border border-amber-400/40 ring-1 ring-amber-400/10 rounded-xl overflow-hidden group transition-all';
+                }
+
+                const payBadge =
+                  payStatus === 'paid'
+                    ? { label: 'Pagado', cls: 'text-green-400 bg-green-500/10' }
+                    : payStatus === 'overdue'
+                    ? { label: 'Impago', cls: 'text-red-400 bg-red-500/10' }
+                    : { label: 'Pendiente', cls: 'text-amber-400 bg-amber-500/10' };
+
+                return (
+                  <div key={c.id} className={cardClasses}>
+                    <div className="h-40 bg-black relative">
+                      {isVideo
+                        ? <video src={c.media_url} className="w-full h-full object-cover" muted autoPlay loop />
+                        : <img src={c.media_url} className="w-full h-full object-cover" />}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                      <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${PLAN_COLORS[c.plan_type] || 'text-white border-white'}`}>
+                          {c.plan_type}
+                        </span>
+                        {daysLeft !== null && daysLeft >= 0 && daysLeft <= 7 && (
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${urgency === 'critical' ? 'text-red-400 bg-red-500/20 border-red-500/40' : 'text-amber-400 bg-amber-500/15 border-amber-400/30'}`}>
+                            {daysLeft === 0 ? 'Vence hoy' : `${daysLeft}d`}
+                          </span>
+                        )}
+                        {payStatus === 'overdue' && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border text-red-400 bg-red-500/20 border-red-500/40">
+                            SUSPENDIDO
+                          </span>
+                        )}
+                      </div>
+                      <div className="absolute bottom-3 left-3">
+                        <h3 className="text-white font-semibold">{c.brand_name}</h3>
+                        {c.stores?.name && <p className="text-white/50 text-[10px]">Tienda: {c.stores.name}</p>}
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40">Duración</span>
+                        <span className="text-white font-mono">{c.duration_seconds}s</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40">Fechas</span>
+                        <span className="text-white/70">
+                          {new Date(c.start_date).toLocaleDateString()} {c.end_date ? `— ${new Date(c.end_date).toLocaleDateString()}` : '∞'}
+                        </span>
+                      </div>
+
+                      {/* Payment status */}
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40">Pago</span>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${payBadge.cls}`}>
+                          {payBadge.label}
+                        </span>
+                      </div>
+
+                      <div className="pt-3 border-t border-white/5 flex items-center justify-between">
+                        <button
+                          onClick={() => handleToggleActive(c.id, c.is_active)}
+                          className={`text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${statusClasses}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
+                          {statusLabel}
+                        </button>
+
+                        <div className="flex gap-1">
+                          {/* Mark as paid button (only if not paid) */}
+                          {payStatus !== 'paid' && (
+                            <button
+                              onClick={() => handleMarkPaid(c.id)}
+                              disabled={markingPaidId === c.id}
+                              title="Marcar como pagado"
+                              className="p-1.5 rounded-md text-green-400/60 hover:text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-40"
+                            >
+                              {markingPaidId === c.id ? (
+                                <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                              )}
+                            </button>
+                          )}
+                          <button onClick={() => handleEdit(c)} className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                          </button>
+                          <button onClick={() => handleDelete(c.id, c.media_url)} className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {pg.totalPages > 1 && (
+            <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} perPage={pg.perPage} label="campañas" onPageChange={pg.setPage} onPerPageChange={pg.changePerPage} />
+          )}
+        </>
       )}
 
+      {/* Tab: Kiosco assignment */}
+      {activeTab === 'kioscos' && <KioskAssignment />}
+
+      {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={resetForm} />
@@ -359,12 +609,10 @@ export default function CampaniasAdminPage() {
                   </select>
                 </div>
               </div>
-
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descripción Interna</label>
                 <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de pauta</label>
@@ -377,141 +625,42 @@ export default function CampaniasAdminPage() {
                   <input type="number" min="1" value={priorityLevel} onChange={e => setPriorityLevel(parseInt(e.target.value) || 1)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Grupo Limitación Slot</label>
-                  <input type="text" value={slotLimitGroup} onChange={e => setSlotLimitGroup(e.target.value)} placeholder="Ej: FOOD_COURT" className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
-                </div>
+              <div>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Grupo Limitación Slot</label>
+                <input type="text" value={slotLimitGroup} onChange={e => setSlotLimitGroup(e.target.value)} placeholder="Ej: FOOD_COURT" className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio Campaña</label>
                   <input type="date" required value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fin Campaña</label>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fin Campaña (Fecha de Corte)</label>
                   <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
                 </div>
               </div>
-
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                  Media (1920x1080 pixels ) {editingId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
+                  Media (1920×1080 px) {editingId && <span className="normal-case tracking-normal">(dejar vacío para mantener)</span>}
                 </label>
                 <input type="file" accept="image/*,video/*" onChange={handleFileChange} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white" />
                 {mediaPreview && (
                   <div className="mt-2 h-32 bg-black rounded-lg border border-white/5 overflow-hidden flex items-center justify-center">
-                    {mediaType === 'video' ? <video src={mediaPreview} className="h-full object-contain" muted autoPlay loop /> : <img src={mediaPreview} className="h-full object-contain" />}
+                    {mediaType === 'video'
+                      ? <video src={mediaPreview} className="h-full object-contain" muted autoPlay loop />
+                      : <img src={mediaPreview} className="h-full object-contain" />}
                   </div>
                 )}
               </div>
-
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={resetForm} className="flex-1 py-2 text-sm bg-white/5 hover:bg-white/10 text-white/50 rounded-lg">Cancelar</button>
-                <button type="submit" disabled={isSaving} className="flex-1 py-2 text-sm bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 border border-orange-500/30 rounded-lg disabled:opacity-50">
+                <button type="button" onClick={resetForm} className="flex-1 py-2 text-sm bg-white/5 hover:bg-white/10 text-white/50 rounded-lg transition-colors">Cancelar</button>
+                <button type="submit" disabled={isSaving} className="flex-1 py-2 text-sm bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 border border-orange-500/30 rounded-lg disabled:opacity-50 transition-colors">
                   {isSaving ? 'Guardando...' : 'Guardar Campaña'}
                 </button>
               </div>
             </form>
           </div>
         </div>
-      )}
-
-      {/* Tab: Kiosco assignment */}
-      {activeTab === 'kioscos' && <KioskAssignment />}
-
-      {/* Tab: Campaigns list */}
-      {activeTab === 'campaigns' && campaigns.length === 0 ? (
-        <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
-          <p className="text-white/30 text-sm">No hay campañas registradas</p>
-        </div>
-      ) : activeTab === 'campaigns' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {pg.paginated.map((c) => {
-            const isVideo = c.media_type === 'video';
-            const isExpired = !!c.end_date && new Date(c.end_date) < new Date();
-            const isActiveState = c.is_active && !isExpired;
-            const statusLabel = isExpired ? 'Vencida' : (c.is_active ? 'Activo' : 'Pausado');
-            const statusClasses = isExpired
-              ? 'bg-white/5 text-white/30'
-              : (c.is_active ? 'bg-orange-500/10 text-orange-400' : 'bg-white/5 text-white/30');
-            const dotClasses = isExpired
-              ? 'bg-white/20'
-              : (c.is_active ? 'bg-orange-400' : 'bg-white/20');
-
-            const urgency = getExpiryUrgency(c.end_date);
-            const daysLeft = getDaysUntilExpiry(c.end_date);
-
-            let cardClasses = `bg-[#111] border rounded-xl overflow-hidden group transition-all ${isActiveState ? 'border-white/10' : 'border-white/5 opacity-70'}`;
-            if (highlightExpiring && urgency === 'critical') {
-              cardClasses = 'bg-red-950/25 border border-red-500/50 ring-1 ring-red-500/20 rounded-xl overflow-hidden group transition-all';
-            } else if (highlightExpiring && urgency === 'warning') {
-              cardClasses = 'bg-amber-950/20 border border-amber-400/40 ring-1 ring-amber-400/10 rounded-xl overflow-hidden group transition-all';
-            }
-
-            return (
-              <div key={c.id} className={cardClasses}>
-                <div className="h-40 bg-black relative">
-                  {isVideo ? <video src={c.media_url} className="w-full h-full object-cover" muted autoPlay loop /> : <img src={c.media_url} className="w-full h-full object-cover" />}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                  <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${PLAN_COLORS[c.plan_type] || 'text-white border-white'}`}>
-                      {c.plan_type}
-                    </span>
-                    {daysLeft !== null && daysLeft >= 0 && daysLeft <= 7 && (
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                        urgency === 'critical'
-                          ? 'text-red-400 bg-red-500/20 border-red-500/40'
-                          : 'text-amber-400 bg-amber-500/15 border-amber-400/30'
-                      }`}>
-                        {daysLeft === 0 ? 'Vence hoy' : `${daysLeft}d`}
-                      </span>
-                    )}
-                  </div>
-                  <div className="absolute bottom-3 left-3">
-                    <h3 className="text-white font-semibold">{c.brand_name}</h3>
-                    {c.stores?.name && <p className="text-white/50 text-[10px]">Tienda: {c.stores.name}</p>}
-                  </div>
-                </div>
-                
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-white/40">Duración</span>
-                    <span className="text-white font-mono">{c.duration_seconds}s</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-white/40">Fechas</span>
-                    <span className="text-white/70">
-                      {new Date(c.start_date).toLocaleDateString()} {c.end_date ? `- ${new Date(c.end_date).toLocaleDateString()}` : '∞'}
-                    </span>
-                  </div>
-
-                  <div className="pt-3 border-t border-white/5 flex items-center justify-between">
-                    <button onClick={() => handleToggleActive(c.id, c.is_active)} className={`text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${statusClasses}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
-                      {statusLabel}
-                    </button>
-                    
-                    <div className="flex gap-1">
-                      <button onClick={() => handleEdit(c)} className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                      </button>
-                      <button onClick={() => handleDelete(c.id, c.media_url)} className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {activeTab === 'campaigns' && pg.totalPages > 1 && (
-        <Pagination page={pg.page} totalPages={pg.totalPages} total={pg.total} perPage={pg.perPage} label="campañas" onPageChange={pg.setPage} onPerPageChange={pg.changePerPage} />
       )}
     </div>
   );
