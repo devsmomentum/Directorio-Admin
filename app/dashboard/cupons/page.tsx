@@ -4,14 +4,23 @@ import { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
-// Match real schema coupons.plan_type options
-const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PUBLI_PROMO'] as const;
+// Match real schema coupons.plan_type options + Flash Coupon (PDF "PLANES DIRECTORIOS")
+const PLAN_TYPES = [
+  'DIAMANTE',
+  'ORO',
+  'IA_PERFORMANCE',
+  'PUBLI_PROMO',
+  'FLASH_COUPON_DIARIO',
+  'FLASH_COUPON_SEMANAL',
+] as const;
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
   ORO: 'text-amber-400 bg-amber-500/10',
   IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
   PUBLI_PROMO: 'text-blue-400 bg-blue-500/10',
+  FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
+  FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
 };
 
 const PLAN_LABELS: Record<string, string> = {
@@ -19,6 +28,19 @@ const PLAN_LABELS: Record<string, string> = {
   ORO: 'Oro',
   IA_PERFORMANCE: 'IA Performance',
   PUBLI_PROMO: 'Publi Promo',
+  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
+  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
+};
+
+// Tope duro de marcas activas con Flash Coupon en la galería (PDF: 20 marcas máx)
+const FLASH_COUPON_MAX_BRANDS = 20;
+const FLASH_COUPON_PLANS = new Set(['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL']);
+
+// Cupones máximos que una marca puede lanzar dentro de su período Flash Coupon
+// PDF: "entre 5 y 10 cupones diarios, y 30 semanales, según formato"
+const FLASH_COUPON_BRAND_LIMITS: Record<string, { max: number; windowDays: number; label: string }> = {
+  FLASH_COUPON_DIARIO:  { max: 10, windowDays: 1, label: 'día' },
+  FLASH_COUPON_SEMANAL: { max: 30, windowDays: 5, label: 'semana (5 días)' },
 };
 
 interface Store { id: string; name: string; plan_type: string | null; }
@@ -111,6 +133,18 @@ export default function CuponsAdminPage() {
     return stores.filter(s => s.name.toLowerCase().includes(storeSearch.toLowerCase()));
   }, [stores, storeSearch]);
 
+  // Marcas únicas activas con plan Flash Coupon (cap de 20 según PDF)
+  const flashCouponBrands = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const stamps = today;
+    const activeFlash = coupons.filter(c =>
+      FLASH_COUPON_PLANS.has(c.plan_type) &&
+      c.amount_available > 0 &&
+      (!c.end_date || c.end_date.split('T')[0] >= stamps)
+    );
+    return new Set(activeFlash.map(c => c.store_id).filter(Boolean));
+  }, [coupons]);
+
   const filteredCoupons = useMemo(() => {
     if (!search) return coupons;
     const q = search.toLowerCase();
@@ -171,6 +205,47 @@ export default function CuponsAdminPage() {
     e.preventDefault();
     if (!selectedStoreId) { alert('Debes seleccionar una tienda.'); return; }
     if (!endDate) { alert('La fecha de vencimiento es requerida por el esquema.'); return; }
+
+    // Cap de 20 marcas en galería para planes Flash Coupon
+    if (FLASH_COUPON_PLANS.has(planType)) {
+      const isNewBrand = !flashCouponBrands.has(selectedStoreId);
+      const editingCoupon = editingCouponId ? coupons.find(c => c.id === editingCouponId) : null;
+      const editingPlanWasFlash = editingCoupon && FLASH_COUPON_PLANS.has(editingCoupon.plan_type);
+      // Solo aplicamos cap si esta tienda no estaba ya en la galería
+      if (isNewBrand && !editingPlanWasFlash && flashCouponBrands.size >= FLASH_COUPON_MAX_BRANDS) {
+        alert(
+          `Límite alcanzado: ${flashCouponBrands.size}/${FLASH_COUPON_MAX_BRANDS} marcas activas en la galería de Flash Coupon.\n\n` +
+          `Para añadir esta marca, libera un slot dejando que un cupón Flash existente se agote o venza.`
+        );
+        return;
+      }
+
+      // Cap de cupones por marca dentro del período del plan (10/día, 30/semana)
+      const brandLimit = FLASH_COUPON_BRAND_LIMITS[planType];
+      if (brandLimit) {
+        const windowStart = new Date();
+        windowStart.setHours(0, 0, 0, 0);
+        windowStart.setDate(windowStart.getDate() - (brandLimit.windowDays - 1));
+
+        const issuedInWindow = coupons.filter(c =>
+          c.id !== editingCouponId &&
+          c.store_id === selectedStoreId &&
+          c.plan_type === planType &&
+          new Date(c.start_date) >= windowStart
+        ).length;
+
+        if (issuedInWindow >= brandLimit.max) {
+          const storeName = stores.find(s => s.id === selectedStoreId)?.name || 'esta marca';
+          alert(
+            `Límite alcanzado: ${storeName} ya lanzó ${issuedInWindow}/${brandLimit.max} cupones ` +
+            `en el plan ${PLAN_LABELS[planType]} durante el período (${brandLimit.label}).\n\n` +
+            `Espera al próximo período o cambia de plan para emitir más cupones.`
+          );
+          return;
+        }
+      }
+    }
+
     setIsSaving(true);
 
     try {
@@ -259,6 +334,33 @@ export default function CuponsAdminPage() {
         </div>
       </div>
 
+      {/* Indicador galería Flash Coupon */}
+      {flashCouponBrands.size > 0 && (
+        <div className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+          flashCouponBrands.size >= FLASH_COUPON_MAX_BRANDS
+            ? 'bg-red-950/25 border-red-500/30'
+            : flashCouponBrands.size >= FLASH_COUPON_MAX_BRANDS - 3
+            ? 'bg-amber-950/20 border-amber-500/25'
+            : 'bg-white/[0.03] border-white/10'
+        }`}>
+          <div className="flex items-center gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-pink-400" />
+            <div>
+              <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Galería Flash Coupon</p>
+              <p className="text-white font-mono text-sm">
+                {flashCouponBrands.size}<span className="text-white/30">/{FLASH_COUPON_MAX_BRANDS}</span>
+                <span className="text-white/30 text-xs ml-2">marcas activas</span>
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-white/40 max-w-sm text-right">
+            {flashCouponBrands.size >= FLASH_COUPON_MAX_BRANDS
+              ? 'Galería llena. No se aceptan más marcas Flash hasta liberar slots.'
+              : `Quedan ${FLASH_COUPON_MAX_BRANDS - flashCouponBrands.size} cupos para nuevas marcas.`}
+          </p>
+        </div>
+      )}
+
       {/* Search Bar */}
       <div className="relative">
         <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
@@ -342,6 +444,27 @@ export default function CuponsAdminPage() {
                       </span>
                     )}
                   </div>
+                  {/* Aviso de cupos restantes para Flash Coupon */}
+                  {selectedStoreId && FLASH_COUPON_PLANS.has(planType) && (() => {
+                    const limit = FLASH_COUPON_BRAND_LIMITS[planType];
+                    if (!limit) return null;
+                    const windowStart = new Date();
+                    windowStart.setHours(0, 0, 0, 0);
+                    windowStart.setDate(windowStart.getDate() - (limit.windowDays - 1));
+                    const issued = coupons.filter(c =>
+                      c.id !== editingCouponId &&
+                      c.store_id === selectedStoreId &&
+                      c.plan_type === planType &&
+                      new Date(c.start_date) >= windowStart
+                    ).length;
+                    const remaining = limit.max - issued;
+                    return (
+                      <p className={`text-[10px] mt-1 ${remaining <= 0 ? 'text-red-400' : remaining <= 2 ? 'text-amber-400' : 'text-white/40'}`}>
+                        Lanzados por {limit.label}: <span className="font-mono">{issued}/{limit.max}</span>
+                        {remaining > 0 ? ` · quedan ${remaining}` : ' · sin cupos'}
+                      </p>
+                    );
+                  })()}
                 </div>
 
               </div>

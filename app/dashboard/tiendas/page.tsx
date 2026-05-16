@@ -4,20 +4,49 @@ import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
-const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PROMO_FLASH'] as const;
+// Planes asignables a una tienda (PDF "PLANES DIRECTORIOS")
+const PLAN_TYPES = [
+  'DIAMANTE',
+  'ORO',
+  'IA_PERFORMANCE',
+  'PUBLI_PROMO_DIARIO',
+  'PUBLI_PROMO_SEMANAL',
+  'FLASH_COUPON_DIARIO',
+  'FLASH_COUPON_SEMANAL',
+] as const;
+
+// Capacidad máxima de tiendas activas por plan (null = ilimitado)
+const PLAN_MAX_BRANDS: Record<string, number | null> = {
+  DIAMANTE: 2,
+  ORO: 30,
+  IA_PERFORMANCE: null,
+  PUBLI_PROMO_DIARIO: null,
+  PUBLI_PROMO_SEMANAL: null,
+  FLASH_COUPON_DIARIO: 20,
+  FLASH_COUPON_SEMANAL: 20,
+  PROMO_FLASH: 20, // legacy
+};
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
   ORO: 'text-amber-400 bg-amber-500/10',
   IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
-  PROMO_FLASH: 'text-pink-400 bg-pink-500/10',
+  PUBLI_PROMO_DIARIO: 'text-blue-400 bg-blue-500/10',
+  PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10',
+  FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
+  FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
+  PROMO_FLASH: 'text-pink-400 bg-pink-500/10', // legacy
 };
 
 const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
   ORO: 'Oro',
   IA_PERFORMANCE: 'IA Performance',
-  PROMO_FLASH: 'Promo Flash',
+  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
+  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
+  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
+  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
+  PROMO_FLASH: 'Promo Flash', // legacy
 };
 
 // Logos → bucket público 'publicidad'
@@ -97,6 +126,20 @@ export default function TiendasCRUD() {
     setRefreshing(false);
   };
 
+  // Tiendas agrupadas por plan asignado.
+  // Cuenta TODAS las tiendas que tengan el plan asignado en BD, sin filtrar
+  // por vencimiento de contrato: el cap se aplica al slot del plan, no al
+  // estado comercial del contrato. Una tienda con contrato vencido sigue
+  // ocupando su cupo de Diamante/Oro/Flash hasta que se reasigne explícitamente.
+  const planUsage = useMemo(() => {
+    const byPlan: Record<string, number> = {};
+    for (const s of stores) {
+      if (!s.plan_type) continue;
+      byPlan[s.plan_type] = (byPlan[s.plan_type] || 0) + 1;
+    }
+    return byPlan;
+  }, [stores]);
+
   const validateImage = (file: File): Promise<boolean> =>
     new Promise((resolve) => {
       if (file.size > 500 * 1024) { alert('El logo debe pesar menos de 500 KB.'); resolve(false); return; }
@@ -146,6 +189,25 @@ export default function TiendasCRUD() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validación de capacidad del plan (Diamante ≤ 2, Oro ≤ 30, Flash Coupon ≤ 20)
+    if (planType) {
+      const cap = PLAN_MAX_BRANDS[planType];
+      if (cap != null) {
+        // Excluir la tienda que se está editando si ya tenía ese plan
+        const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
+        const wasSamePlan = editingStore?.plan_type === planType;
+        const currentCount = (planUsage[planType] || 0) - (wasSamePlan ? 1 : 0);
+        if (currentCount >= cap) {
+          alert(
+            `Límite alcanzado: ${currentCount}/${cap} tiendas activas con plan ${PLAN_LABELS[planType] || planType}.\n\n` +
+            `Para asignar este plan, libera un cupo desactivando o cambiando de plan a otra tienda con el mismo plan.`
+          );
+          return;
+        }
+      }
+    }
+
     setSubmitting(true);
     try {
       let finalLogoUrl = logoPreview || '';
@@ -262,7 +324,12 @@ export default function TiendasCRUD() {
         getCategoryName(s).toLowerCase().includes(q)
       );
     }
-    const planWeight: Record<string, number> = { PROMO_FLASH: 4, DIAMANTE: 3, ORO: 2, IA_PERFORMANCE: 1 };
+    const planWeight: Record<string, number> = {
+      DIAMANTE: 7, ORO: 6,
+      FLASH_COUPON_SEMANAL: 5, FLASH_COUPON_DIARIO: 4,
+      PUBLI_PROMO_SEMANAL: 3, PUBLI_PROMO_DIARIO: 2,
+      IA_PERFORMANCE: 1, PROMO_FLASH: 1,
+    };
     return [...result].sort((a, b) => {
       const diff = (planWeight[b.plan_type] || 0) - (planWeight[a.plan_type] || 0);
       return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '');
@@ -310,6 +377,45 @@ export default function TiendasCRUD() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
             Nueva tienda
           </button>
+        </div>
+      </div>
+
+      {/* Capacidad por plan (PDF "PLANES DIRECTORIOS") */}
+      <div className="bg-white/[0.03] border border-white/10 rounded-xl p-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-1">Capacidad de planes</p>
+            <p className="text-white/40 text-xs">Tiendas con cada plan asignado en BD</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {PLAN_TYPES.map(p => {
+              const cap = PLAN_MAX_BRANDS[p];
+              const used = planUsage[p] || 0;
+              if (cap == null) {
+                return (
+                  <span key={p} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium ${PLAN_COLORS[p]}`}>
+                    {PLAN_LABELS[p]} <span className="font-mono">{used}</span>
+                  </span>
+                );
+              }
+              const saturated = used >= cap;
+              const tight = used >= cap - 2;
+              return (
+                <span
+                  key={p}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
+                    saturated
+                      ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                      : tight
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                      : `${PLAN_COLORS[p]} border-transparent`
+                  }`}
+                >
+                  {PLAN_LABELS[p]} <span className="font-mono">{used}/{cap}</span>
+                </span>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -558,17 +664,50 @@ export default function TiendasCRUD() {
                   >
                     Sin plan
                   </button>
-                  {PLAN_TYPES.map(pt => (
-                    <button
-                      key={pt} type="button" onClick={() => setPlanType(pt)}
-                      className={`py-2 text-xs font-medium rounded-lg border transition-colors ${planType === pt
-                        ? `${PLAN_COLORS[pt]} border-current`
-                        : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'}`}
-                    >
-                      {PLAN_LABELS[pt]}
-                    </button>
-                  ))}
+                  {PLAN_TYPES.map(pt => {
+                    const cap = PLAN_MAX_BRANDS[pt];
+                    const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
+                    const wasSamePlan = editingStore?.plan_type === pt;
+                    const used = (planUsage[pt] || 0) - (wasSamePlan ? 1 : 0);
+                    const saturated = cap != null && used >= cap;
+                    const isSelected = planType === pt;
+                    return (
+                      <button
+                        key={pt} type="button"
+                        onClick={() => { if (!saturated || isSelected) setPlanType(pt); }}
+                        disabled={saturated && !isSelected}
+                        title={saturated && !isSelected ? `Plan saturado: ${used}/${cap}` : undefined}
+                        className={`py-2 text-xs font-medium rounded-lg border transition-colors ${
+                          isSelected
+                            ? `${PLAN_COLORS[pt]} border-current`
+                            : saturated
+                            ? 'bg-red-500/5 text-red-400/50 border-red-500/20 cursor-not-allowed'
+                            : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        <div>{PLAN_LABELS[pt]}</div>
+                        {cap != null && (
+                          <div className="text-[9px] opacity-70 font-mono mt-0.5">{used}/{cap}</div>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
+                {/* Aviso de cupo */}
+                {planType && PLAN_MAX_BRANDS[planType] != null && (() => {
+                  const cap = PLAN_MAX_BRANDS[planType]!;
+                  const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
+                  const wasSamePlan = editingStore?.plan_type === planType;
+                  const used = (planUsage[planType] || 0) - (wasSamePlan ? 1 : 0);
+                  const remaining = cap - used;
+                  return (
+                    <p className={`text-[10px] mt-2 ${remaining <= 0 ? 'text-red-400' : remaining <= 2 ? 'text-amber-400' : 'text-white/40'}`}>
+                      {remaining <= 0
+                        ? `Plan saturado (${used}/${cap}) — no podrás guardar`
+                        : `Disponibles: ${remaining}/${cap}`}
+                    </p>
+                  );
+                })()}
               </div>
 
               {/* ── Sección: Logo ── */}

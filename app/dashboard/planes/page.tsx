@@ -10,10 +10,11 @@ import Pagination, { usePagination } from '../../components/Pagination';
 const PLAN_COLORS: Record<string, { badge: string; border: string; bg: string; dot: string }> = {
   DIAMANTE: { badge: 'text-cyan-400 bg-cyan-500/10', border: 'border-cyan-500/30', bg: 'bg-cyan-500/5', dot: 'bg-cyan-400' },
   ORO:      { badge: 'text-amber-400 bg-amber-500/10', border: 'border-amber-500/30', bg: 'bg-amber-500/5', dot: 'bg-amber-400' },
-  PLATA:    { badge: 'text-slate-300 bg-slate-400/10', border: 'border-slate-400/30', bg: 'bg-slate-400/5', dot: 'bg-slate-300' },
-  SOCIOS:   { badge: 'text-purple-400 bg-purple-500/10', border: 'border-purple-500/30', bg: 'bg-purple-500/5', dot: 'bg-purple-400' },
-  BONO_FLASH: { badge: 'text-pink-400 bg-pink-500/10', border: 'border-pink-500/30', bg: 'bg-pink-500/5', dot: 'bg-pink-400' },
-  GRATIS:   { badge: 'text-white/40 bg-white/5', border: 'border-white/10', bg: 'bg-white/5', dot: 'bg-white/30' },
+  IA_PERFORMANCE: { badge: 'text-purple-400 bg-purple-500/10', border: 'border-purple-500/30', bg: 'bg-purple-500/5', dot: 'bg-purple-400' },
+  PUBLI_PROMO_DIARIO:  { badge: 'text-blue-400 bg-blue-500/10', border: 'border-blue-500/30', bg: 'bg-blue-500/5', dot: 'bg-blue-400' },
+  PUBLI_PROMO_SEMANAL: { badge: 'text-blue-400 bg-blue-500/10', border: 'border-blue-500/30', bg: 'bg-blue-500/5', dot: 'bg-blue-400' },
+  FLASH_COUPON_DIARIO:  { badge: 'text-pink-400 bg-pink-500/10', border: 'border-pink-500/30', bg: 'bg-pink-500/5', dot: 'bg-pink-400' },
+  FLASH_COUPON_SEMANAL: { badge: 'text-pink-400 bg-pink-500/10', border: 'border-pink-500/30', bg: 'bg-pink-500/5', dot: 'bg-pink-400' },
 };
 
 const DEFAULT_COLOR = { badge: 'text-white/40 bg-white/5', border: 'border-white/10', bg: 'bg-white/5', dot: 'bg-white/30' };
@@ -37,6 +38,13 @@ export default function PlanesCRUD() {
   const [features, setFeatures] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [displayOrder, setDisplayOrder] = useState('0');
+
+  // Reglas del directorio (loop de 3 min / 12 slots)
+  const [maxBrands, setMaxBrands] = useState('');          // vacío = ilimitado
+  const [videoSeconds, setVideoSeconds] = useState('15');
+  const [priorityLevel, setPriorityLevel] = useState('99');
+  const [loopEligible, setLoopEligible] = useState(false);
+  const [hasFixedBanner, setHasFixedBanner] = useState(false);
 
   useEffect(() => {
     fetchPlans();
@@ -70,6 +78,11 @@ export default function PlanesCRUD() {
     setFeatures('');
     setIsActive(true);
     setDisplayOrder('0');
+    setMaxBrands('');
+    setVideoSeconds('15');
+    setPriorityLevel('99');
+    setLoopEligible(false);
+    setHasFixedBanner(false);
     setShowForm(false);
   };
 
@@ -84,6 +97,11 @@ export default function PlanesCRUD() {
     setFeatures((plan.features || []).join('\n'));
     setIsActive(plan.is_active ?? true);
     setDisplayOrder(String(plan.display_order ?? 0));
+    setMaxBrands(plan.max_brands != null ? String(plan.max_brands) : '');
+    setVideoSeconds(String(plan.video_seconds ?? 15));
+    setPriorityLevel(String(plan.priority_level ?? 99));
+    setLoopEligible(plan.loop_eligible ?? false);
+    setHasFixedBanner(plan.has_fixed_banner ?? false);
     setShowForm(true);
   };
 
@@ -105,6 +123,11 @@ export default function PlanesCRUD() {
       features: features.split('\n').map(f => f.trim()).filter(Boolean),
       is_active: isActive,
       display_order: parseInt(displayOrder) || 0,
+      max_brands: maxBrands === '' ? null : parseInt(maxBrands),
+      video_seconds: parseInt(videoSeconds) || 0,
+      priority_level: parseInt(priorityLevel) || 99,
+      loop_eligible: loopEligible,
+      has_fixed_banner: hasFixedBanner,
     };
 
     try {
@@ -314,6 +337,69 @@ export default function PlanesCRUD() {
                   ))}
                 </div>
               </div>
+              {/* ── Reglas del loop (Directorios) ── */}
+              <div className="bg-white/[0.03] border border-white/5 rounded-lg p-3 space-y-3">
+                <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Reglas del loop (Directorios)</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Máx. marcas</label>
+                    <input
+                      type="number" min="0" value={maxBrands}
+                      onChange={(e) => setMaxBrands(e.target.value)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500/50 transition-colors"
+                      placeholder="∞"
+                    />
+                    <p className="text-[10px] text-white/20 mt-1">Vacío = ilimitado</p>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Video (seg)</label>
+                    <input
+                      type="number" min="0" max="60" value={videoSeconds}
+                      onChange={(e) => setVideoSeconds(e.target.value)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500/50 transition-colors"
+                      placeholder="15"
+                    />
+                    <p className="text-[10px] text-white/20 mt-1">0 = sin video</p>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Prioridad</label>
+                    <input
+                      type="number" min="1" value={priorityLevel}
+                      onChange={(e) => setPriorityLevel(e.target.value)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500/50 transition-colors"
+                      placeholder="99"
+                    />
+                    <p className="text-[10px] text-white/20 mt-1">1 = mayor</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setLoopEligible(!loopEligible)}
+                    className={`flex items-center justify-between py-2 px-3 text-xs font-medium rounded-lg border transition-colors ${
+                      loopEligible
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : 'bg-white/5 text-white/40 border-white/10'
+                    }`}
+                  >
+                    <span>Aparece en loop</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${loopEligible ? 'bg-emerald-400' : 'bg-white/20'}`} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHasFixedBanner(!hasFixedBanner)}
+                    className={`flex items-center justify-between py-2 px-3 text-xs font-medium rounded-lg border transition-colors ${
+                      hasFixedBanner
+                        ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+                        : 'bg-white/5 text-white/40 border-white/10'
+                    }`}
+                  >
+                    <span>Banner fijo</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${hasFixedBanner ? 'bg-cyan-400' : 'bg-white/20'}`} />
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
                   Beneficios / Features <span className="normal-case tracking-normal">(uno por línea)</span>
@@ -407,7 +493,7 @@ export default function PlanesCRUD() {
                   </div>
 
                   {/* Stats */}
-                  <div className="flex items-center gap-4 mb-3">
+                  <div className="flex items-center gap-4 mb-3 flex-wrap">
                     <div>
                       <p className="text-[10px] text-white/30 uppercase tracking-wider">Duración</p>
                       <p className="text-white/70 text-xs font-mono mt-0.5">{plan.duration_days}d</p>
@@ -419,9 +505,39 @@ export default function PlanesCRUD() {
                       </div>
                     )}
                     <div>
-                      <p className="text-[10px] text-white/30 uppercase tracking-wider">Aplica a</p>
-                      <p className="text-white/50 text-xs mt-0.5">{(plan.applies_to || []).join(', ')}</p>
+                      <p className="text-[10px] text-white/30 uppercase tracking-wider">Máx</p>
+                      <p className="text-white/70 text-xs font-mono mt-0.5">
+                        {plan.max_brands != null ? `${plan.max_brands} marcas` : '∞'}
+                      </p>
                     </div>
+                    {plan.video_seconds > 0 && (
+                      <div>
+                        <p className="text-[10px] text-white/30 uppercase tracking-wider">Video</p>
+                        <p className="text-white/70 text-xs font-mono mt-0.5">{plan.video_seconds}s</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Loop / banner badges */}
+                  <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                    {plan.loop_eligible && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400">
+                        <span className="w-1 h-1 rounded-full bg-emerald-400" /> En loop
+                      </span>
+                    )}
+                    {plan.has_fixed_banner && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400">
+                        <span className="w-1 h-1 rounded-full bg-cyan-400" /> Banner fijo
+                      </span>
+                    )}
+                    {plan.priority_level != null && plan.priority_level < 99 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-white/5 text-white/50 font-mono">
+                        P{plan.priority_level}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center text-[10px] text-white/30 px-1">
+                      {(plan.applies_to || []).join(' · ')}
+                    </span>
                   </div>
 
                   {/* Features */}

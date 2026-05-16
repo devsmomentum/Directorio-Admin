@@ -20,20 +20,41 @@ function getExpiryUrgency(endDate: string | null): 'critical' | 'warning' | null
   return null;
 }
 
-const PLAN_TYPES = ['DIAMANTE', 'ORO'] as const;
+// Planes elegibles para el loop publicitario de directorios (PDF "PLANES DIRECTORIOS")
+const PLAN_TYPES = ['DIAMANTE', 'ORO', 'PUBLI_PROMO_DIARIO', 'PUBLI_PROMO_SEMANAL'] as const;
 
+// Capacidad máxima de marcas activas por plan (hard cap)
+const PLAN_MAX_BRANDS: Record<string, number | null> = {
+  DIAMANTE: 2,
+  ORO: 30,
+  PUBLI_PROMO_DIARIO: null,
+  PUBLI_PROMO_SEMANAL: null,
+};
+
+// Frecuencia objetivo del loop por plan (cada cuántos segundos aparece la marca)
 const PLAN_FREQUENCY_SECONDS: Record<string, number> = {
-  DIAMANTE: 90,
+  DIAMANTE: 180,
   ORO: 180,
+  PUBLI_PROMO_DIARIO: 180,
+  PUBLI_PROMO_SEMANAL: 180,
 };
 
 const CAMPAIGN_DURATION_SECONDS = 15;
+const LOOP_TARGET_SLOTS = 12;          // 12 slots × 15s = 180s = 3 min
+const LOOP_EXTENDED_SLOTS = 22;        // Escenario ampliado: 22 slots × 15s = 330s = 5,5 min
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
   ORO: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
-  SOCIOS: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
-  BONO_FLASH: 'text-pink-400 bg-pink-500/10 border-pink-500/30',
+  PUBLI_PROMO_DIARIO: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
+  PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
+};
+
+const PLAN_LABELS: Record<string, string> = {
+  DIAMANTE: 'Diamante',
+  ORO: 'Oro',
+  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
+  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
 };
 
 type PaymentStatus = 'pending' | 'paid' | 'overdue';
@@ -122,6 +143,30 @@ export default function CampaniasAdminPage() {
     setRefreshing(false);
   };
 
+  // Estado actual del loop: marcas activas, vigentes y pagas que ocupan slots
+  const loopStatus = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const loopPlans = new Set<string>(['DIAMANTE', 'ORO', 'PUBLI_PROMO', 'PUBLI_PROMO_DIARIO', 'PUBLI_PROMO_SEMANAL']);
+    const live = campaigns.filter(c =>
+      c.is_active &&
+      loopPlans.has(c.plan_type) &&
+      (c.payment_status ?? 'pending') !== 'overdue' &&
+      (!c.end_date || c.end_date >= today)
+    );
+    const byPlan = live.reduce<Record<string, number>>((acc, c) => {
+      acc[c.plan_type] = (acc[c.plan_type] || 0) + 1;
+      return acc;
+    }, {});
+    const slots = live.length;
+    return {
+      slots,
+      durationSeconds: slots * CAMPAIGN_DURATION_SECONDS,
+      byPlan,
+      overTarget: slots > LOOP_TARGET_SLOTS,
+      overExtended: slots > LOOP_EXTENDED_SLOTS,
+    };
+  }, [campaigns]);
+
   // Campaigns expiring in ≤3 days with unpaid status (cobranzas warning)
   const cobrosWarning = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -173,7 +218,7 @@ export default function CampaniasAdminPage() {
   const handleEdit = (c: Campaign) => {
     setEditingId(c.id);
     setBrandName(c.brand_name);
-    setPlanType(PLAN_FREQUENCY_SECONDS[c.plan_type] ? c.plan_type : 'ORO');
+    setPlanType((PLAN_TYPES as readonly string[]).includes(c.plan_type) ? c.plan_type : 'ORO');
     setDescription(c.description || '');
     setStartDate(c.start_date || '');
     setEndDate(c.end_date || '');
@@ -206,6 +251,27 @@ export default function CampaniasAdminPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingId && !mediaFile) { alert('Debes subir un archivo multimedia.'); return; }
+
+    // Validación de capacidad: bloquear si el plan está saturado
+    const cap = PLAN_MAX_BRANDS[planType];
+    if (cap != null && isActive) {
+      const today = new Date().toISOString().split('T')[0];
+      const currentActive = campaigns.filter(c =>
+        c.id !== editingId &&
+        c.plan_type === planType &&
+        c.is_active &&
+        (c.payment_status ?? 'pending') !== 'overdue' &&
+        (!c.end_date || c.end_date >= today)
+      ).length;
+      if (currentActive >= cap) {
+        alert(
+          `Límite alcanzado: ${currentActive}/${cap} marcas activas con plan ${PLAN_LABELS[planType] || planType}.\n\n` +
+          `Para añadir esta campaña, libera un slot pausando o dejando vencer otra marca con el mismo plan.`
+        );
+        return;
+      }
+    }
+
     setIsSaving(true);
 
     try {
@@ -378,6 +444,61 @@ export default function CampaniasAdminPage() {
 
       {activeTab === 'campaigns' && (
         <>
+          {/* ── Estado del loop publicitario ── */}
+          <div className={`rounded-xl border p-4 ${
+            loopStatus.overExtended
+              ? 'bg-red-950/30 border-red-500/30'
+              : loopStatus.overTarget
+              ? 'bg-amber-950/20 border-amber-500/25'
+              : 'bg-white/[0.03] border-white/10'
+          }`}>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-4">
+                <div>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-0.5">Loop actual</p>
+                  <p className="text-white font-mono text-xl">
+                    {loopStatus.slots}<span className="text-white/30 text-sm">/{LOOP_TARGET_SLOTS}</span>
+                    <span className="text-white/30 text-xs ml-2">slots</span>
+                  </p>
+                </div>
+                <div className="h-10 w-px bg-white/10" />
+                <div>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-0.5">Duración</p>
+                  <p className="text-white font-mono text-xl">
+                    {Math.floor(loopStatus.durationSeconds / 60)}:{String(loopStatus.durationSeconds % 60).padStart(2, '0')}
+                    <span className="text-white/30 text-xs ml-2">min</span>
+                  </p>
+                </div>
+                <div className="h-10 w-px bg-white/10" />
+                <div className="flex items-center gap-2 flex-wrap">
+                  {PLAN_TYPES.map(p => {
+                    const cap = PLAN_MAX_BRANDS[p];
+                    const used = (p === 'PUBLI_PROMO_DIARIO' || p === 'PUBLI_PROMO_SEMANAL')
+                      ? (loopStatus.byPlan[p] || 0) + (loopStatus.byPlan['PUBLI_PROMO'] || 0)
+                      : (loopStatus.byPlan[p] || 0);
+                    const saturated = cap != null && used >= cap;
+                    return (
+                      <span key={p} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border ${
+                        saturated
+                          ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                          : `${PLAN_COLORS[p]}`
+                      }`}>
+                        {PLAN_LABELS[p]} <span className="font-mono">{used}{cap != null ? `/${cap}` : ''}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="text-[11px] text-white/40 max-w-xs">
+                {loopStatus.overExtended
+                  ? `Excediste el escenario ampliado de ${LOOP_EXTENDED_SLOTS} slots. La frecuencia bajará por debajo del estándar.`
+                  : loopStatus.overTarget
+                  ? `Pasaste el loop base de 3 min. Estás en escenario ampliado (cap. ${LOOP_EXTENDED_SLOTS}).`
+                  : `Cada slot dura ${CAMPAIGN_DURATION_SECONDS}s. Loop base = 3 min con 12 slots.`}
+              </p>
+            </div>
+          </div>
+
           {/* ── Smart Kill-Switch Alert ── */}
           {killSwitchCandidates.length > 0 && (
             <div className="bg-red-950/30 border border-red-500/30 rounded-xl p-4">
@@ -501,7 +622,7 @@ export default function CampaniasAdminPage() {
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
                       <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${PLAN_COLORS[c.plan_type] || 'text-white border-white'}`}>
-                          {c.plan_type}
+                          {PLAN_LABELS[c.plan_type] || c.plan_type}
                         </span>
                         {daysLeft !== null && daysLeft >= 0 && daysLeft <= 7 && (
                           <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${urgency === 'critical' ? 'text-red-400 bg-red-500/20 border-red-500/40' : 'text-amber-400 bg-amber-500/15 border-amber-400/30'}`}>
@@ -617,8 +738,27 @@ export default function CampaniasAdminPage() {
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de pauta</label>
                   <select required value={planType} onChange={e => setPlanType(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none">
-                    {PLAN_TYPES.map(p => <option key={p} value={p}>{p}</option>)}
+                    {PLAN_TYPES.map(p => {
+                      const cap = PLAN_MAX_BRANDS[p];
+                      const used = (loopStatus.byPlan[p] || 0);
+                      const label = PLAN_LABELS[p] || p;
+                      const tag = cap != null ? ` — ${used}/${cap}` : '';
+                      return <option key={p} value={p}>{label}{tag}</option>;
+                    })}
                   </select>
+                  {(() => {
+                    const cap = PLAN_MAX_BRANDS[planType];
+                    if (cap == null) return null;
+                    const used = (loopStatus.byPlan[planType] || 0) - (editingId && campaigns.find(c => c.id === editingId)?.plan_type === planType ? 1 : 0);
+                    const remaining = cap - used;
+                    return (
+                      <p className={`text-[10px] mt-1 ${remaining <= 0 ? 'text-red-400' : remaining <= 2 ? 'text-amber-400' : 'text-white/30'}`}>
+                        {remaining <= 0
+                          ? `Plan saturado (${used}/${cap}) — no podrás guardar`
+                          : `Disponibles: ${remaining}/${cap}`}
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Prioridad (1 = Mayor)</label>
