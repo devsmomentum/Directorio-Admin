@@ -72,8 +72,8 @@ export default function AnalyticsDashboard() {
     : allEvents.filter(e => e.kiosk_id === selectedKioskId);
 
   const now = new Date();
-  const fiveMinsAgo = new Date(now.getTime() - 5 * 60000);
-  const activeKiosks = kiosks.filter(k => new Date(k.last_ping) > fiveMinsAgo && k.status === 'online').length;
+  const tenMinsAgo = new Date(now.getTime() - 10 * 60000);
+  const activeKiosks = kiosks.filter(k => new Date(k.last_ping) > tenMinsAgo).length;
 
   const totalClicks = filteredEvents.length;
   const todayClicks = filteredEvents.filter(e => new Date(e.created_at).toLocaleDateString() === now.toLocaleDateString()).length;

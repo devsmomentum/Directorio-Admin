@@ -55,13 +55,10 @@ export default function DashboardPage() {
     setRefreshing(false);
   };
 
-  // Un kiosco se considera online solo si la app Flutter sigue reportando:
-  // status='online' lo escribe el TelemetryService mientras la app esta en
-  // primer plano y last_ping debe ser reciente (ping cada 1 min, toleramos
-  // hasta 3 min por si se pierde algun ping puntual).
-  const onlineCutoff = Date.now() - 3 * 60_000;
+  // Un kiosco se considera online si last_ping es reciente (toleramos
+  // hasta 10 min para cubrir el intervalo de ping de la app Flutter).
+  const onlineCutoff = Date.now() - 10 * 60_000;
   const isKioskOnline = (k: any) =>
-    k.status === 'online' &&
     !!k.last_ping &&
     new Date(k.last_ping).getTime() > onlineCutoff;
   const online = kiosks.filter(isKioskOnline).length;
