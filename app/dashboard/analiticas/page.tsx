@@ -30,6 +30,26 @@ type Campaign = {
   is_active: boolean;
 };
 
+type CampaignImpressionTotals = {
+  campaign_id: string;
+  brand_name: string;
+  start_date: string | null;
+  end_date: string | null;
+  is_active: boolean | null;
+  payment_status: string | null;
+  today: number;
+  last_7d: number;
+  last_30d: number;
+  total: number;
+};
+
+type ImpressionDaily = {
+  campaign_id: string;
+  kiosk_id: string;
+  day: string;
+  count: number;
+};
+
 type RankItem = { name: string; count: number; location?: string };
 
 export default function AnalyticsDashboard() {
@@ -37,11 +57,14 @@ export default function AnalyticsDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'trafico' | 'heatmap'>('trafico');
   const [selectedKioskId, setSelectedKioskId] = useState<string>('all');
+  const [periodFilter, setPeriodFilter] = useState<'day' | 'week' | 'month' | 'all'>('week');
 
   const [kiosks, setKiosks] = useState<Kiosk[]>([]);
   const [allEvents, setAllEvents] = useState<AnalyticsEvent[]>([]);
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [impressionTotals, setImpressionTotals] = useState<CampaignImpressionTotals[]>([]);
+  const [impressionDaily, setImpressionDaily] = useState<ImpressionDaily[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('top');
 
 
@@ -50,15 +73,40 @@ export default function AnalyticsDashboard() {
   const fetchDashboardData = async () => {
     setRefreshing(true);
     try {
-      const [{ data: ks }, { data: analytics }, { data: campData }] = await Promise.all([
+      const [
+        { data: ks },
+        { data: analytics },
+        { data: campData },
+        { data: totals },
+        { data: daily },
+      ] = await Promise.all([
         supabase.from('kiosks').select('*'),
-        supabase.from('analytics_events').select('id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data').order('created_at', { ascending: false }).limit(3000),
-        supabase.from('ad_campaigns').select('id, brand_name, start_date, end_date, is_active').order('brand_name').limit(500),
+        // analytics_events ahora solo trae clicks/navegación (no impresiones)
+        supabase
+          .from('analytics_events')
+          .select('id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data')
+          .order('created_at', { ascending: false })
+          .limit(3000),
+        supabase
+          .from('ad_campaigns')
+          .select('id, brand_name, start_date, end_date, is_active')
+          .order('brand_name')
+          .limit(500),
+        supabase
+          .from('v_campaign_impressions')
+          .select('campaign_id, brand_name, start_date, end_date, is_active, payment_status, today, last_7d, last_30d, total'),
+        supabase
+          .from('ad_impressions_daily')
+          .select('campaign_id, kiosk_id, day, count')
+          .order('day', { ascending: false })
+          .limit(10000),
       ]);
 
       setKiosks(ks || []);
       setAllEvents((analytics as AnalyticsEvent[]) || []);
       setCampaigns((campData as Campaign[]) || []);
+      setImpressionTotals((totals as CampaignImpressionTotals[]) || []);
+      setImpressionDaily((daily as ImpressionDaily[]) || []);
     } catch (error) {
       console.error('Error cargando analiticas:', error);
     } finally {
@@ -67,125 +115,126 @@ export default function AnalyticsDashboard() {
     }
   };
 
-  const filteredEvents = selectedKioskId === 'all'
+  const now = new Date();
+
+  // ── Filtro de período (día/semana/mes/todo) ─────────────────────────────────
+  const periodStart = useMemo(() => {
+    if (periodFilter === 'all') return null;
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    if (periodFilter === 'day')   return d;
+    if (periodFilter === 'week')  { d.setDate(d.getDate() - 6);  return d; }  // últimos 7 días
+    if (periodFilter === 'month') { d.setDate(d.getDate() - 29); return d; }  // últimos 30 días
+    return null;
+  }, [periodFilter, now]);
+
+  const periodLabel = {
+    day:   'hoy',
+    week:  'últimos 7 días',
+    month: 'últimos 30 días',
+    all:   'todo el histórico',
+  }[periodFilter];
+
+  const inPeriod = (iso: string) => {
+    if (!periodStart) return true;
+    return new Date(iso) >= periodStart;
+  };
+
+  const kioskFilteredEvents = selectedKioskId === 'all'
     ? allEvents
     : allEvents.filter(e => e.kiosk_id === selectedKioskId);
 
-  const now = new Date();
-  const tenMinsAgo = new Date(now.getTime() - 10 * 60000);
-  const activeKiosks = kiosks.filter(k => new Date(k.last_ping) > tenMinsAgo).length;
+  const filteredEvents = kioskFilteredEvents.filter(e => inPeriod(e.created_at));
 
-  const totalClicks = filteredEvents.length;
-  const todayClicks = filteredEvents.filter(e => new Date(e.created_at).toLocaleDateString() === now.toLocaleDateString()).length;
+  // ── Clasificación por categoría según whitelist ─────────────────────────────
+  // clicks         → event_type IN ('click','tap')
+  // búsquedas      → event_type IN ('filter','select')
+  // navegaciones   → event_type IN ('navigate','navigation')
+  // flash coupons  → event_type = 'flash_coupon_shown'
+  const isClick   = (e: AnalyticsEvent) => e.event_type === 'click' || e.event_type === 'tap';
+  const isSearch  = (e: AnalyticsEvent) => e.event_type === 'filter' || e.event_type === 'select';
+  const isNav     = (e: AnalyticsEvent) => e.event_type === 'navigate' || e.event_type === 'navigation';
+  const isFlash   = (e: AnalyticsEvent) => e.event_type === 'flash_coupon_shown';
 
-  const storeCounts: Record<string, number> = {};
-  const sectionCounts: Record<string, number> = {};
+  const todayKey = now.toLocaleDateString();
+  const isToday  = (e: AnalyticsEvent) => new Date(e.created_at).toLocaleDateString() === todayKey;
+
+  const clickEvents  = filteredEvents.filter(isClick);
+  const searchEvents = filteredEvents.filter(isSearch);
+  const navEvents    = filteredEvents.filter(isNav);
+  const flashEvents  = filteredEvents.filter(isFlash);
+
+  const totals = {
+    clicks:    { total: clickEvents.length,  today: clickEvents.filter(isToday).length },
+    searches:  { total: searchEvents.length, today: searchEvents.filter(isToday).length },
+    navs:      { total: navEvents.length,    today: navEvents.filter(isToday).length },
+    flash:     { total: flashEvents.length,  today: flashEvents.filter(isToday).length },
+  };
+
+  // Rankings por categoría
+  const countBy = (events: AnalyticsEvent[]) => {
+    const acc: Record<string, number> = {};
+    events.forEach(e => { acc[e.item_name] = (acc[e.item_name] || 0) + 1; });
+    return acc;
+  };
+  const toRanking = (counts: Record<string, number>, limit = 5): RankItem[] =>
+    Object.entries(counts).map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count).slice(0, limit);
+
+  const topClicks    = toRanking(countBy(clickEvents));
+  const topSearches  = toRanking(countBy(searchEvents));
+  const topSections  = toRanking(countBy(navEvents));
+
+  // Tráfico por kiosco: solo interacciones reales (whitelist completo)
+  const interactionEvents = filteredEvents.filter(e => isClick(e) || isSearch(e) || isNav(e) || isFlash(e));
   const kioskActivity: Record<string, number> = {};
-
-  filteredEvents.forEach(event => {
+  interactionEvents.forEach(event => {
     if (event.kiosk_id) kioskActivity[event.kiosk_id] = (kioskActivity[event.kiosk_id] || 0) + 1;
-    if (event.module === 'navigation') {
-      sectionCounts[event.item_name] = (sectionCounts[event.item_name] || 0) + 1;
-    } else {
-      storeCounts[event.item_name] = (storeCounts[event.item_name] || 0) + 1;
-    }
   });
-
-  const topStores: RankItem[] = Object.entries(storeCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
-  const topSections: RankItem[] = Object.entries(sectionCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5);
   const topKiosksActivity: RankItem[] = Object.entries(kioskActivity).map(([kId, count]) => {
     const m = kiosks.find(k => k.id === kId);
     return { name: m?.name || 'Desconocido', location: m?.location || '', count };
   }).sort((a, b) => b.count - a.count).slice(0, 5);
 
-  const toDateKey = (value: string) => {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleDateString('en-CA');
-  };
+  // ── Impresiones de campañas (filtradas por período + kiosko) ────────────────
+  const impressionsByCampaign = useMemo(() => {
+    const map = new Map<string, { total: number; today: number; daily: Record<string, number> }>();
+    const todayKey = new Date().toLocaleDateString('en-CA');
+    const startStr = periodStart ? periodStart.toLocaleDateString('en-CA') : null;
 
-  const parseEventData = (data: AnalyticsEvent['event_data']) => {
-    if (!data) return null;
-    if (typeof data === 'string') {
-      try { return JSON.parse(data) as Record<string, any>; } catch { return null; }
-    }
-    if (typeof data === 'object') return data as Record<string, any>;
-    return null;
-  };
+    impressionDaily.forEach(d => {
+      if (selectedKioskId !== 'all' && d.kiosk_id !== selectedKioskId) return;
+      if (startStr && d.day < startStr) return;
+      const entry = map.get(d.campaign_id) || { total: 0, today: 0, daily: {} };
+      entry.total += d.count;
+      entry.daily[d.day] = (entry.daily[d.day] || 0) + d.count;
+      if (d.day === todayKey) entry.today += d.count;
+      map.set(d.campaign_id, entry);
+    });
 
-  const campaignById = new Map(campaigns.map(c => [c.id, c]));
-  const campaignNameToId = new Map(campaigns.map(c => [c.brand_name.toLowerCase().trim(), c.id]));
-
-  const resolveCampaignId = (event: AnalyticsEvent) => {
-    if (event.item_id && campaignById.has(event.item_id)) return event.item_id;
-    const data = parseEventData(event.event_data);
-    const dataCampaignId = data?.campaign_id || data?.campaignId || data?.ad_campaign_id || data?.adCampaignId;
-    if (dataCampaignId && campaignById.has(dataCampaignId)) return dataCampaignId as string;
-    const dataName = String(data?.brand_name || data?.campaign_name || data?.campaignName || '').trim().toLowerCase();
-    if (dataName && campaignNameToId.has(dataName)) return campaignNameToId.get(dataName) || null;
-    const itemName = String(event.item_name || '').trim().toLowerCase();
-    if (itemName && campaignNameToId.has(itemName)) return campaignNameToId.get(itemName) || null;
-    return null;
-  };
-
-  const isLikelyImpression = (event: AnalyticsEvent) => {
-    const eventType = (event.event_type || '').toLowerCase();
-    if (eventType.includes('click')) return false;
-    const moduleName = (event.module || '').toLowerCase();
-    const impressionHints = ['impression', 'view', 'show', 'display'];
-    const moduleHints = ['campaign', 'ad', 'banner', 'promo'];
-    return impressionHints.some(h => eventType.includes(h)) || moduleHints.some(h => moduleName.includes(h));
-  };
-
-  const isWithinReportingHours = (value: string) => {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return false;
-    const hour = d.getHours();
-    return hour >= 10 && hour <= 21;
-  };
-
-  const campaignRangeById = new Map<string, { start: Date | null; end: Date | null }>();
-  campaigns.forEach(c => {
-    const start = c.start_date ? new Date(`${c.start_date}T00:00:00`) : null;
-    const end = c.end_date ? new Date(`${c.end_date}T23:59:59`) : null;
-    campaignRangeById.set(c.id, { start, end });
-  });
-
-  const todayKey = toDateKey(now.toISOString());
-  const campaignStatsById: Record<string, { total: number; today: number; daily: Record<string, number> }> = {};
-
-  filteredEvents.forEach(event => {
-    if (!isLikelyImpression(event)) return;
-    const campaignId = resolveCampaignId(event);
-    if (!campaignId) return;
-    const range = campaignRangeById.get(campaignId);
-    const eventDate = new Date(event.created_at);
-    if (range?.start && eventDate < range.start) return;
-    if (range?.end && eventDate > range.end) return;
-    if (!isWithinReportingHours(event.created_at)) return;
-    if (!campaignStatsById[campaignId]) campaignStatsById[campaignId] = { total: 0, today: 0, daily: {} };
-    const dateKey = toDateKey(event.created_at);
-    if (!dateKey) return;
-    const stats = campaignStatsById[campaignId];
-    stats.total += 1;
-    stats.daily[dateKey] = (stats.daily[dateKey] || 0) + 1;
-    if (dateKey === todayKey) stats.today += 1;
-  });
+    return map;
+  }, [impressionDaily, selectedKioskId, periodStart]);
 
   const campaignTotals = campaigns
-    .map(c => ({ id: c.id, name: c.brand_name, total: campaignStatsById[c.id]?.total || 0 }))
+    .map(c => ({ id: c.id, name: c.brand_name, total: impressionsByCampaign.get(c.id)?.total || 0 }))
     .filter(c => c.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, 5)
     .map(c => ({ name: c.name, count: c.total }));
 
   const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId);
-  const selectedStats = selectedCampaign ? (campaignStatsById[selectedCampaign.id] || { total: 0, today: 0, daily: {} }) : null;
+  const selectedStats = selectedCampaign ? impressionsByCampaign.get(selectedCampaign.id) || { today: 0, total: 0, daily: {} } : null;
   const selectedDailyRows = selectedStats
     ? Object.entries(selectedStats.daily).sort((a, b) => b[0].localeCompare(a[0]))
     : [];
   const maxDailyCount = selectedDailyRows.length > 0 ? Math.max(...selectedDailyRows.map(([, v]) => v)) : 1;
-  const selectedRange = selectedCampaign ? campaignRangeById.get(selectedCampaign.id) : null;
+
+  const selectedRange = selectedCampaign
+    ? {
+        start: selectedCampaign.start_date ? new Date(`${selectedCampaign.start_date}T00:00:00`) : null,
+        end: selectedCampaign.end_date ? new Date(`${selectedCampaign.end_date}T23:59:59`) : null,
+      }
+    : null;
   const rangeEnd = selectedRange?.end || now;
   const rangeStart = selectedRange?.start || null;
   const activeDays = rangeStart
@@ -193,7 +242,7 @@ export default function AnalyticsDashboard() {
     : null;
   const avgPerDay = selectedStats && activeDays ? (selectedStats.total / activeDays).toFixed(2) : null;
 
-  // ── Heatmap: kiosk × module ──────────────────────────────────────────────────
+  // ── Heatmap: kiosk × module (sigue usando analytics_events para clicks/navegación) ──
   const heatmapData = useMemo(() => {
     const byKioskModule: Record<string, Record<string, number>> = {};
     const moduleTotals: Record<string, number> = {};
@@ -206,20 +255,17 @@ export default function AnalyticsDashboard() {
       moduleTotals[mod] = (moduleTotals[mod] || 0) + 1;
     });
 
-    // Top 8 modules by total volume
     const topModules = Object.entries(moduleTotals)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
       .map(([mod]) => mod);
 
-    // Kiosks sorted by total event count
     const activeKioskIds = Object.keys(byKioskModule).sort((a, b) => {
       const aTotal = Object.values(byKioskModule[a]).reduce((s, v) => s + v, 0);
       const bTotal = Object.values(byKioskModule[b]).reduce((s, v) => s + v, 0);
       return bTotal - aTotal;
     });
 
-    // Global max for color scaling
     let globalMax = 1;
     activeKioskIds.forEach(kid => {
       topModules.forEach(mod => {
@@ -269,11 +315,11 @@ export default function AnalyticsDashboard() {
   const handleExportImpressions = () => {
     const rows: string[][] = [];
     campaigns
-      .filter(c => (campaignStatsById[c.id]?.total || 0) > 0)
-      .sort((a, b) => (campaignStatsById[b.id]?.total || 0) - (campaignStatsById[a.id]?.total || 0))
-      .forEach(c => {
-        const stats = campaignStatsById[c.id];
-        Object.entries(stats.daily)
+      .map(c => ({ c, stats: impressionsByCampaign.get(c.id) }))
+      .filter(({ stats }) => (stats?.total || 0) > 0)
+      .sort((a, b) => (b.stats?.total || 0) - (a.stats?.total || 0))
+      .forEach(({ c, stats }) => {
+        Object.entries(stats!.daily)
           .sort((a, b) => a[0].localeCompare(b[0]))
           .forEach(([day, count]) => {
             rows.push([`"${c.brand_name}"`, day, String(count)]);
@@ -302,6 +348,26 @@ export default function AnalyticsDashboard() {
       </div>
     );
   }
+
+  const StatCard = ({ label, total, today, accent }: { label: string; total: number; today: number; accent: 'pink'|'purple'|'cyan'|'emerald' }) => {
+    const accentClass = {
+      pink:    'text-pink-400',
+      purple:  'text-purple-400',
+      cyan:    'text-cyan-400',
+      emerald: 'text-emerald-400',
+    }[accent];
+    return (
+      <div className="bg-[#111] border border-white/5 rounded-xl p-4">
+        <p className="text-[10px] text-white/30 uppercase tracking-wider font-medium">{label}</p>
+        <p className={`text-2xl font-bold ${accentClass} mt-1`}>{total.toLocaleString()}</p>
+        <p className="text-[10px] text-white/30 mt-1">
+          {periodFilter === 'day'
+            ? <>En el día</>
+            : <>Hoy: <span className="text-white/60 font-mono">{today}</span></>}
+        </p>
+      </div>
+    );
+  };
 
   const RankingList = ({ items, color, valueLabel }: { items: RankItem[]; color: string; valueLabel: string }) => {
     if (!items.length) return <p className="text-white/20 text-sm py-4">Sin datos</p>;
@@ -338,7 +404,6 @@ export default function AnalyticsDashboard() {
   const heatCellStyle = (count: number, globalMax: number): React.CSSProperties => {
     if (count === 0) return { backgroundColor: 'rgba(255,255,255,0.03)' };
     const t = count / globalMax;
-    // pink gradient: low = indigo tint, high = bright pink
     const r = Math.round(80 + t * 175);
     const g = Math.round(20 + t * 10);
     const b = Math.round(120 - t * 30);
@@ -353,8 +418,28 @@ export default function AnalyticsDashboard() {
         <div>
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Reportes</p>
           <h2 className="text-2xl font-bold text-white">Analiticas</h2>
+          <p className="text-white/30 text-xs mt-1">Período: <span className="text-white/60">{periodLabel}</span></p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Filtro de período */}
+          <div className="flex gap-1 bg-[#111] rounded-lg p-1 border border-white/5">
+            {([
+              { v: 'day',   l: 'Día'     },
+              { v: 'week',  l: 'Semana'  },
+              { v: 'month', l: 'Mes'     },
+              { v: 'all',   l: 'Todo'    },
+            ] as const).map(opt => (
+              <button
+                key={opt.v}
+                onClick={() => setPeriodFilter(opt.v)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                  periodFilter === opt.v ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'
+                }`}
+              >
+                {opt.l}
+              </button>
+            ))}
+          </div>
           <select
             value={selectedKioskId}
             onChange={e => setSelectedKioskId(e.target.value)}
@@ -401,20 +486,36 @@ export default function AnalyticsDashboard() {
             </button>
           </div>
 
+          {/* Stat cards: 4 categorías */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Clicks"          total={totals.clicks.total}   today={totals.clicks.today}   accent="pink"    />
+            <StatCard label="Búsquedas"       total={totals.searches.total} today={totals.searches.today} accent="purple"  />
+            <StatCard label="Navegaciones"    total={totals.navs.total}     today={totals.navs.today}     accent="cyan"    />
+            <StatCard label="Flash Coupons"   total={totals.flash.total}    today={totals.flash.today}    accent="emerald" />
+          </div>
+
           {/* Rankings */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top tiendas / elementos</h3>
-              <RankingList items={topStores} color="text-pink-400" valueLabel="clics" />
+              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top clicks</h3>
+              <RankingList items={topClicks} color="text-pink-400" valueLabel="clicks" />
             </div>
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Secciones visitadas</h3>
-              <RankingList items={topSections} color="text-purple-400" valueLabel="visitas" />
+              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top búsquedas</h3>
+              <p className="text-white/15 text-[10px] -mt-3 mb-3">categorías filtradas + tiendas elegidas</p>
+              <RankingList items={topSearches} color="text-purple-400" valueLabel="acciones" />
             </div>
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Tráfico por kiosco</h3>
-              <RankingList items={topKiosksActivity} color="text-cyan-400" valueLabel="usos" />
+              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Secciones navegadas</h3>
+              <RankingList items={topSections} color="text-emerald-400" valueLabel="visitas" />
             </div>
+          </div>
+
+          {/* Tráfico por kiosco */}
+          <div className="bg-[#111] border border-white/5 rounded-xl p-5">
+            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Tráfico por kiosco</h3>
+            <p className="text-white/15 text-[10px] -mt-3 mb-3">solo interacciones de usuario (clicks + búsquedas + navegaciones + flash coupons)</p>
+            <RankingList items={topKiosksActivity} color="text-cyan-400" valueLabel="usos" />
           </div>
 
           {/* Impressions */}
@@ -422,7 +523,7 @@ export default function AnalyticsDashboard() {
             <div className="flex items-start justify-between flex-wrap gap-3">
               <div>
                 <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium">Campañas: impresiones</h3>
-                <p className="text-white/20 text-xs mt-1">Eventos de visualización por campaña dentro de su periodo activo (10h–21h).</p>
+                <p className="text-white/20 text-xs mt-1">Reproducciones registradas por el Ad-Server en kioscos (tabla <code className="text-white/40">ad_impressions</code>).</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={handleExportImpressions} className="flex items-center gap-1.5 text-xs text-emerald-400/60 hover:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 rounded-lg px-3 py-2 transition-colors">
