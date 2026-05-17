@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, ChangeEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -10,7 +10,17 @@ const SCALE = 2;
 
 const UI_POSITIONS = ['top', 'bottom'] as const;
 
+// Plan exclusivo para slots de banner (PDF "PLANES DIRECTORIOS").
+const DIAMANTE_PLAN = 'DIAMANTE';
+
 interface Campaign { id: string; brand_name: string; }
+
+interface DiamanteStore {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  plan_type: string | null;
+}
 
 interface Banner {
   id: string;
@@ -21,8 +31,10 @@ interface Banner {
   end_date: string | null;
   is_active: boolean;
   campaign_id: string | null;
+  store_id: string | null;
   slot_position: number | null;
   ad_campaigns?: { brand_name: string };
+  stores?: { id: string; name: string; logo_url: string | null; plan_type: string | null };
 }
 
 function KioskPreview({ src, type, inactive = false, scale = SCALE }: {
@@ -62,6 +74,7 @@ function KioskPreview({ src, type, inactive = false, scale = SCALE }: {
 export default function BannersAdminPage() {
   const [banners, setBanners] = useState<Banner[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [diamanteStores, setDiamanteStores] = useState<DiamanteStore[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -75,18 +88,65 @@ export default function BannersAdminPage() {
   const [slotPosition, setSlotPosition] = useState(1);
   const [isActive, setIsActive] = useState(true);
   const [campaignId, setCampaignId] = useState('');
+  const [storeId, setStoreId] = useState('');
+  const [storeSearch, setStoreSearch] = useState('');
+  const [storeDropdownOpen, setStoreDropdownOpen] = useState(false);
+  const storeBoxRef = useRef<HTMLDivElement | null>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
   useEffect(() => { fetchData(); }, []);
 
+  // Cerrar el combobox al clickear fuera del contenedor.
+  useEffect(() => {
+    if (!storeDropdownOpen) return;
+    const handler = (ev: MouseEvent) => {
+      if (storeBoxRef.current && !storeBoxRef.current.contains(ev.target as Node)) {
+        setStoreDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [storeDropdownOpen]);
+
+  const filteredDiamanteStores = useMemo(() => {
+    if (!storeSearch) return diamanteStores;
+    const q = storeSearch.toLowerCase();
+    return diamanteStores.filter(s => s.name.toLowerCase().includes(q));
+  }, [diamanteStores, storeSearch]);
+
+  const selectedStore = useMemo(
+    () => diamanteStores.find(s => s.id === storeId) || null,
+    [diamanteStores, storeId]
+  );
+
+  // Si la tienda vinculada perdió el plan DIAMANTE, el SELECT en fetchData no
+  // la traerá; recurrimos al `stores` embebido del banner que estamos editando
+  // para que el formulario muestre el nombre real en vez de un id huérfano.
+  const editingStoreFallback = useMemo(() => {
+    if (!editingId) return null;
+    if (selectedStore) return null;
+    const b = banners.find(x => x.id === editingId);
+    return b?.stores || null;
+  }, [editingId, selectedStore, banners]);
+
   const fetchData = async () => {
     setRefreshing(true);
-    const [bannersRes, campsRes] = await Promise.all([
-      supabase.from('banners').select('*, ad_campaigns(brand_name)').order('ui_position').order('slot_position', { ascending: true }),
+    const [bannersRes, campsRes, storesRes] = await Promise.all([
+      supabase
+        .from('banners')
+        .select('*, ad_campaigns(brand_name), stores(id, name, logo_url, plan_type)')
+        .order('ui_position')
+        .order('slot_position', { ascending: true }),
       supabase.from('ad_campaigns').select('id, brand_name').order('brand_name'),
+      // Solo tiendas DIAMANTE pueden tener banner (regla del PDF "PLANES DIRECTORIOS").
+      supabase
+        .from('stores')
+        .select('id, name, logo_url, plan_type')
+        .eq('plan_type', DIAMANTE_PLAN)
+        .order('name'),
     ]);
-    
+
     if (bannersRes.error) {
       console.error("Error fetching banners:", bannersRes.error);
       alert("Error al cargar banners: " + bannersRes.error.message);
@@ -99,7 +159,13 @@ export default function BannersAdminPage() {
     } else if (campsRes.data) {
       setCampaigns(campsRes.data);
     }
-    
+
+    if (storesRes.error) {
+      console.error("Error fetching DIAMANTE stores:", storesRes.error);
+    } else if (storesRes.data) {
+      setDiamanteStores(storesRes.data as DiamanteStore[]);
+    }
+
     setLoading(false);
     setRefreshing(false);
   };
@@ -108,6 +174,7 @@ export default function BannersAdminPage() {
     setEditingId(null); setMediaFile(null); setMediaPreview('');
     setMediaType('image'); setUiPosition('home_hero'); setSlotPosition(1);
     setIsActive(true); setCampaignId(''); setStartDate(''); setEndDate('');
+    setStoreId(''); setStoreSearch(''); setStoreDropdownOpen(false);
     setShowForm(false);
   };
 
@@ -117,6 +184,9 @@ export default function BannersAdminPage() {
     setEditingId(b.id); setMediaPreview(b.media_url); setMediaType(b.media_type);
     setUiPosition(b.ui_position); setSlotPosition(b.slot_position || 1);
     setIsActive(b.is_active); setCampaignId(b.campaign_id || '');
+    setStoreId(b.store_id || '');
+    setStoreSearch(b.stores?.name || '');
+    setStoreDropdownOpen(false);
     setStartDate(b.start_date ? b.start_date.split('T')[0] : '');
     setEndDate(b.end_date ? b.end_date.split('T')[0] : '');
     setShowForm(true);
@@ -138,6 +208,20 @@ export default function BannersAdminPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingId && !mediaFile) { alert('Sube un archivo multimedia.'); return; }
+
+    // Tienda DIAMANTE es obligatoria — el slot del banner solo se vende dentro
+    // de ese plan. Validamos en cliente para feedback inmediato; el trigger
+    // `enforce_banner_diamante` lo refuerza en BD.
+    if (!storeId) {
+      alert('Vincula una tienda con plan DIAMANTE antes de guardar el banner.');
+      return;
+    }
+    const storeStillDiamante = diamanteStores.some(s => s.id === storeId);
+    if (!storeStillDiamante) {
+      alert('La tienda seleccionada ya no tiene plan DIAMANTE. Elige otra tienda DIAMANTE activa.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       let finalUrl = mediaPreview;
@@ -152,6 +236,7 @@ export default function BannersAdminPage() {
       const payload: any = {
         ui_position: uiPosition, slot_position: slotPosition,
         media_url: finalUrl, media_type: mediaType, is_active: isActive,
+        store_id: storeId,
         campaign_id: campaignId || null,
         start_date: startDate ? new Date(startDate).toISOString() : null,
         end_date: endDate ? new Date(endDate).toISOString() : null,
@@ -202,8 +287,11 @@ export default function BannersAdminPage() {
             </svg>
             {refreshing ? 'Actualizando...' : 'Actualizar'}
           </button>
-          <button onClick={() => { resetForm(); setShowForm(true); }}
-            className="flex items-center gap-2 text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg px-4 py-2 transition-colors">
+          <button
+            onClick={() => { resetForm(); setShowForm(true); }}
+            disabled={diamanteStores.length === 0}
+            title={diamanteStores.length === 0 ? 'No hay tiendas DIAMANTE: asigna el plan DIAMANTE a una tienda antes de crear banners' : undefined}
+            className="flex items-center gap-2 text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg px-4 py-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/10">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
             Nuevo Banner
           </button>
@@ -223,6 +311,89 @@ export default function BannersAdminPage() {
               </div>
               <div className="flex gap-6 items-start">
                 <form onSubmit={handleSave} className="flex-1 space-y-3 min-w-0">
+                  {/* Tienda DIAMANTE — obligatoria */}
+                  <div className="relative" ref={storeBoxRef}>
+                    <label className="flex items-center justify-between text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+                      <span>Tienda DIAMANTE <span className="text-cyan-400 normal-case tracking-normal">*</span></span>
+                      <span className="text-[10px] text-white/25 normal-case tracking-normal">
+                        {diamanteStores.length} disponibles
+                      </span>
+                    </label>
+                    {diamanteStores.length === 0 && !editingStoreFallback ? (
+                      <div className="bg-red-500/5 border border-red-500/20 rounded-lg px-3 py-2.5 text-xs text-red-300">
+                        No hay tiendas con plan DIAMANTE. Asigna el plan a una tienda
+                        antes de crear un banner (Directorio → Tiendas → editar → plan DIAMANTE).
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          role="combobox"
+                          aria-expanded={storeDropdownOpen}
+                          aria-haspopup="listbox"
+                          tabIndex={0}
+                          onClick={() => { if (!storeDropdownOpen) setStoreSearch(''); setStoreDropdownOpen(!storeDropdownOpen); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStoreDropdownOpen(o => !o); } }}
+                          className={`flex items-center justify-between w-full bg-[#0A0A0A] border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
+                            storeId ? 'border-emerald-500/30' : 'border-white/10 hover:border-white/20'
+                          }`}
+                        >
+                          <span className={`truncate ${selectedStore || editingStoreFallback ? 'text-white' : 'text-white/40'}`}>
+                            {selectedStore?.name
+                              || (editingStoreFallback
+                                ? `${editingStoreFallback.name} (ya no es DIAMANTE)`
+                                : 'Seleccionar tienda DIAMANTE...')}
+                          </span>
+                          <svg className={`w-4 h-4 text-white/30 transition-transform shrink-0 ${storeDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </div>
+                        {storeDropdownOpen && (
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                            <div className="p-2 border-b border-white/5">
+                              <input
+                                type="text"
+                                autoFocus
+                                value={storeSearch}
+                                onChange={e => setStoreSearch(e.target.value)}
+                                placeholder="Buscar tienda DIAMANTE..."
+                                className="w-full bg-[#0A0A0A] border border-white/5 rounded-md px-2 py-1.5 text-xs text-white focus:outline-none"
+                              />
+                            </div>
+                            <div className="max-h-48 overflow-y-auto" role="listbox">
+                              {filteredDiamanteStores.length === 0 ? (
+                                <div className="px-3 py-3 text-xs text-white/30 text-center">Sin coincidencias</div>
+                              ) : filteredDiamanteStores.map(s => (
+                                <button
+                                  type="button"
+                                  key={s.id}
+                                  role="option"
+                                  aria-selected={s.id === storeId}
+                                  onClick={() => {
+                                    setStoreId(s.id);
+                                    setStoreSearch(s.name);
+                                    setStoreDropdownOpen(false);
+                                  }}
+                                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-white/5 transition-colors ${
+                                    s.id === storeId ? 'bg-emerald-500/10 text-emerald-300' : 'text-white'
+                                  }`}
+                                >
+                                  {s.logo_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={s.logo_url} alt="" className="w-5 h-5 rounded object-cover bg-[#0A0A0A] shrink-0" onError={(ev) => { (ev.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                                  ) : (
+                                    <span className="w-5 h-5 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-semibold flex items-center justify-center shrink-0">
+                                      {(s.name[0] || '?').toUpperCase()}
+                                    </span>
+                                  )}
+                                  <span className="truncate">{s.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-white/25 mt-1">Sólo tiendas con plan DIAMANTE pueden tener banner activo.</p>
+                      </>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Posición UI</label>
@@ -267,9 +438,10 @@ export default function BannersAdminPage() {
                       className="flex-1 py-2 text-sm bg-white/5 hover:bg-white/10 text-white/50 rounded-lg transition-colors">
                       Cancelar
                     </button>
-                    <button type="submit" disabled={isSaving}
-                      className="flex-1 py-2 text-sm bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-lg disabled:opacity-50 transition-colors">
-                      {isSaving ? 'Guardando...' : 'Guardar banner'}
+                    <button type="submit" disabled={isSaving || !storeId}
+                      title={!storeId ? 'Vincula una tienda DIAMANTE para habilitar el guardado' : undefined}
+                      className="flex-1 py-2 text-sm bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                      {isSaving ? 'Guardando...' : !storeId ? 'Falta tienda DIAMANTE' : 'Guardar banner'}
                     </button>
                   </div>
                 </form>
@@ -326,8 +498,30 @@ export default function BannersAdminPage() {
                       {b.media_type === 'video' ? '▶ Video' : '🖼 Imagen'}
                     </span>
                   </div>
+                  {b.stores ? (
+                    <div className="flex items-center gap-2 mb-1">
+                      {b.stores.logo_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={b.stores.logo_url} alt="" className="w-5 h-5 rounded object-cover bg-[#0A0A0A] border border-white/5 shrink-0" onError={(ev) => { (ev.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                      ) : (
+                        <span className="w-5 h-5 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-semibold flex items-center justify-center shrink-0">
+                          {(b.stores.name[0] || '?').toUpperCase()}
+                        </span>
+                      )}
+                      <span className="text-white/70 text-xs truncate">{b.stores.name}</span>
+                      {b.stores.plan_type === DIAMANTE_PLAN ? (
+                        <span className="text-cyan-400 bg-cyan-500/10 text-[9px] font-semibold tracking-wider px-1.5 py-0.5 rounded">DIAMANTE</span>
+                      ) : (
+                        <span className="text-amber-400 bg-amber-500/10 text-[9px] font-semibold tracking-wider px-1.5 py-0.5 rounded" title="La tienda ya no es DIAMANTE — el banner sigue vivo pero no es editable sin reasignar a otra tienda DIAMANTE.">
+                          plan caducó
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-amber-400 text-xs mb-1">⚠ Banner sin tienda vinculada</p>
+                  )}
                   {b.ad_campaigns?.brand_name && (
-                    <p className="text-white/40 text-xs mb-1">🔗 {b.ad_campaigns.brand_name}</p>
+                    <p className="text-white/40 text-[10px] mb-1">Campaña: {b.ad_campaigns.brand_name}</p>
                   )}
                   {(b.start_date || b.end_date) && (
                     <p className="text-white/25 text-[10px] font-mono">

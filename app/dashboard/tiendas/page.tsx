@@ -77,6 +77,94 @@ async function openPrivateDoc(path: string) {
   window.open(data.signedUrl, '_blank');
 }
 
+// Normaliza el logo_url para tolerar tres formas históricas que conviven en BD:
+//   1. URL pública completa (https://…/storage/v1/object/public/publicidad/logos/x.png) → usar tal cual
+//   2. Path crudo dentro del bucket (logos/x.png) → resolver con getPublicUrl
+//   3. Path con prefijo redundante (publicidad/logos/x.png o /publicidad/logos/x.png) → limpiar y resolver
+// Devuelve null si no hay un valor utilizable.
+function resolveLogoUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!v) return null;
+  if (/^https?:\/\//i.test(v) || v.startsWith('data:') || v.startsWith('blob:')) return v;
+  const cleaned = v.replace(/^\/+/, '').replace(/^publicidad\//, '');
+  const { data } = supabase.storage.from('publicidad').getPublicUrl(cleaned);
+  return data?.publicUrl || null;
+}
+
+// Iniciales para placeholder cuando no hay logo o falla la carga.
+function storeInitials(name: string | null | undefined): string {
+  if (!name) return '·';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '·';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// Color estable derivado del nombre — placeholder consistente entre renders.
+function nameHue(name: string | null | undefined): number {
+  if (!name) return 0;
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+function StoreLogo({
+  store,
+  size = 32,
+  className = '',
+  rounded = 'rounded-md',
+}: {
+  store: { name?: string; logo_url?: string | null };
+  size?: number;
+  className?: string;
+  rounded?: string;
+}) {
+  // Recalculamos la URL si cambia logo_url (clave fuerza remount al re-subir).
+  const resolved = useMemo(() => resolveLogoUrl(store.logo_url), [store.logo_url]);
+  const [errored, setErrored] = useState(false);
+
+  // Si cambia el src resuelto (ej. tras editar), resetear el flag de error.
+  useEffect(() => { setErrored(false); }, [resolved]);
+
+  const showImg = resolved && !errored;
+  const hue = nameHue(store.name);
+  const style: React.CSSProperties = { width: size, height: size };
+
+  return (
+    <div
+      style={style}
+      className={`bg-[#0A0A0A] border border-white/5 overflow-hidden shrink-0 flex items-center justify-center ${rounded} ${className}`}
+    >
+      {showImg ? (
+        <img
+          key={resolved}
+          src={resolved}
+          alt={store.name || 'Logo'}
+          className="w-full h-full object-cover"
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setErrored(true)}
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          style={{
+            background: `linear-gradient(135deg, hsl(${hue} 60% 22%), hsl(${(hue + 40) % 360} 60% 14%))`,
+            color: `hsl(${hue} 70% 78%)`,
+          }}
+          className="w-full h-full flex items-center justify-center font-semibold tracking-tight"
+        >
+          <span style={{ fontSize: Math.max(10, Math.round(size * 0.36)) }}>
+            {storeInitials(store.name)}
+          </span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function TiendasCRUD() {
   const [stores, setStores] = useState<any[]>([]);
   const [categoriesList, setCategoriesList] = useState<any[]>([]);
@@ -85,6 +173,7 @@ export default function TiendasCRUD() {
   const [showForm, setShowForm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
+  const [detailStore, setDetailStore] = useState<any | null>(null);
 
   // Basic info
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -716,11 +805,11 @@ export default function TiendasCRUD() {
                   Logo {editingId && <span className="normal-case tracking-normal">(dejar vacio para mantener)</span>}
                 </label>
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-[#0A0A0A] rounded-lg border border-white/10 overflow-hidden shrink-0 flex items-center justify-center">
-                    {logoPreview
-                      ? <img src={logoPreview} alt="Preview" className="w-full h-full object-cover" />
-                      : <span className="text-white/15 text-[9px]">1:1</span>}
-                  </div>
+                  <StoreLogo
+                    store={{ name: name || 'Preview', logo_url: logoPreview }}
+                    size={48}
+                    rounded="rounded-lg"
+                  />
                   <div className="flex-1">
                     <input
                       type="file" accept="image/*" onChange={handleLogoChange}
@@ -777,13 +866,16 @@ export default function TiendasCRUD() {
                 <tr key={store.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors group">
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-md bg-[#0A0A0A] border border-white/5 overflow-hidden shrink-0">
-                        {store.logo_url
-                          ? <img src={store.logo_url} alt={store.name} className="w-full h-full object-cover" loading="lazy" />
-                          : <div className="w-full h-full flex items-center justify-center text-white/10 text-[8px]">N/A</div>}
-                      </div>
+                      <StoreLogo store={store} size={32} />
                       <div className="min-w-0">
-                        <span className="text-white font-medium text-sm block truncate">{store.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setDetailStore(store)}
+                          title="Ver toda la información y exportar data K2 de la tienda"
+                          className="text-white font-medium text-sm block truncate text-left hover:text-pink-400 transition-colors max-w-full"
+                        >
+                          {store.name}
+                        </button>
                         {store.rif && (
                           <span className="text-white/30 text-[10px] font-mono block">{store.rif}</span>
                         )}
@@ -888,6 +980,558 @@ export default function TiendasCRUD() {
           )}
         </div>
       )}
+
+      {detailStore && (
+        <StoreDetailModal
+          store={detailStore}
+          onClose={() => setDetailStore(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StoreDetailModal — vista completa de la tienda + export de data K2 (kioscos)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type RangePreset = '7d' | '30d' | '90d' | 'all';
+
+const RANGE_LABELS: Record<RangePreset, string> = {
+  '7d': 'Últimos 7 días',
+  '30d': 'Últimos 30 días',
+  '90d': 'Últimos 90 días',
+  'all': 'Todo el histórico',
+};
+
+const FLASH_PLAN_SET = new Set(['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL']);
+
+function rangeStartISO(preset: RangePreset): string | null {
+  if (preset === 'all') return null;
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const days = preset === '7d' ? 6 : preset === '30d' ? 29 : 89;
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
+// CSV-safe: comillas dobladas, comillas envolventes si hay coma/quote/newline.
+function csvCell(v: unknown): string {
+  if (v == null) return '';
+  const s = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCSV(filename: string, headers: string[], rows: (unknown[])[]) {
+  // BOM para que Excel respete UTF-8.
+  const body = [headers.map(csvCell).join(','), ...rows.map(r => r.map(csvCell).join(','))].join('\n');
+  const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function slugify(s: string): string {
+  return (s || 'tienda')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
+function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void }) {
+  const [range, setRange] = useState<RangePreset>('30d');
+  const [loading, setLoading] = useState(true);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [coupons, setCoupons] = useState<any[]>([]);
+  const [impressionsDaily, setImpressionsDaily] = useState<any[]>([]);
+  const [events, setEvents] = useState<any[]>([]);
+
+  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const rangeStart = useMemo(() => rangeStartISO(range), [range]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        // 1) Campañas y cupones de la tienda (siempre el histórico completo;
+        //    el filtro de rango aplica a impresiones y eventos K2).
+        const [campRes, couponsRes] = await Promise.all([
+          supabase
+            .from('ad_campaigns')
+            .select('id, brand_name, plan_type, start_date, end_date, is_active, payment_status, suspended_at, created_at')
+            .eq('store_id', store.id)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('coupons')
+            .select('id, title, plan_type, code, amount_available, price_usd, category, start_date, end_date, campaign_id, created_at')
+            .eq('store_id', store.id)
+            .order('created_at', { ascending: false }),
+        ]);
+
+        if (cancelled) return;
+        const camps = campRes.data || [];
+        const cps = couponsRes.data || [];
+        setCampaigns(camps);
+        setCoupons(cps);
+
+        const campaignIds = camps.map(c => c.id);
+        const couponIds = cps.map(c => c.id);
+
+        // 2) Impresiones diarias para las campañas de la tienda (data K2)
+        let impQuery = supabase
+          .from('ad_impressions_daily')
+          .select('campaign_id, kiosk_id, day, count')
+          .order('day', { ascending: false });
+        if (campaignIds.length) impQuery = impQuery.in('campaign_id', campaignIds);
+        else impQuery = impQuery.eq('campaign_id', '00000000-0000-0000-0000-000000000000'); // ninguna
+        if (rangeStart) impQuery = impQuery.gte('day', rangeStart.split('T')[0]);
+        const impRes = await impQuery;
+
+        // 3) Eventos K2 ligados a la tienda: por item_id (storeId/couponId/campaignId)
+        //    o por item_name = nombre de la tienda.
+        const idsForEvents = [store.id, ...couponIds, ...campaignIds].filter(Boolean);
+        const evBaseSelect = 'id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data';
+        const queries: any[] = [];
+
+        if (idsForEvents.length) {
+          let q1: any = supabase.from('analytics_events').select(evBaseSelect)
+            .in('item_id', idsForEvents)
+            .order('created_at', { ascending: false })
+            .limit(5000);
+          if (rangeStart) q1 = q1.gte('created_at', rangeStart);
+          queries.push(q1);
+        }
+        let q2: any = supabase.from('analytics_events').select(evBaseSelect)
+          .eq('item_name', store.name)
+          .order('created_at', { ascending: false })
+          .limit(5000);
+        if (rangeStart) q2 = q2.gte('created_at', rangeStart);
+        queries.push(q2);
+
+        const evResults: any[] = await Promise.all(queries);
+        if (cancelled) return;
+
+        const dedup = new Map<string, any>();
+        for (const r of evResults) {
+          for (const e of (r.data || [])) dedup.set(e.id, e);
+        }
+
+        setImpressionsDaily(impRes.data || []);
+        setEvents(Array.from(dedup.values()).sort((a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ));
+      } catch (err) {
+        console.error('StoreDetailModal fetch error:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [store.id, store.name, range, rangeStart]);
+
+  // ── Métricas derivadas ────────────────────────────────────────────────────
+  const activeCampaign = useMemo(() => {
+    return campaigns.find(c =>
+      c.is_active &&
+      (!c.end_date || c.end_date >= today) &&
+      (!c.start_date || c.start_date <= today) &&
+      (c.payment_status ?? 'pending') !== 'overdue' &&
+      !c.suspended_at
+    ) || null;
+  }, [campaigns, today]);
+
+  const activeCoupons = useMemo(() => coupons.filter(c =>
+    (!c.end_date || c.end_date.split('T')[0] >= today) &&
+    (!c.start_date || c.start_date.split('T')[0] <= today)
+  ), [coupons, today]);
+
+  const flashCoupons = useMemo(() => coupons.filter(c => FLASH_PLAN_SET.has(c.plan_type)), [coupons]);
+  const activeFlashCoupons = useMemo(() => activeCoupons.filter(c => FLASH_PLAN_SET.has(c.plan_type)), [activeCoupons]);
+
+  const flashCouponIds = useMemo(() => new Set(flashCoupons.map(c => c.id)), [flashCoupons]);
+  const campaignIdsSet = useMemo(() => new Set(campaigns.map(c => c.id)), [campaigns]);
+
+  const flashShownCount = useMemo(() =>
+    events.filter(e => e.event_type === 'flash_coupon_shown' && (
+      flashCouponIds.has(e.item_id) || e.item_name === store.name
+    )).length,
+  [events, flashCouponIds, store.name]);
+
+  const campaignImpressionsTotal = useMemo(() =>
+    impressionsDaily.reduce((s, d) => s + (d.count || 0), 0),
+  [impressionsDaily]);
+
+  const storeClicks = useMemo(() =>
+    events.filter(e => (e.event_type === 'click' || e.event_type === 'tap') && (
+      e.item_id === store.id || e.item_name === store.name
+    )).length,
+  [events, store.id, store.name]);
+
+  const uniqueKiosks = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of impressionsDaily) if (d.kiosk_id) set.add(d.kiosk_id);
+    for (const e of events) if (e.kiosk_id) set.add(e.kiosk_id);
+    return set.size;
+  }, [impressionsDaily, events]);
+
+  // ── Exportadores K2 ───────────────────────────────────────────────────────
+  const slug = slugify(store.name);
+  const stamp = new Date().toISOString().split('T')[0];
+
+  const exportSummary = () => {
+    downloadCSV(`K2_${slug}_resumen_${stamp}.csv`,
+      ['metrica', 'valor'],
+      [
+        ['tienda', store.name],
+        ['rif', store.rif || ''],
+        ['categoria', store.categories?.name || ''],
+        ['plan', store.plan_type || ''],
+        ['piso', store.floor_level || ''],
+        ['local', store.local_number || ''],
+        ['rango_export', RANGE_LABELS[range]],
+        ['campania_activa', activeCampaign ? activeCampaign.brand_name : 'no'],
+        ['campanias_total', campaigns.length],
+        ['cupones_activos', activeCoupons.length],
+        ['cupones_total', coupons.length],
+        ['flash_coupons_total', flashCoupons.length],
+        ['flash_coupons_activos', activeFlashCoupons.length],
+        ['flash_coupon_apariciones', flashShownCount],
+        ['campania_impresiones', campaignImpressionsTotal],
+        ['clicks_directorio', storeClicks],
+        ['kioscos_unicos', uniqueKiosks],
+        ['contacto_email', store.contact_email || ''],
+        ['contacto_telefono', store.contact_phone || ''],
+        ['contrato_vencimiento', store.contract_expiry_date || ''],
+      ]);
+  };
+
+  const exportImpressions = () => {
+    if (!impressionsDaily.length) { alert('Sin impresiones de campaña en el rango.'); return; }
+    const byCamp: Record<string, string> = {};
+    campaigns.forEach(c => { byCamp[c.id] = c.brand_name; });
+    const rows = impressionsDaily
+      .slice()
+      .sort((a, b) => (a.day < b.day ? 1 : -1))
+      .map(d => [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id, d.count]);
+    downloadCSV(`K2_${slug}_impresiones_diarias_${stamp}.csv`,
+      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones'],
+      rows);
+  };
+
+  const exportEvents = () => {
+    if (!events.length) { alert('Sin eventos K2 en el rango.'); return; }
+    const rows = events.map(e => [
+      e.id,
+      new Date(e.created_at).toISOString(),
+      e.event_type,
+      e.module || '',
+      e.item_id || '',
+      e.item_name || '',
+      e.kiosk_id || '',
+      flashCouponIds.has(e.item_id) ? 'flash' : campaignIdsSet.has(e.item_id) ? 'campaign' : e.item_id === store.id ? 'store' : 'related',
+      e.event_data ? JSON.stringify(e.event_data) : '',
+    ]);
+    downloadCSV(`K2_${slug}_eventos_${stamp}.csv`,
+      ['event_id', 'fecha_iso', 'event_type', 'module', 'item_id', 'item_name', 'kiosk_id', 'origen', 'event_data_json'],
+      rows);
+  };
+
+  const exportCoupons = () => {
+    if (!coupons.length) { alert('Esta tienda no tiene cupones.'); return; }
+    const rows = coupons.map(c => [
+      c.id,
+      c.title,
+      c.code || '',
+      c.plan_type,
+      FLASH_PLAN_SET.has(c.plan_type) ? 'si' : 'no',
+      c.category || '',
+      c.amount_available,
+      c.price_usd,
+      c.start_date || '',
+      c.end_date || '',
+      c.campaign_id || '',
+      c.created_at,
+    ]);
+    downloadCSV(`K2_${slug}_cupones_${stamp}.csv`,
+      ['coupon_id', 'titulo', 'codigo', 'plan_type', 'es_flash', 'categoria', 'cantidad_disponible', 'precio_usd', 'inicio', 'fin', 'campaign_id', 'creado_en'],
+      rows);
+  };
+
+  // KPI tile helper.
+  const Tile = ({ label, value, accent, sub }: { label: string; value: React.ReactNode; accent?: string; sub?: string }) => (
+    <div className="bg-[#0A0A0A] border border-white/5 rounded-lg p-3.5">
+      <p className="text-[10px] text-white/30 uppercase tracking-wider font-medium mb-1.5">{label}</p>
+      <p className={`text-xl font-semibold ${accent || 'text-white'} leading-none`}>{value}</p>
+      {sub && <p className="text-[10px] text-white/30 mt-1.5">{sub}</p>}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[#0E0E0E] border border-white/10 rounded-xl w-full max-w-4xl shadow-2xl max-h-[92vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-[#0E0E0E] border-b border-white/5 px-6 py-4 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <StoreLogo store={store} size={40} />
+            <div className="min-w-0">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Detalle de tienda · Data K2</p>
+              <h3 className="text-base font-semibold text-white truncate">{store.name}</h3>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {store.plan_type && (
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider ${PLAN_COLORS[store.plan_type] || 'text-white/40 bg-white/5'}`}>
+                    {PLAN_LABELS[store.plan_type] || store.plan_type}
+                  </span>
+                )}
+                {store.categories?.name && (
+                  <span className="text-white/40 bg-white/5 px-2 py-0.5 rounded text-[10px]">{store.categories.name}</span>
+                )}
+                {store.floor_level && (
+                  <span className="text-white/30 text-[10px] font-mono">{store.floor_level} · {store.local_number}</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white/30 hover:text-white/70 transition-colors shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Range selector */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-1.5 bg-white/[0.03] border border-white/10 rounded-lg p-1">
+              {(['7d', '30d', '90d', 'all'] as RangePreset[]).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setRange(p)}
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
+                    range === p ? 'bg-pink-500/20 text-pink-300' : 'text-white/40 hover:text-white/70'
+                  }`}
+                >
+                  {RANGE_LABELS[p]}
+                </button>
+              ))}
+            </div>
+            {loading && (
+              <span className="text-[10px] text-white/30 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-pink-500/60 animate-pulse" />
+                Consultando K2…
+              </span>
+            )}
+          </div>
+
+          {/* KPI grid */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Tile
+              label="Campaña activa"
+              accent={activeCampaign ? 'text-emerald-400' : 'text-white/40'}
+              value={activeCampaign ? 'Sí' : 'No'}
+              sub={activeCampaign ? `${activeCampaign.brand_name} · vence ${activeCampaign.end_date || '—'}` : `${campaigns.length} campañas totales`}
+            />
+            <Tile
+              label="Cupones activos"
+              accent="text-cyan-400"
+              value={activeCoupons.length}
+              sub={`${coupons.length} históricos`}
+            />
+            <Tile
+              label="Flash coupons"
+              accent={flashCoupons.length ? 'text-pink-400' : 'text-white/40'}
+              value={flashCoupons.length ? 'Sí' : 'No'}
+              sub={`${activeFlashCoupons.length} activos · ${flashCoupons.length} totales`}
+            />
+            <Tile
+              label="Apariciones flash"
+              accent="text-pink-400"
+              value={flashShownCount.toLocaleString('es-VE')}
+              sub={`Eventos flash_coupon_shown · ${RANGE_LABELS[range].toLowerCase()}`}
+            />
+            <Tile
+              label="Impresiones campaña"
+              accent="text-orange-400"
+              value={campaignImpressionsTotal.toLocaleString('es-VE')}
+              sub={`Reproducciones en K2 · ${RANGE_LABELS[range].toLowerCase()}`}
+            />
+            <Tile
+              label="Clicks en directorio"
+              accent="text-violet-400"
+              value={storeClicks.toLocaleString('es-VE')}
+              sub="click + tap sobre la tienda"
+            />
+            <Tile
+              label="Kioscos únicos"
+              value={uniqueKiosks}
+              sub="K2 que registraron actividad"
+            />
+            <Tile
+              label="Estado contrato"
+              accent={store.contract_expiry_date && store.contract_expiry_date < today ? 'text-red-400' : 'text-white/70'}
+              value={store.contract_expiry_date
+                ? (store.contract_expiry_date < today ? 'Vencido' : 'Vigente')
+                : '—'}
+              sub={store.contract_expiry_date ? `Vence ${store.contract_expiry_date}` : 'Sin contrato cargado'}
+            />
+          </div>
+
+          {/* Campañas */}
+          <div>
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Campañas ({campaigns.length})</p>
+            {campaigns.length === 0 ? (
+              <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 text-center text-white/30 text-xs">
+                Sin campañas registradas para esta tienda.
+              </div>
+            ) : (
+              <div className="bg-white/[0.02] border border-white/5 rounded-lg overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-white/5 text-white/30 uppercase text-[10px] tracking-wider">
+                      <th className="px-3 py-2 font-medium">Marca</th>
+                      <th className="px-3 py-2 font-medium">Plan</th>
+                      <th className="px-3 py-2 font-medium">Vigencia</th>
+                      <th className="px-3 py-2 font-medium">Estado</th>
+                      <th className="px-3 py-2 font-medium text-right">Impresiones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campaigns.map(c => {
+                      const imp = impressionsDaily
+                        .filter(d => d.campaign_id === c.id)
+                        .reduce((s, d) => s + (d.count || 0), 0);
+                      const live = c.is_active && (!c.end_date || c.end_date >= today);
+                      return (
+                        <tr key={c.id} className="border-b border-white/[0.03]">
+                          <td className="px-3 py-2 text-white/80">{c.brand_name}</td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${PLAN_COLORS[c.plan_type] || 'text-white/40 bg-white/5'}`}>
+                              {PLAN_LABELS[c.plan_type] || c.plan_type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-white/40 font-mono">{c.start_date || '—'} → {c.end_date || '∞'}</td>
+                          <td className="px-3 py-2">
+                            <span className={`text-[10px] font-medium ${live ? 'text-emerald-400' : 'text-white/30'}`}>
+                              {c.suspended_at ? 'Suspendida' : live ? 'Activa' : 'Inactiva'}
+                            </span>
+                            {c.payment_status && c.payment_status !== 'paid' && (
+                              <span className="ml-1.5 text-[9px] text-amber-400">· {c.payment_status}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-white/70">{imp.toLocaleString('es-VE')}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Flash coupons */}
+          <div>
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Flash coupons ({flashCoupons.length})</p>
+            {flashCoupons.length === 0 ? (
+              <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 text-center text-white/30 text-xs">
+                Esta tienda no tiene cupones bajo plan Flash Coupon.
+              </div>
+            ) : (
+              <div className="bg-white/[0.02] border border-white/5 rounded-lg overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-white/5 text-white/30 uppercase text-[10px] tracking-wider">
+                      <th className="px-3 py-2 font-medium">Cupón</th>
+                      <th className="px-3 py-2 font-medium">Plan</th>
+                      <th className="px-3 py-2 font-medium">Vigencia</th>
+                      <th className="px-3 py-2 font-medium text-right">Apariciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {flashCoupons.map(c => {
+                      const shown = events.filter(e => e.event_type === 'flash_coupon_shown' && e.item_id === c.id).length;
+                      const live = (!c.end_date || c.end_date.split('T')[0] >= today) &&
+                                   (!c.start_date || c.start_date.split('T')[0] <= today);
+                      return (
+                        <tr key={c.id} className="border-b border-white/[0.03]">
+                          <td className="px-3 py-2 text-white/80">
+                            {c.title}
+                            <span className={`ml-2 text-[9px] ${live ? 'text-emerald-400' : 'text-white/30'}`}>
+                              {live ? '● activo' : '○ vencido'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${PLAN_COLORS[c.plan_type] || 'text-white/40 bg-white/5'}`}>
+                              {PLAN_LABELS[c.plan_type] || c.plan_type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-white/40 font-mono">
+                            {(c.start_date || '').split('T')[0] || '—'} → {(c.end_date || '').split('T')[0] || '∞'}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-pink-400">{shown.toLocaleString('es-VE')}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* CRM / Docs resumen */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 space-y-1.5">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Contacto</p>
+              <p className="text-xs text-white/70">{store.representative_name || <span className="text-white/20">Sin representante</span>}</p>
+              <p className="text-xs text-white/50">{store.contact_email || '—'}</p>
+              <p className="text-xs text-white/50">{store.contact_phone || '—'}</p>
+            </div>
+            <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 space-y-1.5">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Documentación</p>
+              <p className="text-xs">
+                <span className={store.contract_url ? 'text-emerald-400' : 'text-white/20'}>● Contrato</span>{' '}
+                <span className={store.mercantil_url ? 'text-emerald-400' : 'text-white/20'} >● Mercantil</span>{' '}
+                <span className={store.cedula_url ? 'text-emerald-400' : 'text-white/20'}>● Cédula</span>
+              </p>
+              <p className="text-xs text-white/50">RIF: <span className="font-mono">{store.rif || '—'}</span></p>
+              <p className="text-xs text-white/50">Vence contrato: <span className="font-mono">{store.contract_expiry_date || '—'}</span></p>
+            </div>
+          </div>
+
+          {/* Exports K2 */}
+          <div className="border-t border-white/5 pt-5">
+            <div className="flex items-end justify-between mb-3 gap-3 flex-wrap">
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Exportar data K2</p>
+                <p className="text-xs text-white/40 mt-0.5">CSV UTF-8 con BOM · respeta el rango seleccionado ({RANGE_LABELS[range].toLowerCase()})</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <button onClick={exportSummary} disabled={loading}
+                className="px-3 py-2.5 text-xs font-medium bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 rounded-lg transition-colors disabled:opacity-40">
+                Resumen
+              </button>
+              <button onClick={exportImpressions} disabled={loading || !impressionsDaily.length}
+                className="px-3 py-2.5 text-xs font-medium bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 rounded-lg transition-colors disabled:opacity-40">
+                Impresiones diarias
+              </button>
+              <button onClick={exportEvents} disabled={loading || !events.length}
+                className="px-3 py-2.5 text-xs font-medium bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-300 rounded-lg transition-colors disabled:opacity-40">
+                Eventos K2
+              </button>
+              <button onClick={exportCoupons} disabled={loading || !coupons.length}
+                className="px-3 py-2.5 text-xs font-medium bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 rounded-lg transition-colors disabled:opacity-40">
+                Cupones
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
