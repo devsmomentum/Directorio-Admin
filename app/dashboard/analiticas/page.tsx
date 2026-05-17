@@ -147,28 +147,32 @@ export default function AnalyticsDashboard() {
   const filteredEvents = kioskFilteredEvents.filter(e => inPeriod(e.created_at));
 
   // ── Clasificación por categoría según whitelist ─────────────────────────────
-  // clicks         → event_type IN ('click','tap')
-  // búsquedas      → event_type IN ('filter','select')
-  // navegaciones   → event_type IN ('navigate','navigation')
-  // flash coupons  → event_type = 'flash_coupon_shown'
-  const isClick   = (e: AnalyticsEvent) => e.event_type === 'click' || e.event_type === 'tap';
-  const isSearch  = (e: AnalyticsEvent) => e.event_type === 'filter' || e.event_type === 'select';
-  const isNav     = (e: AnalyticsEvent) => e.event_type === 'navigate' || e.event_type === 'navigation';
-  const isFlash   = (e: AnalyticsEvent) => e.event_type === 'flash_coupon_shown';
+  // clicks            → event_type IN ('click','tap')
+  // búsquedas         → event_type IN ('filter','select')
+  // clic post-búsqueda → event_type = 'search_click'  (tienda abierta tras tipear)
+  // navegaciones      → event_type IN ('navigate','navigation')
+  // flash coupons     → event_type = 'flash_coupon_shown'
+  const isClick       = (e: AnalyticsEvent) => e.event_type === 'click' || e.event_type === 'tap';
+  const isSearch      = (e: AnalyticsEvent) => e.event_type === 'filter' || e.event_type === 'select';
+  const isSearchClick = (e: AnalyticsEvent) => e.event_type === 'search_click';
+  const isNav         = (e: AnalyticsEvent) => e.event_type === 'navigate' || e.event_type === 'navigation';
+  const isFlash       = (e: AnalyticsEvent) => e.event_type === 'flash_coupon_shown';
 
   const todayKey = now.toLocaleDateString();
   const isToday  = (e: AnalyticsEvent) => new Date(e.created_at).toLocaleDateString() === todayKey;
 
-  const clickEvents  = filteredEvents.filter(isClick);
-  const searchEvents = filteredEvents.filter(isSearch);
-  const navEvents    = filteredEvents.filter(isNav);
-  const flashEvents  = filteredEvents.filter(isFlash);
+  const clickEvents       = filteredEvents.filter(isClick);
+  const searchEvents      = filteredEvents.filter(isSearch);
+  const searchClickEvents = filteredEvents.filter(isSearchClick);
+  const navEvents         = filteredEvents.filter(isNav);
+  const flashEvents       = filteredEvents.filter(isFlash);
 
   const totals = {
-    clicks:    { total: clickEvents.length,  today: clickEvents.filter(isToday).length },
-    searches:  { total: searchEvents.length, today: searchEvents.filter(isToday).length },
-    navs:      { total: navEvents.length,    today: navEvents.filter(isToday).length },
-    flash:     { total: flashEvents.length,  today: flashEvents.filter(isToday).length },
+    clicks:       { total: clickEvents.length,       today: clickEvents.filter(isToday).length },
+    searches:     { total: searchEvents.length,      today: searchEvents.filter(isToday).length },
+    searchClicks: { total: searchClickEvents.length, today: searchClickEvents.filter(isToday).length },
+    navs:         { total: navEvents.length,         today: navEvents.filter(isToday).length },
+    flash:        { total: flashEvents.length,       today: flashEvents.filter(isToday).length },
   };
 
   // Rankings por categoría
@@ -181,12 +185,13 @@ export default function AnalyticsDashboard() {
     Object.entries(counts).map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count).slice(0, limit);
 
-  const topClicks    = toRanking(countBy(clickEvents));
-  const topSearches  = toRanking(countBy(searchEvents));
-  const topSections  = toRanking(countBy(navEvents));
+  const topClicks         = toRanking(countBy(clickEvents));
+  const topSearches       = toRanking(countBy(searchEvents));
+  const topSearchedStores = toRanking(countBy(searchClickEvents));
+  const topSections       = toRanking(countBy(navEvents));
 
   // Tráfico por kiosco: solo interacciones reales (whitelist completo)
-  const interactionEvents = filteredEvents.filter(e => isClick(e) || isSearch(e) || isNav(e) || isFlash(e));
+  const interactionEvents = filteredEvents.filter(e => isClick(e) || isSearch(e) || isSearchClick(e) || isNav(e) || isFlash(e));
   const kioskActivity: Record<string, number> = {};
   interactionEvents.forEach(event => {
     if (event.kiosk_id) kioskActivity[event.kiosk_id] = (kioskActivity[event.kiosk_id] || 0) + 1;
@@ -349,12 +354,13 @@ export default function AnalyticsDashboard() {
     );
   }
 
-  const StatCard = ({ label, total, today, accent }: { label: string; total: number; today: number; accent: 'pink'|'purple'|'cyan'|'emerald' }) => {
+  const StatCard = ({ label, total, today, accent }: { label: string; total: number; today: number; accent: 'pink'|'purple'|'cyan'|'emerald'|'sky' }) => {
     const accentClass = {
       pink:    'text-pink-400',
       purple:  'text-purple-400',
       cyan:    'text-cyan-400',
       emerald: 'text-emerald-400',
+      sky:     'text-sky-400',
     }[accent];
     return (
       <div className="bg-[#111] border border-white/5 rounded-xl p-4">
@@ -486,16 +492,17 @@ export default function AnalyticsDashboard() {
             </button>
           </div>
 
-          {/* Stat cards: 4 categorías */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard label="Clicks"          total={totals.clicks.total}   today={totals.clicks.today}   accent="pink"    />
-            <StatCard label="Búsquedas"       total={totals.searches.total} today={totals.searches.today} accent="purple"  />
-            <StatCard label="Navegaciones"    total={totals.navs.total}     today={totals.navs.today}     accent="cyan"    />
-            <StatCard label="Flash Coupons"   total={totals.flash.total}    today={totals.flash.today}    accent="emerald" />
+          {/* Stat cards: 5 categorías */}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <StatCard label="Clicks"          total={totals.clicks.total}       today={totals.clicks.today}       accent="pink"    />
+            <StatCard label="Búsquedas"       total={totals.searches.total}     today={totals.searches.today}     accent="purple"  />
+            <StatCard label="Clic post-búsq." total={totals.searchClicks.total} today={totals.searchClicks.today} accent="sky"     />
+            <StatCard label="Navegaciones"    total={totals.navs.total}         today={totals.navs.today}         accent="cyan"    />
+            <StatCard label="Flash Coupons"   total={totals.flash.total}        today={totals.flash.today}        accent="emerald" />
           </div>
 
           {/* Rankings */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
               <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Top clicks</h3>
               <RankingList items={topClicks} color="text-pink-400" valueLabel="clicks" />
@@ -506,6 +513,11 @@ export default function AnalyticsDashboard() {
               <RankingList items={topSearches} color="text-purple-400" valueLabel="acciones" />
             </div>
             <div className="bg-[#111] border border-white/5 rounded-xl p-5">
+              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Tiendas más buscadas</h3>
+              <p className="text-white/15 text-[10px] -mt-3 mb-3">tienda abierta tras tipear en la barra de búsqueda</p>
+              <RankingList items={topSearchedStores} color="text-sky-400" valueLabel="búsquedas" />
+            </div>
+            <div className="bg-[#111] border border-white/5 rounded-xl p-5">
               <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Secciones navegadas</h3>
               <RankingList items={topSections} color="text-emerald-400" valueLabel="visitas" />
             </div>
@@ -514,7 +526,7 @@ export default function AnalyticsDashboard() {
           {/* Tráfico por kiosco */}
           <div className="bg-[#111] border border-white/5 rounded-xl p-5">
             <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Tráfico por kiosco</h3>
-            <p className="text-white/15 text-[10px] -mt-3 mb-3">solo interacciones de usuario (clicks + búsquedas + navegaciones + flash coupons)</p>
+            <p className="text-white/15 text-[10px] -mt-3 mb-3">solo interacciones de usuario (clicks + búsquedas + clic post-búsqueda + navegaciones + flash coupons)</p>
             <RankingList items={topKiosksActivity} color="text-cyan-400" valueLabel="usos" />
           </div>
 

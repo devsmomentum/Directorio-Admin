@@ -7,6 +7,9 @@
 --     • búsquedas       → event_type IN ('filter','select')
 --                         (filter = elige categoría / aplica búsqueda)
 --                         (select = elige una tienda dada la búsqueda)
+--     • clic post-búsqueda → event_type = 'search_click'
+--                         (usuario tipea en la barra y abre una tienda;
+--                          event_data.query trae el texto buscado)
 --     • navegaciones    → event_type IN ('navigate','navigation')
 --     • flash coupons   → event_type = 'flash_coupon_shown'
 --
@@ -70,6 +73,7 @@ BEGIN
   WHERE event_type NOT IN (
     'click', 'tap',
     'filter', 'select',
+    'search_click',
     'navigate', 'navigation',
     'flash_coupon_shown'
   );
@@ -82,7 +86,7 @@ END $$;
 -- CREATE TABLE IF NOT EXISTS public.analytics_events_purged_backup AS
 -- SELECT * FROM public.analytics_events
 -- WHERE event_type NOT IN (
---   'click','tap','filter','select','navigate','navigation','flash_coupon_shown'
+--   'click','tap','filter','select','search_click','navigate','navigation','flash_coupon_shown'
 -- );
 
 -- ── 4. DELETE estricto: conservar solo el whitelist ──────────────────
@@ -91,6 +95,7 @@ WITH deleted AS (
   WHERE event_type NOT IN (
     'click', 'tap',
     'filter', 'select',
+    'search_click',
     'navigate', 'navigation',
     'flash_coupon_shown'
   )

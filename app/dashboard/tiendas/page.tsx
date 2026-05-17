@@ -1175,6 +1175,26 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     )).length,
   [events, store.id, store.name]);
 
+  const searchClickCount = useMemo(() =>
+    events.filter(e => e.event_type === 'search_click' && (
+      e.item_id === store.id || e.item_name === store.name
+    )).length,
+  [events, store.id, store.name]);
+
+  const topSearchQueries = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of events) {
+      if (e.event_type !== 'search_click') continue;
+      if (e.item_id !== store.id && e.item_name !== store.name) continue;
+      const q = String(e.event_data?.query || '').trim().toLowerCase();
+      if (!q) continue;
+      counts.set(q, (counts.get(q) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+  }, [events, store.id, store.name]);
+
   const uniqueKiosks = useMemo(() => {
     const set = new Set<string>();
     for (const d of impressionsDaily) if (d.kiosk_id) set.add(d.kiosk_id);
@@ -1182,14 +1202,70 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     return set.size;
   }, [impressionsDaily, events]);
 
+  // ── Agregados analíticos (todos respetan el rango seleccionado) ──────────
+  const analyticsBreakdown = useMemo(() => {
+    const byType: Record<string, number> = {};
+    const byModule: Record<string, number> = {};
+    const byKiosk: Record<string, number> = {};
+    const daySet = new Set<string>();
+    let first: string | null = null;
+    let last: string | null = null;
+
+    for (const e of events) {
+      byType[e.event_type] = (byType[e.event_type] || 0) + 1;
+      const mod = e.module || '(sin módulo)';
+      byModule[mod] = (byModule[mod] || 0) + 1;
+      if (e.kiosk_id) byKiosk[e.kiosk_id] = (byKiosk[e.kiosk_id] || 0) + 1;
+      const day = (e.created_at || '').split('T')[0];
+      if (day) daySet.add(day);
+      if (!first || e.created_at < first) first = e.created_at;
+      if (!last || e.created_at > last) last = e.created_at;
+    }
+
+    const impByCampaign: Record<string, number> = {};
+    const impByKiosk: Record<string, number> = {};
+    for (const d of impressionsDaily) {
+      impByCampaign[d.campaign_id] = (impByCampaign[d.campaign_id] || 0) + (d.count || 0);
+      if (d.kiosk_id) impByKiosk[d.kiosk_id] = (impByKiosk[d.kiosk_id] || 0) + (d.count || 0);
+    }
+
+    const flashByCoupon: Record<string, number> = {};
+    for (const e of events) {
+      if (e.event_type !== 'flash_coupon_shown') continue;
+      const cid = e.item_id || '';
+      if (!flashCouponIds.has(cid)) continue;
+      flashByCoupon[cid] = (flashByCoupon[cid] || 0) + 1;
+    }
+
+    return { byType, byModule, byKiosk, daySet, first, last, impByCampaign, impByKiosk, flashByCoupon };
+  }, [events, impressionsDaily, flashCouponIds]);
+
   // ── Exportadores K2 ───────────────────────────────────────────────────────
   const slug = slugify(store.name);
   const stamp = new Date().toISOString().split('T')[0];
 
+  const fmtBreakdown = (
+    counts: Record<string, number>,
+    labelFor: (key: string) => string = (k) => k,
+  ) => Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${labelFor(k)} (${n.toLocaleString('es-VE')})`)
+    .join(' | ');
+
   const exportSummary = () => {
+    const { byType, byModule, byKiosk, daySet, first, last, impByCampaign, impByKiosk, flashByCoupon } = analyticsBreakdown;
+    const eventsTotal = events.length;
+    const activeDays = daySet.size;
+    const avgPerDay = activeDays ? (eventsTotal / activeDays) : 0;
+    const campNameById: Record<string, string> = {};
+    campaigns.forEach(c => { campNameById[c.id] = c.brand_name; });
+    const couponTitleById: Record<string, string> = {};
+    coupons.forEach(c => { couponTitleById[c.id] = c.title; });
+
     downloadCSV(`K2_${slug}_resumen_${stamp}.csv`,
       ['metrica', 'valor'],
       [
+        // ── Identidad de la tienda ──────────────────────────────────────
         ['tienda', store.name],
         ['rif', store.rif || ''],
         ['categoria', store.categories?.name || ''],
@@ -1197,16 +1273,37 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         ['piso', store.floor_level || ''],
         ['local', store.local_number || ''],
         ['rango_export', RANGE_LABELS[range]],
+
+        // ── Campañas y cupones (estado) ─────────────────────────────────
         ['campania_activa', activeCampaign ? activeCampaign.brand_name : 'no'],
         ['campanias_total', campaigns.length],
         ['cupones_activos', activeCoupons.length],
         ['cupones_total', coupons.length],
         ['flash_coupons_total', flashCoupons.length],
         ['flash_coupons_activos', activeFlashCoupons.length],
-        ['flash_coupon_apariciones', flashShownCount],
+
+        // ── Analíticas: totales agregados ───────────────────────────────
+        ['eventos_total', eventsTotal],
+        ['eventos_dias_con_actividad', activeDays],
+        ['eventos_promedio_por_dia', avgPerDay ? avgPerDay.toFixed(2) : '0'],
+        ['eventos_primer_evento_iso', first || ''],
+        ['eventos_ultimo_evento_iso', last || ''],
         ['campania_impresiones', campaignImpressionsTotal],
+        ['flash_coupon_apariciones', flashShownCount],
         ['clicks_directorio', storeClicks],
+        ['veces_buscada', searchClickCount],
         ['kioscos_unicos', uniqueKiosks],
+
+        // ── Analíticas: desgloses ───────────────────────────────────────
+        ['eventos_por_tipo', fmtBreakdown(byType)],
+        ['eventos_por_modulo', fmtBreakdown(byModule)],
+        ['eventos_por_kiosco', fmtBreakdown(byKiosk)],
+        ['impresiones_por_campania', fmtBreakdown(impByCampaign, id => campNameById[id] || id)],
+        ['impresiones_por_kiosco', fmtBreakdown(impByKiosk)],
+        ['apariciones_por_flash_coupon', fmtBreakdown(flashByCoupon, id => couponTitleById[id] || id)],
+        ['top_terminos_busqueda', topSearchQueries.map(([q, n]) => `${q} (${n})`).join(' | ')],
+
+        // ── CRM ─────────────────────────────────────────────────────────
         ['contacto_email', store.contact_email || ''],
         ['contacto_telefono', store.contact_phone || ''],
         ['contrato_vencimiento', store.contract_expiry_date || ''],
@@ -1368,6 +1465,12 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
               sub="click + tap sobre la tienda"
             />
             <Tile
+              label="Veces buscada"
+              accent={searchClickCount ? 'text-sky-400' : 'text-white/40'}
+              value={searchClickCount.toLocaleString('es-VE')}
+              sub={`Clic tras búsqueda · ${RANGE_LABELS[range].toLowerCase()}`}
+            />
+            <Tile
               label="Kioscos únicos"
               value={uniqueKiosks}
               sub="K2 que registraron actividad"
@@ -1434,12 +1537,19 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
             )}
           </div>
 
-          {/* Flash coupons */}
+          {/* Cupones (todos) */}
           <div>
-            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Flash coupons ({flashCoupons.length})</p>
-            {flashCoupons.length === 0 ? (
+            <div className="flex items-baseline justify-between mb-2">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Cupones ({coupons.length})</p>
+              {flashCoupons.length > 0 && (
+                <p className="text-[10px] text-white/40">
+                  <span className="text-pink-400 font-medium">{flashCoupons.length}</span> flash · <span className="text-pink-400 font-medium">{flashShownCount.toLocaleString('es-VE')}</span> apariciones
+                </p>
+              )}
+            </div>
+            {coupons.length === 0 ? (
               <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 text-center text-white/30 text-xs">
-                Esta tienda no tiene cupones bajo plan Flash Coupon.
+                Esta tienda no ha creado cupones.
               </div>
             ) : (
               <div className="bg-white/[0.02] border border-white/5 rounded-lg overflow-hidden">
@@ -1453,8 +1563,11 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                     </tr>
                   </thead>
                   <tbody>
-                    {flashCoupons.map(c => {
-                      const shown = events.filter(e => e.event_type === 'flash_coupon_shown' && e.item_id === c.id).length;
+                    {coupons.map(c => {
+                      const isFlash = FLASH_PLAN_SET.has(c.plan_type);
+                      const shown = isFlash
+                        ? events.filter(e => e.event_type === 'flash_coupon_shown' && e.item_id === c.id).length
+                        : 0;
                       const live = (!c.end_date || c.end_date.split('T')[0] >= today) &&
                                    (!c.start_date || c.start_date.split('T')[0] <= today);
                       return (
@@ -1464,6 +1577,11 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                             <span className={`ml-2 text-[9px] ${live ? 'text-emerald-400' : 'text-white/30'}`}>
                               {live ? '● activo' : '○ vencido'}
                             </span>
+                            {isFlash && (
+                              <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-300 font-semibold tracking-wider uppercase">
+                                Flash
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-2">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${PLAN_COLORS[c.plan_type] || 'text-white/40 bg-white/5'}`}>
@@ -1473,7 +1591,9 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                           <td className="px-3 py-2 text-white/40 font-mono">
                             {(c.start_date || '').split('T')[0] || '—'} → {(c.end_date || '').split('T')[0] || '∞'}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-pink-400">{shown.toLocaleString('es-VE')}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${isFlash ? 'text-pink-400' : 'text-white/20'}`}>
+                            {isFlash ? shown.toLocaleString('es-VE') : '—'}
+                          </td>
                         </tr>
                       );
                     })}
