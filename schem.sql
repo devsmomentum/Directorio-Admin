@@ -4,7 +4,7 @@
 CREATE TABLE public.ad_campaigns (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   brand_name text NOT NULL,
-  plan_type text NOT NULL,
+  plan_type text NOT NULL CHECK (plan_type = ANY (ARRAY['DIAMANTE'::text, 'ORO'::text, 'IA_PERFORMANCE'::text, 'PUBLI_PROMO'::text, 'PUBLI_PROMO_DIARIO'::text, 'PUBLI_PROMO_SEMANAL'::text, 'FLASH_COUPON_DIARIO'::text, 'FLASH_COUPON_SEMANAL'::text])),
   media_url text NOT NULL,
   media_type text NOT NULL,
   duration_seconds integer DEFAULT 15,
@@ -17,8 +17,28 @@ CREATE TABLE public.ad_campaigns (
   slot_limit_group text,
   target_frequency_seconds integer,
   store_id uuid,
+  payment_status text DEFAULT 'pending'::text CHECK (payment_status = ANY (ARRAY['pending'::text, 'paid'::text, 'overdue'::text])),
+  suspended_at timestamp with time zone,
   CONSTRAINT ad_campaigns_pkey PRIMARY KEY (id),
   CONSTRAINT ad_campaigns_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id)
+);
+CREATE TABLE public.ad_impressions (
+  id bigint NOT NULL DEFAULT nextval('ad_impressions_id_seq'::regclass),
+  campaign_id uuid NOT NULL,
+  kiosk_id text NOT NULL,
+  slot_position integer,
+  duration_ms integer,
+  occurred_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT ad_impressions_pkey PRIMARY KEY (id),
+  CONSTRAINT ad_impressions_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.ad_campaigns(id)
+);
+CREATE TABLE public.ad_impressions_daily (
+  campaign_id uuid NOT NULL,
+  kiosk_id text NOT NULL,
+  day date NOT NULL,
+  count integer NOT NULL DEFAULT 0,
+  CONSTRAINT ad_impressions_daily_pkey PRIMARY KEY (campaign_id, kiosk_id, day),
+  CONSTRAINT ad_impressions_daily_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.ad_campaigns(id)
 );
 CREATE TABLE public.admin_notifications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -52,8 +72,10 @@ CREATE TABLE public.banners (
   campaign_id uuid,
   slot_position integer,
   media_type text NOT NULL DEFAULT 'image'::text CHECK (media_type = ANY (ARRAY['image'::text, 'video'::text])),
+  store_id uuid,
   CONSTRAINT banners_pkey PRIMARY KEY (id),
-  CONSTRAINT banners_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.ad_campaigns(id)
+  CONSTRAINT banners_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.ad_campaigns(id),
+  CONSTRAINT banners_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id)
 );
 CREATE TABLE public.bathrooms (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -94,7 +116,7 @@ CREATE TABLE public.coupons (
   title text DEFAULT 'Cupón Promocional'::text,
   price_usd numeric DEFAULT 0.00,
   campaign_id uuid,
-  plan_type text NOT NULL DEFAULT 'IA_PERFORMANCE'::text CHECK (plan_type = ANY (ARRAY['DIAMANTE'::text, 'ORO'::text, 'IA_PERFORMANCE'::text, 'BONO_PREMIADO'::text, 'PUBLI_PROMO'::text])),
+  plan_type text NOT NULL DEFAULT 'IA_PERFORMANCE'::text CHECK (plan_type = ANY (ARRAY['DIAMANTE'::text, 'ORO'::text, 'IA_PERFORMANCE'::text, 'BONO_PREMIADO'::text, 'PUBLI_PROMO'::text, 'FLASH_COUPON_DIARIO'::text, 'FLASH_COUPON_SEMANAL'::text])),
   start_date timestamp with time zone DEFAULT now(),
   end_date timestamp with time zone NOT NULL,
   category text,
@@ -197,6 +219,15 @@ CREATE TABLE public.map_routes (
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT map_routes_pkey PRIMARY KEY (id)
 );
+CREATE TABLE public.operational_expenses (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  category text NOT NULL,
+  description text,
+  amount_usd numeric NOT NULL CHECK (amount_usd > 0::numeric),
+  expense_date date NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT operational_expenses_pkey PRIMARY KEY (id)
+);
 CREATE TABLE public.pap_payment_orders (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   order_id text NOT NULL UNIQUE,
@@ -217,6 +248,26 @@ CREATE TABLE public.parking_tickets (
   exit_code text,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT parking_tickets_pkey PRIMARY KEY (barcode)
+);
+CREATE TABLE public.plans (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  plan_key text NOT NULL UNIQUE,
+  name text NOT NULL,
+  description text,
+  duration_days integer NOT NULL DEFAULT 30,
+  price_usd numeric,
+  applies_to ARRAY NOT NULL DEFAULT ARRAY['stores'::text],
+  features ARRAY NOT NULL DEFAULT ARRAY[]::text[],
+  is_active boolean NOT NULL DEFAULT true,
+  display_order integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  max_brands integer,
+  video_seconds integer NOT NULL DEFAULT 15,
+  priority_level integer NOT NULL DEFAULT 99,
+  loop_eligible boolean NOT NULL DEFAULT false,
+  has_fixed_banner boolean NOT NULL DEFAULT false,
+  CONSTRAINT plans_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.search_analytics (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -247,7 +298,7 @@ CREATE TABLE public.stores (
   local_number text,
   floor_level text,
   category_id uuid,
-  plan_type text CHECK (plan_type = ANY (ARRAY['DIAMANTE'::text, 'ORO'::text, 'IA_PERFORMANCE'::text])),
+  plan_type text CHECK (plan_type IS NULL OR (plan_type = ANY (ARRAY['DIAMANTE'::text, 'ORO'::text, 'IA_PERFORMANCE'::text, 'PROMO_FLASH'::text, 'PUBLI_PROMO_DIARIO'::text, 'PUBLI_PROMO_SEMANAL'::text, 'FLASH_COUPON_DIARIO'::text, 'FLASH_COUPON_SEMANAL'::text]))),
   rif text,
   representative_name text,
   contact_phone text,
@@ -255,6 +306,7 @@ CREATE TABLE public.stores (
   contract_url text,
   mercantil_url text,
   contract_expiry_date date,
+  cedula_url text,
   CONSTRAINT stores_pkey PRIMARY KEY (id),
   CONSTRAINT stores_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.map_nodes(id),
   CONSTRAINT stores_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
@@ -266,16 +318,21 @@ CREATE TABLE public.temp_locales (
 );
 CREATE TABLE public.transactions (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  transaction_type text NOT NULL CHECK (transaction_type = ANY (ARRAY['coupon'::text, 'service'::text])),
+  transaction_type text NOT NULL CHECK (transaction_type = ANY (ARRAY['coupon'::text, 'service'::text, 'plan_payment'::text])),
   item_id uuid,
   item_name text NOT NULL,
   amount_usd numeric NOT NULL,
-  exchange_rate numeric NOT NULL,
-  amount_bs numeric NOT NULL,
+  exchange_rate numeric,
+  amount_bs numeric,
   payment_method text DEFAULT 'simulated'::text,
   status text DEFAULT 'completed'::text,
   user_email text,
-  kiosk_id text DEFAULT 'K2-MAIN'::text,
+  kiosk_id text,
   created_at timestamp with time zone NOT NULL DEFAULT timezone('utc'::text, now()),
-  CONSTRAINT transactions_pkey PRIMARY KEY (id)
+  store_id uuid,
+  payment_date date,
+  period text,
+  notes text,
+  CONSTRAINT transactions_pkey PRIMARY KEY (id),
+  CONSTRAINT transactions_store_id_fkey FOREIGN KEY (store_id) REFERENCES public.stores(id)
 );

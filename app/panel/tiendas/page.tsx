@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -192,6 +193,10 @@ export default function TiendasCRUD() {
   const [contactPhone, setContactPhone] = useState('');
   const [contactEmail, setContactEmail] = useState('');
 
+  // Usuario vinculado: solo lectura. La gestión completa (crear, editar,
+  // vincular/desvincular, enviar link) vive en /panel/clientes.
+  const [linkedUser, setLinkedUser] = useState<any | null>(null);
+
   // Documents
   const [contractFile, setContractFile] = useState<File | null>(null);
   const [contractUrl, setContractUrl] = useState('');
@@ -339,13 +344,18 @@ export default function TiendasCRUD() {
         contract_expiry_date: contractExpiryDate || null,
       };
 
+      let storeId: string | null = editingId;
       if (editingId) {
         const { error } = await supabase.from('stores').update(storeData).eq('id', editingId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('stores').insert([storeData]);
+        const { data: inserted, error } = await supabase.from('stores').insert([storeData]).select('id').single();
         if (error) throw error;
+        storeId = inserted?.id ?? null;
       }
+
+      // La vinculación tienda↔cliente y el envío de magic links se hace en
+      // /panel/clientes. Acá solo persistimos los campos de la tienda en sí.
 
       resetForm();
       fetchData();
@@ -356,7 +366,7 @@ export default function TiendasCRUD() {
     }
   };
 
-  const handleEdit = (store: any) => {
+  const handleEdit = async (store: any) => {
     setEditingId(store.id);
     setName(store.name || '');
     setCategoryId(store.category_id || '');
@@ -377,6 +387,16 @@ export default function TiendasCRUD() {
     setCedulaUrl(store.cedula_url || '');
     setCedulaFile(null);
     setContractExpiryDate(store.contract_expiry_date || '');
+
+    // Cargar el usuario vinculado a esta tienda (read-only). La gestión vive
+    // en /panel/clientes.
+    const { data: link } = await supabase
+      .from('user_stores')
+      .select('user_id, users!user_stores_user_id_fkey(id, email, full_name, cedula_numero, telefono_personal, correo_personal)')
+      .eq('store_id', store.id)
+      .maybeSingle();
+    setLinkedUser((link as any)?.users ?? null);
+
     setShowForm(true);
   };
 
@@ -396,6 +416,7 @@ export default function TiendasCRUD() {
     setMercantilFile(null); setMercantilUrl('');
     setCedulaFile(null); setCedulaUrl('');
     setContractExpiryDate('');
+    setLinkedUser(null);
     setShowForm(false);
   };
 
@@ -594,9 +615,9 @@ export default function TiendasCRUD() {
                 </div>
               </div>
 
-              {/* ── Sección: Datos del Cliente (CRM) ── */}
+              {/* ── Sección: Datos de la Tienda (Empresa) ── */}
               <div className="border-t border-white/5 pt-5 space-y-4">
-                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Datos del Cliente</p>
+                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Datos de la Tienda (Empresa)</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">RIF</label>
@@ -607,32 +628,67 @@ export default function TiendasCRUD() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Representante Legal</label>
-                    <input
-                      type="text" value={representativeName} onChange={(e) => setRepresentativeName(e.target.value)}
-                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                      placeholder="Nombre completo"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Telefono</label>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Telefono de la Tienda</label>
                     <input
                       type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
                       placeholder="+58 4XX-XXXXXXX"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Email de Contacto</label>
-                    <input
-                      type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
-                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                      placeholder="correo@empresa.com"
-                    />
-                  </div>
                 </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Email Corporativo de la Tienda</label>
+                  <input
+                    type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                    placeholder="correo@empresa.com"
+                  />
+                </div>
+              </div>
+
+              {/* ── Sección: Cliente vinculado (read-only) ──
+                  La gestión completa (crear, editar, vincular/desvincular,
+                  enviar magic link) vive en /panel/clientes. Acá solo
+                  informamos quién es el dueño actual de la tienda. */}
+              <div className="border-t border-white/5 pt-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+                    Cliente vinculado
+                  </p>
+                  <Link
+                    href="/panel/clientes"
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300 underline"
+                  >
+                    Ir a Clientes →
+                  </Link>
+                </div>
+
+                {editingId && linkedUser ? (
+                  <div className="bg-white/[0.03] border border-white/10 rounded-lg p-3">
+                    <p className="text-sm text-white/85 font-medium truncate">
+                      {linkedUser.full_name || <span className="text-white/40 italic">Sin nombre</span>}
+                    </p>
+                    <p className="text-[11px] text-white/50 truncate">{linkedUser.email}</p>
+                    <div className="flex gap-3 mt-1 flex-wrap">
+                      {linkedUser.cedula_numero && (
+                        <span className="text-[10px] text-white/40 font-mono">
+                          CI: {linkedUser.cedula_numero}
+                        </span>
+                      )}
+                      {linkedUser.telefono_personal && (
+                        <span className="text-[10px] text-white/40">
+                          📱 {linkedUser.telefono_personal}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-white/40 bg-white/[0.02] border border-white/5 rounded-lg p-3">
+                    {editingId
+                      ? 'Esta tienda no tiene cliente vinculado. Vincúlala desde Clientes.'
+                      : 'Tras crear la tienda, vincúlale un cliente desde Clientes.'}
+                  </p>
+                )}
               </div>
 
               {/* ── Sección: Documentación Legal ── */}

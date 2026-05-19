@@ -29,3 +29,8 @@ enabled = true
 # kill-switch: no requiere JWT porque lo llama pg_cron con x-cron-secret
 [functions.kill-switch]
 verify_jwt = false
+
+# send-magic-link: la invoca el admin desde el panel; Supabase valida el JWT
+# del caller y la function comprueba role='admin' adentro.
+[functions.send-magic-link]
+verify_jwt = true

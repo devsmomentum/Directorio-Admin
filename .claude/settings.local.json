@@ -6,7 +6,8 @@
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Read(//home/andres-parra/Desktop/Andres/Morna/milemium/**)",
       "Read(//home/andres-parra/Desktop/Andres/Morna/**)",
-      "Bash(dart analyze *)"
+      "Bash(dart analyze *)",
+      "Bash(git rm *)"
     ]
   }
 }
