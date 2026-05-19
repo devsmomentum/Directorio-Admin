@@ -41,9 +41,7 @@ Deno.serve(async (req: Request) => {
       end_date,
       store_id,
       stores (
-        name,
-        contact_phone,
-        contact_email
+        name
       )
     `)
     .lt('end_date', today)
@@ -86,8 +84,6 @@ Deno.serve(async (req: Request) => {
     metadata: {
       campaign_id: c.id,
       store_name: c.stores?.name ?? null,
-      contact_phone: c.stores?.contact_phone ?? null,
-      contact_email: c.stores?.contact_email ?? null,
       end_date: c.end_date,
     },
     // unique_key evita duplicados si el cron corre más de una vez el mismo día

@@ -7,8 +7,7 @@ import { supabase } from '@/lib/supabase';
 // Página de "definir contraseña" — sirve para dos flujos:
 //
 //   1) ONBOARDING inicial (cliente recién invitado, sin password todavía):
-//      pide nombre + contraseña + confirmación. Marca password_set=true y
-//      espeja full_name en public.users.
+//      pide contraseña + confirmación. Marca password_set=true.
 //
 //   2) RECOVERY (usuario que pidió reset desde /login): viene con ?recover=1.
 //      Sólo pide nueva contraseña + confirmación; el nombre ya existe y no
@@ -26,7 +25,6 @@ export default function BienvenidaPage() {
   const isRecover = searchParams?.get('recover') === '1';
 
   const [email, setEmail] = useState<string>('');
-  const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -70,10 +68,6 @@ export default function BienvenidaPage() {
   }, [router, isRecover]);
 
   const validate = (): string | null => {
-    if (!isRecover) {
-      if (!fullName.trim()) return 'Escribe tu nombre completo.';
-      if (fullName.trim().length < 3) return 'El nombre es muy corto.';
-    }
     if (password.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
     if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
       return 'La contraseña debe incluir letras y números.';
@@ -95,9 +89,7 @@ export default function BienvenidaPage() {
     // 1. Setear password (+ metadata si es onboarding inicial).
     // updateUser({password}) escribe en auth.users.encrypted_password. Si
     // falla, abortamos antes de tocar public.users.
-    const metaPatch = isRecover
-      ? { password_set: true } // recovery: re-afirma el flag por si lo perdimos
-      : { password_set: true, full_name: fullName.trim() };
+    const metaPatch = { password_set: true };
 
     const { data: updateData, error: updateErr } = await supabase.auth.updateUser({
       password,
@@ -109,20 +101,7 @@ export default function BienvenidaPage() {
       return;
     }
 
-    // 2. Sólo en onboarding sincronizamos full_name en public.users.
-    if (!isRecover) {
-      const { error: rowErr } = await supabase
-        .from('users')
-        .update({ full_name: fullName.trim() })
-        .eq('id', updateData.user.id);
-      if (rowErr) {
-        // No bloqueamos: auth.users ya quedó OK; public.users es espejo y el
-        // admin lo puede corregir. Lo registramos.
-        console.warn('public.users.full_name update:', rowErr.message);
-      }
-    }
-
-    // 3. Cerrar sesión y mandar a /login para que el usuario pruebe la
+    // 2. Cerrar sesión y mandar a /login para que el usuario pruebe la
     // contraseña recién definida. Esto confirma de un vistazo que sí quedó
     // grabada y limpia los tokens del magic-link/recovery.
     await supabase.auth.signOut({ scope: 'local' });
@@ -140,7 +119,7 @@ export default function BienvenidaPage() {
   const titleText = isRecover ? 'NUEVA CONTRASEÑA' : 'BIENVENIDO A MILLENNIUM';
   const subtitleText = isRecover
     ? 'Define la nueva contraseña para entrar a tu cuenta.'
-    : 'Define tu nombre y una contraseña para entrar a tu cuenta.';
+    : 'Define una contraseña para entrar a tu cuenta.';
   const buttonText = isRecover ? 'GUARDAR CONTRASEÑA' : 'ACTIVAR CUENTA';
 
   return (
@@ -174,23 +153,6 @@ export default function BienvenidaPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {!isRecover && (
-            <div>
-              <label className="block text-sm font-medium text-white/70 mb-2">
-                Nombre completo
-              </label>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-                autoFocus
-                autoComplete="name"
-                className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
-                placeholder="Tu nombre y apellido"
-              />
-            </div>
-          )}
 
           <div>
             <label className="block text-sm font-medium text-white/70 mb-2">

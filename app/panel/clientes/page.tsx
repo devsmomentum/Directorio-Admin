@@ -24,11 +24,57 @@ type ClientRow = {
   id: string;
   email: string;
   full_name: string | null;
+  doc_tipo: string | null;
   cedula_numero: string | null;
+  cedula_url: string | null;
   telefono_personal: string | null;
-  correo_personal: string | null;
   created_at: string;
 };
+
+// Límites de caracteres por campo para prevenir inyección SQL
+const MAX_LEN = {
+  email: 120,
+  fullName: 100,
+  cedula: 15,
+  telefono: 20,
+} as const;
+
+// Valida formato de teléfono: debe empezar con +código de país
+const PHONE_REGEX = /^\+\d{1,4}\s?\d[\d\s-]{5,18}$/;
+
+// Convierte +58XXXXXXXXXX → 0XXXXXXXXXX para guardar en BD
+function phoneForDb(raw: string): string {
+  const clean = raw.replace(/[\s-]/g, '');
+  if (clean.startsWith('+58')) return '0' + clean.slice(3);
+  return clean;
+}
+
+// Para mostrar en la tabla: si empieza con 0 y tiene 11 dígitos, es +58
+function phoneForDisplay(stored: string | null): string {
+  if (!stored) return '—';
+  return stored;
+}
+
+// Documentos legales → bucket privado 'documentos', devuelve solo el path
+async function uploadPrivateDoc(file: File, path: string): Promise<string> {
+  const { error } = await supabase.storage
+    .from('documentos')
+    .upload(path, file, { upsert: true });
+  if (error) throw error;
+  return path;
+}
+
+// Genera URL firmada de 60s y abre el documento en nueva pestaña
+async function openPrivateDoc(path: string) {
+  const { data, error } = await supabase.storage
+    .from('documentos')
+    .createSignedUrl(path, 60);
+  if (error || !data?.signedUrl) {
+    alert('No se pudo abrir el documento.');
+    return;
+  }
+  window.open(data.signedUrl, '_blank');
+}
 
 type StoreLite = { id: string; name: string };
 
@@ -46,10 +92,13 @@ export default function ClientesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
+  const [docTipo, setDocTipo] = useState<'V' | 'E'>('V');
   const [cedula, setCedula] = useState('');
   const [telefono, setTelefono] = useState('');
-  const [correoPersonal, setCorreoPersonal] = useState('');
+  const [cedulaFile, setCedulaFile] = useState<File | null>(null);
+  const [cedulaUrl, setCedulaUrl] = useState('');
   const [pickedStoreIds, setPickedStoreIds] = useState<string[]>([]);
+  const [storeSearch, setStoreSearch] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [invite, setInvite] = useState<{ state: 'idle' | 'sending' | 'sent' | 'error'; msg: string }>({ state: 'idle', msg: '' });
 
@@ -60,7 +109,7 @@ export default function ClientesPage() {
     const [clientsRes, storesRes, linksRes] = await Promise.all([
       supabase
         .from('users')
-        .select('id, email, full_name, cedula_numero, telefono_personal, correo_personal, created_at')
+        .select('id, email, full_name, doc_tipo, cedula_numero, cedula_url, telefono_personal, created_at')
         .eq('role', 'cliente')
         .order('created_at', { ascending: false }),
       supabase
@@ -95,7 +144,8 @@ export default function ClientesPage() {
   const openCreate = () => {
     setEditing(null);
     setEmail('');
-    setFullName(''); setCedula(''); setTelefono(''); setCorreoPersonal('');
+    setFullName(''); setDocTipo('V'); setCedula(''); setTelefono('');
+    setCedulaFile(null); setCedulaUrl('');
     setPickedStoreIds([]);
     setFormError(null); setInvite({ state: 'idle', msg: '' });
     setShowForm(true);
@@ -105,10 +155,13 @@ export default function ClientesPage() {
     setEditing(c);
     setEmail(c.email);
     setFullName(c.full_name ?? '');
+    setDocTipo((c.doc_tipo as 'V' | 'E') ?? 'V');
     setCedula(c.cedula_numero ?? '');
-    setTelefono(c.telefono_personal ?? '');
-    setCorreoPersonal(c.correo_personal ?? '');
+    setCedulaUrl(c.cedula_url ?? '');
+    setCedulaFile(null);
+    setTelefono(c.telefono_personal ? phoneForDisplay(c.telefono_personal) : '');
     setPickedStoreIds((storesByClient[c.id] ?? []).map(s => s.id));
+    setStoreSearch('');
     setFormError(null); setInvite({ state: 'idle', msg: '' });
     setShowForm(true);
   };
@@ -119,6 +172,36 @@ export default function ClientesPage() {
     setSubmitting(false);
   };
 
+  // Eliminar cliente: borra el auth.user (cascade a public.users y user_stores).
+  // Requiere la edge function o el service_role; como el admin tiene policy
+  // admin_write, eliminamos la fila de public.users y dejamos que el trigger
+  // on_delete_cascade se encargue. Si no hay cascade, se usa deleteUser.
+  const handleDeleteClient = async (c: ClientRow) => {
+    const linkedStores = storesByClient[c.id] ?? [];
+    const storeNames = linkedStores.map(s => s.name).join(', ');
+    const msg = linkedStores.length > 0
+      ? `¿Eliminar al cliente "${c.full_name || c.email}"?\n\nTiene ${linkedStores.length} tienda(s) vinculada(s): ${storeNames}.\nSe desvincularán automáticamente.`
+      : `¿Eliminar al cliente "${c.full_name || c.email}"?\n\nEsta acción no se puede deshacer.`;
+
+    if (!confirm(msg)) return;
+
+    try {
+      // Primero desvincular tiendas
+      for (const s of linkedStores) {
+        await supabase.rpc('admin_unlink_store_user', {
+          p_user_id: c.id,
+          p_store_id: s.id,
+        });
+      }
+      // Eliminar de public.users (cascade desde auth.users manejado por FK)
+      const { error } = await supabase.from('users').delete().eq('id', c.id);
+      if (error) throw error;
+      await fetchAll();
+    } catch (err: any) {
+      alert('Error al eliminar: ' + (err.message || 'Error desconocido'));
+    }
+  };
+
   // Crea o actualiza al cliente. Pasos:
   //   1) Si NO existe en public.users con este email, llama a la edge function
   //      send-magic-link (channel='none', profile={...}) que crea el auth.user
@@ -127,18 +210,101 @@ export default function ClientesPage() {
   //   2) Si existe (editando), actualiza directamente public.users.
   //   3) Reconcilia user_stores: vincula los store_ids elegidos y desvincula
   //      los que estaban antes y ya no están.
+  const validateDoc = (file: File): boolean => {
+    if (file.size > 2 * 1024 * 1024) { alert('El documento debe pesar menos de 2 MB.'); return false; }
+    if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)) {
+      alert('Solo se admiten PDF, JPG o PNG.'); return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
     setFormError(null);
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = fullName.trim();
+    const cleanCedula = cedula.trim();
+    const cleanTelefono = telefono.trim();
+
+    // ── Validaciones obligatorias ──
     if (!cleanEmail) return setFormError('El correo es obligatorio.');
+    if (cleanEmail.length > MAX_LEN.email) return setFormError(`El correo no puede exceder ${MAX_LEN.email} caracteres.`);
     if (!cleanName) return setFormError('El nombre es obligatorio.');
+    if (cleanName.length > MAX_LEN.fullName) return setFormError(`El nombre no puede exceder ${MAX_LEN.fullName} caracteres.`);
+
+    // ── Documento de identidad: solo enteros ──
+    if (cleanCedula) {
+      if (!/^\d+$/.test(cleanCedula)) return setFormError('El documento de identidad debe contener solo números.');
+      if (cleanCedula.length > MAX_LEN.cedula) return setFormError(`El documento no puede exceder ${MAX_LEN.cedula} dígitos.`);
+    }
+
+    // ── Teléfono: debe empezar con +código de país ──
+    if (cleanTelefono) {
+      if (!cleanTelefono.startsWith('+')) return setFormError('El teléfono debe empezar con + y el código de país (ej: +58, +1, +34).');
+      if (!PHONE_REGEX.test(cleanTelefono)) return setFormError('Formato de teléfono inválido. Ejemplo: +58 4141234567');
+      if (cleanTelefono.length > MAX_LEN.telefono) return setFormError(`El teléfono no puede exceder ${MAX_LEN.telefono} caracteres.`);
+    }
+    // Valor a persistir en BD: +58 → 0...
+    const telefonoDb = cleanTelefono ? phoneForDb(cleanTelefono) : null;
 
     setSubmitting(true);
 
-    let userId = editing?.id ?? null;
-
     try {
+      // ── Unicidad: documento, teléfono, correo ──
+      const currentId = editing?.id ?? null;
+
+      if (cleanCedula) {
+        const { data: dupDoc } = await supabase
+          .from('users')
+          .select('id')
+          .eq('role', 'cliente')
+          .eq('doc_tipo', docTipo)
+          .eq('cedula_numero', cleanCedula)
+          .maybeSingle();
+        if (dupDoc && dupDoc.id !== currentId) {
+          throw new Error(`Ya existe un cliente con documento ${docTipo}-${cleanCedula}.`);
+        }
+      }
+
+      if (telefonoDb) {
+        const { data: dupTel } = await supabase
+          .from('users')
+          .select('id')
+          .eq('role', 'cliente')
+          .eq('telefono_personal', telefonoDb)
+          .maybeSingle();
+        if (dupTel && dupTel.id !== currentId) {
+          throw new Error('Ya existe un cliente con ese número de teléfono.');
+        }
+      }
+
+      if (!editing && cleanEmail) {
+        const { data: dupEmail } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+        if (dupEmail) {
+          throw new Error('Ya existe un usuario con ese correo electrónico.');
+        }
+      }
+
+
+
+      let userId = currentId;
+      
+      if (cedulaFile) {
+        const isValid = validateDoc(cedulaFile);
+        if (!isValid) { setSubmitting(false); return; }
+      }
+
+      let finalCedulaUrl = cedulaUrl;
+      if (cedulaFile) {
+        const ext = cedulaFile.name.split('.').pop();
+        const cleanEmailEscaped = cleanEmail.replace(/[^a-zA-Z0-9]/g, '_');
+        const p = `cedulas/cedula_${cleanEmailEscaped}_${Date.now()}.${ext}`;
+        finalCedulaUrl = await uploadPrivateDoc(cedulaFile, p);
+      }
+
       if (!userId) {
         // Crear el auth.user vía edge function (channel='none' no envía nada).
         const { data, error } = await supabase.functions.invoke('send-magic-link', {
@@ -147,9 +313,8 @@ export default function ClientesPage() {
             channel: 'none',
             profile: {
               full_name: cleanName,
-              cedula_numero: cedula || null,
-              telefono_personal: telefono || null,
-              correo_personal: correoPersonal || null,
+              cedula_numero: cleanCedula || null,
+              telefono_personal: telefonoDb,
             },
           },
         });
@@ -164,16 +329,22 @@ export default function ClientesPage() {
           .maybeSingle();
         if (!u?.id) throw new Error('El cliente se creó pero no se pudo leer su id (¿RLS?).');
         userId = u.id;
+
+        // Guardar doc_tipo y cedula_url
+        await supabase.from('users').update({ 
+          doc_tipo: docTipo,
+          cedula_url: finalCedulaUrl || null
+        }).eq('id', userId);
       } else {
-        // Editar: UPDATE directo en public.users. Las policies admin_write
-        // y el trigger guard_users_self_update preservan role/email.
+        // Editar: UPDATE directo en public.users.
         const { error } = await supabase
           .from('users')
           .update({
             full_name: cleanName,
-            cedula_numero: cedula || null,
-            telefono_personal: telefono || null,
-            correo_personal: correoPersonal || null,
+            doc_tipo: docTipo,
+            cedula_numero: cleanCedula || null,
+            cedula_url: finalCedulaUrl || null,
+            telefono_personal: telefonoDb,
           })
           .eq('id', userId);
         if (error) throw error;
@@ -195,9 +366,8 @@ export default function ClientesPage() {
           p_email: cleanEmail,
           p_store_id: storeId,
           p_full_name: cleanName,
-          p_cedula_numero: cedula || null,
-          p_telefono_personal: telefono || null,
-          p_correo_personal: correoPersonal || null,
+          p_cedula_numero: cleanCedula || null,
+          p_telefono_personal: telefonoDb,
         });
         if (error) throw error;
       }
@@ -230,17 +400,17 @@ export default function ClientesPage() {
     }
     setInvite({ state: 'sending', msg: '' });
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const cleanTel = telefono.trim();
     const { data, error } = await supabase.functions.invoke('send-magic-link', {
       body: {
         email: editing.email,
-        phone: channel === 'whatsapp' ? telefono.trim() : undefined,
+        phone: channel === 'whatsapp' ? cleanTel : undefined,
         channel,
         redirectTo: `${origin}/auth/callback`,
         profile: {
           full_name: fullName.trim() || null,
           cedula_numero: cedula || null,
-          telefono_personal: telefono || null,
-          correo_personal: correoPersonal || null,
+          telefono_personal: cleanTel ? phoneForDb(cleanTel) : null,
         },
       },
     });
@@ -251,7 +421,7 @@ export default function ClientesPage() {
     setInvite({
       state: 'sent',
       msg: channel === 'whatsapp'
-        ? `Enviado por WhatsApp a ${telefono.trim()}`
+        ? `Enviado por WhatsApp a ${cleanTel}`
         : `Correo enviado a ${editing.email}`,
     });
   };
@@ -311,7 +481,7 @@ export default function ClientesPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, correo, cédula o teléfono…"
+          placeholder="Buscar por nombre, correo, documento o teléfono…"
           className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10 transition-colors"
         />
       </div>
@@ -328,7 +498,7 @@ export default function ClientesPage() {
               <tr className="border-b border-white/5">
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Cliente</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Correo (login)</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Cédula</th>
+                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Documento</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Teléfono</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tiendas</th>
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acción</th>
@@ -336,13 +506,13 @@ export default function ClientesPage() {
             </thead>
             <tbody>
               {filtered.map(c => (
-                <tr key={c.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                <tr key={c.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] group">
                   <td className="px-5 py-3.5 text-white/85">
                     {c.full_name || <span className="text-white/30 italic">Sin nombre</span>}
                   </td>
                   <td className="px-5 py-3.5 text-white/60 text-xs font-mono">{c.email}</td>
-                  <td className="px-5 py-3.5 text-white/50 text-xs font-mono">{c.cedula_numero || '—'}</td>
-                  <td className="px-5 py-3.5 text-white/50 text-xs">{c.telefono_personal || '—'}</td>
+                  <td className="px-5 py-3.5 text-white/50 text-xs font-mono">{c.cedula_numero ? `${c.doc_tipo || 'V'}-${c.cedula_numero}` : '—'}</td>
+                  <td className="px-5 py-3.5 text-white/50 text-xs">{phoneForDisplay(c.telefono_personal)}</td>
                   <td className="px-5 py-3.5">
                     <div className="flex gap-1 flex-wrap max-w-[280px]">
                       {(storesByClient[c.id] ?? []).map(s => (
@@ -356,12 +526,22 @@ export default function ClientesPage() {
                     </div>
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    <button
-                      onClick={() => openEdit(c)}
-                      className="text-xs text-white/60 hover:text-white bg-white/5 hover:bg-white/10 rounded-md px-3 py-1.5 transition-colors"
-                    >
-                      Editar
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => openEdit(c)}
+                        title="Editar"
+                        className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteClient(c)}
+                        title="Eliminar"
+                        className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -400,6 +580,7 @@ export default function ClientesPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    maxLength={MAX_LEN.email}
                     disabled={!!editing}
                     autoFocus={!editing}
                     className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors disabled:opacity-60"
@@ -420,6 +601,7 @@ export default function ClientesPage() {
                     type="text"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
+                    maxLength={MAX_LEN.fullName}
                     className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
                     placeholder="Ej: María Pérez"
                   />
@@ -427,14 +609,30 @@ export default function ClientesPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Cédula</label>
-                    <input
-                      type="text"
-                      value={cedula}
-                      onChange={(e) => setCedula(e.target.value)}
-                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                      placeholder="V-12345678"
-                    />
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Documento de identidad</label>
+                    <div className="flex gap-0">
+                      <select
+                        value={docTipo}
+                        onChange={(e) => setDocTipo(e.target.value as 'V' | 'E')}
+                        className="bg-[#0A0A0A] border border-white/10 border-r-0 rounded-l-lg px-2 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors appearance-none cursor-pointer"
+                      >
+                        <option value="V">V</option>
+                        <option value="E">E</option>
+                      </select>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={cedula}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, '');
+                          setCedula(v);
+                        }}
+                        maxLength={MAX_LEN.cedula}
+                        className="flex-1 bg-[#0A0A0A] border border-white/10 rounded-r-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                        placeholder="12345678"
+                      />
+                    </div>
+                    <p className="text-[10px] text-white/30 mt-1">Solo números. Debe ser único.</p>
                   </div>
                   <div>
                     <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Teléfono</label>
@@ -442,24 +640,37 @@ export default function ClientesPage() {
                       type="tel"
                       value={telefono}
                       onChange={(e) => setTelefono(e.target.value)}
+                      maxLength={MAX_LEN.telefono}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                      placeholder="+58 4XX-XXXXXXX"
+                      placeholder="+58 4141234567"
                     />
+                    <p className="text-[10px] text-white/30 mt-1">Incluir +código de país. Debe ser único.</p>
+                  </div>
+                </div>
+                
+                <div className="mt-4">
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Documento adjunto (PDF/JPG/PNG)</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="file"
+                      accept=".pdf,image/jpeg,image/png"
+                      onChange={(e) => setCedulaFile(e.target.files?.[0] || null)}
+                      className="flex-1 bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white/70 file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-pink-500/10 file:text-pink-400 hover:file:bg-pink-500/20"
+                    />
+                    {cedulaUrl && (
+                      <button
+                        type="button"
+                        onClick={() => openPrivateDoc(cedulaUrl)}
+                        className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/70 text-xs rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        Ver actual
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                    Correo personal (alternativo)
-                  </label>
-                  <input
-                    type="email"
-                    value={correoPersonal}
-                    onChange={(e) => setCorreoPersonal(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                    placeholder="Si difiere del correo de login"
-                  />
-                </div>
+
+
               </div>
 
               {/* Tiendas vinculadas */}
@@ -478,33 +689,50 @@ export default function ClientesPage() {
                     No hay tiendas creadas todavía.
                   </p>
                 ) : (
-                  <div className="max-h-48 overflow-y-auto bg-[#0A0A0A] border border-white/10 rounded-lg p-2 space-y-0.5">
-                    {stores.map(s => {
-                      const checked = pickedStoreIds.includes(s.id);
-                      return (
-                        <label
-                          key={s.id}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm transition-colors ${
-                            checked ? 'bg-cyan-500/10 text-cyan-200' : 'text-white/70 hover:bg-white/[0.04]'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              setPickedStoreIds(prev =>
-                                e.target.checked
-                                  ? [...prev, s.id]
-                                  : prev.filter(id => id !== s.id)
-                              );
-                            }}
-                            className="accent-cyan-500"
-                          />
-                          {s.name}
-                        </label>
-                      );
-                    })}
-                  </div>
+                  <>
+                    <div className="relative">
+                      <svg className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      <input
+                        type="text"
+                        value={storeSearch}
+                        onChange={(e) => setStoreSearch(e.target.value)}
+                        placeholder="Buscar tienda…"
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg pl-8 pr-3 py-2 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-pink-500/50 transition-colors"
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto bg-[#0A0A0A] border border-white/10 rounded-lg p-2 space-y-0.5">
+                      {stores
+                        .filter(s => !storeSearch.trim() || s.name.toLowerCase().includes(storeSearch.trim().toLowerCase()))
+                        .map(s => {
+                        const checked = pickedStoreIds.includes(s.id);
+                        return (
+                          <label
+                            key={s.id}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm transition-colors ${
+                              checked ? 'bg-cyan-500/10 text-cyan-200' : 'text-white/70 hover:bg-white/[0.04]'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setPickedStoreIds(prev =>
+                                  e.target.checked
+                                    ? [...prev, s.id]
+                                    : prev.filter(id => id !== s.id)
+                                );
+                              }}
+                              className="accent-cyan-500"
+                            />
+                            {s.name}
+                          </label>
+                        );
+                      })}
+                      {stores.filter(s => !storeSearch.trim() || s.name.toLowerCase().includes(storeSearch.trim().toLowerCase())).length === 0 && (
+                        <p className="text-[10px] text-white/30 text-center py-2">Sin resultados para "{storeSearch}"</p>
+                      )}
+                    </div>
+                  </>
                 )}
                 <p className="text-[10px] text-white/30">
                   Cada tienda solo puede tener un dueño. Si la asignas a este cliente y ya estaba

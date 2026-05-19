@@ -238,8 +238,8 @@ export default function KioscosCRUD() {
                   <td className="px-5 py-3.5">
                     <span className="text-white font-medium text-sm">{kiosk.name || 'Sin nombre'}</span>
                   </td>
-                  <td className="px-5 py-3.5">
-                    <span className="text-white/40 text-sm">{kiosk.location || '—'}</span>
+                  <td className="px-5 py-3.5 max-w-[150px]">
+                    <span className="text-white/40 text-sm block truncate" title={kiosk.location || ''}>{kiosk.location || '—'}</span>
                   </td>
                   <td className="px-5 py-3.5">
                     {kiosk.hardware_id ? (

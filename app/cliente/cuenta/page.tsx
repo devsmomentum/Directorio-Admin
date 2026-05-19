@@ -13,13 +13,9 @@ export default function ClienteCuentaPage() {
 
   // Campos editables de la tienda seleccionada
   const [storeDescription, setStoreDescription] = useState('');
-  const [storeContactPhone, setStoreContactPhone] = useState('');
-  const [storeContactEmail, setStoreContactEmail] = useState('');
 
-  // Campos editables (persona)
   const [fullName, setFullName] = useState('');
   const [telefonoPersonal, setTelefonoPersonal] = useState('');
-  const [correoPersonal, setCorreoPersonal] = useState('');
 
   const fetchUser = async () => {
     const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -29,7 +25,6 @@ export default function ClienteCuentaPage() {
     if (u) {
       setFullName(u.full_name || '');
       setTelefonoPersonal(u.telefono_personal || '');
-      setCorreoPersonal(u.correo_personal || '');
     }
     setLoading(false);
   };
@@ -39,8 +34,6 @@ export default function ClienteCuentaPage() {
   useEffect(() => {
     if (store) {
       setStoreDescription(store.description || '');
-      setStoreContactPhone(store.contact_phone || '');
-      setStoreContactEmail(store.contact_email || '');
     }
   }, [store]);
 
@@ -53,8 +46,6 @@ export default function ClienteCuentaPage() {
       if (store) {
         const { error: sErr } = await supabase.from('stores').update({
           description: storeDescription,
-          contact_phone: storeContactPhone || null,
-          contact_email: storeContactEmail || null,
         }).eq('id', store.id);
         if (sErr) throw sErr;
         await refreshStores();
@@ -64,7 +55,6 @@ export default function ClienteCuentaPage() {
         const { error: uErr } = await supabase.from('users').update({
           full_name: fullName,
           telefono_personal: telefonoPersonal || null,
-          correo_personal: correoPersonal || null,
         }).eq('id', user.id);
         if (uErr) throw uErr;
       }
@@ -171,23 +161,6 @@ export default function ClienteCuentaPage() {
                   className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 resize-none"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Teléfono de la tienda</label>
-                  <input
-                    type="tel" value={storeContactPhone} onChange={(e) => setStoreContactPhone(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-                    placeholder="+58 4XX-XXXXXXX"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Email corporativo</label>
-                  <input
-                    type="email" value={storeContactEmail} onChange={(e) => setStoreContactEmail(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-                  />
-                </div>
-              </div>
             </div>
           </section>
         ) : (
@@ -228,14 +201,6 @@ export default function ClienteCuentaPage() {
                     className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
                   />
                 </div>
-              </div>
-              <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Correo personal</label>
-                <input
-                  type="email" value={correoPersonal} onChange={(e) => setCorreoPersonal(e.target.value)}
-                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-                  placeholder="Si es distinto al email de login"
-                />
               </div>
             </div>
           </section>

@@ -175,6 +175,7 @@ export default function TiendasCRUD() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [detailStore, setDetailStore] = useState<any | null>(null);
+  const [usersByStore, setUsersByStore] = useState<Record<string, any>>({});
 
   // Basic info
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -189,9 +190,8 @@ export default function TiendasCRUD() {
 
   // CRM fields
   const [rif, setRif] = useState('');
-  const [representativeName, setRepresentativeName] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
   const [contactEmail, setContactEmail] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
 
   // Usuario vinculado: solo lectura. La gestión completa (crear, editar,
   // vincular/desvincular, enviar link) vive en /panel/clientes.
@@ -202,19 +202,28 @@ export default function TiendasCRUD() {
   const [contractUrl, setContractUrl] = useState('');
   const [mercantilFile, setMercantilFile] = useState<File | null>(null);
   const [mercantilUrl, setMercantilUrl] = useState('');
-  const [cedulaFile, setCedulaFile] = useState<File | null>(null);
-  const [cedulaUrl, setCedulaUrl] = useState('');
   const [contractExpiryDate, setContractExpiryDate] = useState('');
 
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [catsRes, storesRes] = await Promise.all([
+    const [catsRes, storesRes, linksRes, usersRes] = await Promise.all([
       supabase.from('categories').select('*').order('name', { ascending: true }).limit(200),
       supabase.from('stores').select('*, categories(id, name, icon)').order('created_at', { ascending: false }).limit(500),
+      supabase.from('user_stores').select('user_id, store_id'),
+      supabase.from('users').select('id, email, full_name, cedula_numero, telefono_personal').eq('role', 'cliente')
     ]);
     if (catsRes.data) setCategoriesList(catsRes.data);
+    
+    // Armar el mapa de dueños
+    const userMap = new Map((usersRes.data || []).map(u => [u.id, u]));
+    const storeToUser: Record<string, any> = {};
+    for (const link of (linksRes.data || [])) {
+      const u = userMap.get(link.user_id);
+      if (u) storeToUser[link.store_id] = u;
+    }
+    setUsersByStore(storeToUser);
     if (storesRes.data) setStores(storesRes.data);
     setLoading(false);
     setRefreshing(false);
@@ -274,13 +283,6 @@ export default function TiendasCRUD() {
     else e.target.value = '';
   };
 
-  const handleCedulaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (validateDoc(file)) setCedulaFile(file);
-    else e.target.value = '';
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -307,7 +309,6 @@ export default function TiendasCRUD() {
       let finalLogoUrl = logoPreview || '';
       let finalContractUrl = contractUrl;
       let finalMercantilUrl = mercantilUrl;
-      let finalCedulaUrl = cedulaUrl;
 
       if (logoFile) {
         const ext = logoFile.name.split('.').pop();
@@ -321,10 +322,6 @@ export default function TiendasCRUD() {
         const ext = mercantilFile.name.split('.').pop();
         finalMercantilUrl = await uploadPrivateDoc(mercantilFile, `mercantil/mercantil_${Date.now()}.${ext}`);
       }
-      if (cedulaFile) {
-        const ext = cedulaFile.name.split('.').pop();
-        finalCedulaUrl = await uploadPrivateDoc(cedulaFile, `cedulas/cedula_${Date.now()}.${ext}`);
-      }
 
       const storeData: any = {
         name,
@@ -335,12 +332,10 @@ export default function TiendasCRUD() {
         logo_url: finalLogoUrl,
         plan_type: planType || null,
         rif: rif || null,
-        representative_name: representativeName || null,
-        contact_phone: contactPhone || null,
         contact_email: contactEmail || null,
+        contact_phone: contactPhone || null,
         contract_url: finalContractUrl || null,
         mercantil_url: finalMercantilUrl || null,
-        cedula_url: finalCedulaUrl || null,
         contract_expiry_date: contractExpiryDate || null,
       };
 
@@ -377,25 +372,32 @@ export default function TiendasCRUD() {
     setLogoPreview(store.logo_url || '');
     setLogoFile(null);
     setRif(store.rif || '');
-    setRepresentativeName(store.representative_name || '');
-    setContactPhone(store.contact_phone || '');
     setContactEmail(store.contact_email || '');
+    setContactPhone(store.contact_phone || '');
     setContractUrl(store.contract_url || '');
     setContractFile(null);
     setMercantilUrl(store.mercantil_url || '');
     setMercantilFile(null);
-    setCedulaUrl(store.cedula_url || '');
-    setCedulaFile(null);
     setContractExpiryDate(store.contract_expiry_date || '');
 
     // Cargar el usuario vinculado a esta tienda (read-only). La gestión vive
     // en /panel/clientes.
     const { data: link } = await supabase
       .from('user_stores')
-      .select('user_id, users!user_stores_user_id_fkey(id, email, full_name, cedula_numero, telefono_personal, correo_personal)')
+      .select('user_id')
       .eq('store_id', store.id)
       .maybeSingle();
-    setLinkedUser((link as any)?.users ?? null);
+
+    if (link?.user_id) {
+      const { data: user } = await supabase
+        .from('users')
+        .select('id, email, full_name, cedula_numero, telefono_personal')
+        .eq('id', link.user_id)
+        .maybeSingle();
+      setLinkedUser(user);
+    } else {
+      setLinkedUser(null);
+    }
 
     setShowForm(true);
   };
@@ -411,10 +413,10 @@ export default function TiendasCRUD() {
     setEditingId(null);
     setName(''); setCategoryId(''); setFloorLevel(''); setLocalNumber('');
     setDescription(''); setPlanType(''); setLogoFile(null); setLogoPreview('');
-    setRif(''); setRepresentativeName(''); setContactPhone(''); setContactEmail('');
+    setRif('');
+    setContactEmail(''); setContactPhone('');
     setContractFile(null); setContractUrl('');
     setMercantilFile(null); setMercantilUrl('');
-    setCedulaFile(null); setCedulaUrl('');
     setContractExpiryDate('');
     setLinkedUser(null);
     setShowForm(false);
@@ -430,7 +432,8 @@ export default function TiendasCRUD() {
         (s.name || '').toLowerCase().includes(q) ||
         (s.floor_level || '').toLowerCase().includes(q) ||
         (s.rif || '').toLowerCase().includes(q) ||
-        (s.contact_email || '').toLowerCase().includes(q) ||
+        (usersByStore[s.id]?.full_name || '').toLowerCase().includes(q) ||
+        (usersByStore[s.id]?.email || '').toLowerCase().includes(q) ||
         getCategoryName(s).toLowerCase().includes(q)
       );
     }
@@ -444,7 +447,7 @@ export default function TiendasCRUD() {
       const diff = (planWeight[b.plan_type] || 0) - (planWeight[a.plan_type] || 0);
       return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '');
     });
-  }, [stores, search]);
+  }, [stores, search, usersByStore]);
 
   const pg = usePagination(filtered);
 
@@ -513,13 +516,12 @@ export default function TiendasCRUD() {
               return (
                 <span
                   key={p}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${
-                    saturated
-                      ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                      : tight
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${saturated
+                    ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                    : tight
                       ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                       : `${PLAN_COLORS[p]} border-transparent`
-                  }`}
+                    }`}
                 >
                   {PLAN_LABELS[p]} <span className="font-mono">{used}/{cap}</span>
                 </span>
@@ -618,31 +620,31 @@ export default function TiendasCRUD() {
               {/* ── Sección: Datos de la Tienda (Empresa) ── */}
               <div className="border-t border-white/5 pt-5 space-y-4">
                 <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Datos de la Tienda (Empresa)</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">RIF</label>
+                  <input
+                    type="text" value={rif} onChange={(e) => setRif(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                    placeholder="Ej: J-12345678-9"
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">RIF</label>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Correo de la tienda</label>
                     <input
-                      type="text" value={rif} onChange={(e) => setRif(e.target.value)}
+                      type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                      placeholder="Ej: J-12345678-9"
+                      placeholder="contacto@tienda.com"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Telefono de la Tienda</label>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Teléfono de la tienda</label>
                     <input
                       type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                      placeholder="+58 4XX-XXXXXXX"
+                      placeholder="Ej: +58 412-1234567"
                     />
                   </div>
-                </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Email Corporativo de la Tienda</label>
-                  <input
-                    type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                    placeholder="correo@empresa.com"
-                  />
                 </div>
               </div>
 
@@ -753,34 +755,6 @@ export default function TiendasCRUD() {
                   </div>
                 </div>
 
-                {/* Cédula del Representante */}
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                    Cédula del Representante Legal
-                    {editingId && cedulaUrl && <span className="normal-case tracking-normal text-green-400/70 ml-2">(ya cargada)</span>}
-                  </label>
-                  <div className="flex items-center gap-3">
-                    {cedulaUrl && !cedulaFile && (
-                      <button
-                        type="button"
-                        onClick={() => openPrivateDoc(cedulaUrl)}
-                        className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 px-2.5 py-1.5 rounded-md shrink-0 transition-colors"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                        Ver doc
-                      </button>
-                    )}
-                    <div className="flex-1">
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={handleCedulaChange}
-                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
-                      />
-                      <p className="text-[10px] text-white/20 mt-1">PDF, JPG o PNG — Max 10MB</p>
-                    </div>
-                  </div>
-                </div>
 
                 {/* Vencimiento del contrato */}
                 <div>
@@ -822,13 +796,12 @@ export default function TiendasCRUD() {
                         onClick={() => { if (!saturated || isSelected) setPlanType(pt); }}
                         disabled={saturated && !isSelected}
                         title={saturated && !isSelected ? `Plan saturado: ${used}/${cap}` : undefined}
-                        className={`py-2 text-xs font-medium rounded-lg border transition-colors ${
-                          isSelected
-                            ? `${PLAN_COLORS[pt]} border-current`
-                            : saturated
+                        className={`py-2 text-xs font-medium rounded-lg border transition-colors ${isSelected
+                          ? `${PLAN_COLORS[pt]} border-current`
+                          : saturated
                             ? 'bg-red-500/5 text-red-400/50 border-red-500/20 cursor-not-allowed'
                             : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
-                        }`}
+                          }`}
                       >
                         <div>{PLAN_LABELS[pt]}</div>
                         {cap != null && (
@@ -904,8 +877,8 @@ export default function TiendasCRUD() {
           <p className="text-white/15 text-xs mt-1">Haz clic en "Nueva tienda" para empezar</p>
         </div>
       ) : (
-        <div className="bg-[#111] border border-white/5 rounded-xl overflow-hidden">
-          <table className="w-full text-left text-sm">
+        <div className="bg-[#111] border border-white/5 rounded-xl overflow-x-auto">
+          <table className="w-full text-left text-sm min-w-[900px]">
             <thead>
               <tr className="border-b border-white/5">
                 <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tienda</th>
@@ -941,23 +914,20 @@ export default function TiendasCRUD() {
                   <td className="px-5 py-3.5">
                     <span className="text-white/40 bg-white/5 px-2 py-0.5 rounded-md text-xs">{getCategoryName(store)}</span>
                   </td>
-                  <td className="px-5 py-3.5">
-                    <span className="text-white/50 text-xs font-mono block truncate">
+                  <td className="px-5 py-3.5 max-w-[120px]">
+                    <span className="text-white/50 text-xs font-mono block truncate" title={`${store.floor_level} — ${store.local_number}`}>
                       {store.floor_level} — {store.local_number}
                     </span>
                   </td>
                   <td className="px-5 py-3.5 max-w-[160px]">
-                    {store.contact_phone || store.contact_email ? (
+                    {usersByStore[store.id] ? (
                       <div className="space-y-0.5">
-                        {store.contact_phone && (
-                          <span className="text-white/40 text-xs block truncate">{store.contact_phone}</span>
-                        )}
-                        {store.contact_email && (
-                          <span className="text-white/30 text-[10px] block truncate">{store.contact_email}</span>
-                        )}
+                        <span className="text-white/70 text-xs block truncate">{usersByStore[store.id].full_name || <span className="text-white/20">Sin nombre</span>}</span>
+                        <span className="text-white/40 text-[10px] block truncate">{usersByStore[store.id].email}</span>
+                        {usersByStore[store.id].telefono_personal && <span className="text-white/40 text-[10px] block truncate">{usersByStore[store.id].telefono_personal}</span>}
                       </div>
                     ) : (
-                      <span className="text-white/15 text-xs">—</span>
+                      <span className="text-white/15 text-xs italic">Sin vincular</span>
                     )}
                   </td>
                   <td className="px-5 py-3.5">
@@ -978,8 +948,8 @@ export default function TiendasCRUD() {
                       </span>
                       {/* Cédula */}
                       <span
-                        title={store.cedula_url ? 'Cédula cargada' : 'Sin cédula del representante'}
-                        className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${store.cedula_url ? 'bg-green-500/15 text-green-400' : 'bg-white/5 text-white/15'}`}
+                        title={usersByStore[store.id]?.cedula_url ? 'Cédula cargada' : 'Sin cédula del dueño'}
+                        className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${usersByStore[store.id]?.cedula_url ? 'bg-green-500/15 text-green-400' : 'bg-white/5 text-white/15'}`}
                       >
                         CI
                       </span>
@@ -1001,7 +971,7 @@ export default function TiendasCRUD() {
                     )}
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-end gap-1">
                       <button
                         onClick={() => handleEdit(store)}
                         title="Editar"
@@ -1108,6 +1078,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   const [coupons, setCoupons] = useState<any[]>([]);
   const [impressionsDaily, setImpressionsDaily] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
+  const [linkedUser, setLinkedUser] = useState<any>(null);
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
   const rangeStart = useMemo(() => rangeStartISO(range), [range]);
@@ -1119,7 +1090,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
       try {
         // 1) Campañas y cupones de la tienda (siempre el histórico completo;
         //    el filtro de rango aplica a impresiones y eventos K2).
-        const [campRes, couponsRes] = await Promise.all([
+        const [campRes, couponsRes, linkRes] = await Promise.all([
           supabase
             .from('ad_campaigns')
             .select('id, brand_name, plan_type, start_date, end_date, is_active, payment_status, suspended_at, created_at')
@@ -1128,8 +1099,12 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
           supabase
             .from('coupons')
             .select('id, title, plan_type, code, amount_available, price_usd, category, start_date, end_date, campaign_id, created_at')
-            .eq('store_id', store.id)
             .order('created_at', { ascending: false }),
+          supabase
+            .from('user_stores')
+            .select('user_id')
+            .eq('store_id', store.id)
+            .maybeSingle(),
         ]);
 
         if (cancelled) return;
@@ -1137,6 +1112,15 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         const cps = couponsRes.data || [];
         setCampaigns(camps);
         setCoupons(cps);
+
+        if (linkRes?.data?.user_id) {
+          const { data: u } = await supabase
+            .from('users')
+            .select('id, email, full_name, cedula_numero, telefono_personal')
+            .eq('id', linkRes.data.user_id)
+            .maybeSingle();
+          if (!cancelled) setLinkedUser(u);
+        }
 
         const campaignIds = camps.map(c => c.id);
         const couponIds = cps.map(c => c.id);
@@ -1219,23 +1203,23 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     events.filter(e => e.event_type === 'flash_coupon_shown' && (
       flashCouponIds.has(e.item_id) || e.item_name === store.name
     )).length,
-  [events, flashCouponIds, store.name]);
+    [events, flashCouponIds, store.name]);
 
   const campaignImpressionsTotal = useMemo(() =>
     impressionsDaily.reduce((s, d) => s + (d.count || 0), 0),
-  [impressionsDaily]);
+    [impressionsDaily]);
 
   const storeClicks = useMemo(() =>
     events.filter(e => (e.event_type === 'click' || e.event_type === 'tap') && (
       e.item_id === store.id || e.item_name === store.name
     )).length,
-  [events, store.id, store.name]);
+    [events, store.id, store.name]);
 
   const searchClickCount = useMemo(() =>
     events.filter(e => e.event_type === 'search_click' && (
       e.item_id === store.id || e.item_name === store.name
     )).length,
-  [events, store.id, store.name]);
+    [events, store.id, store.name]);
 
   const topSearchQueries = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1466,9 +1450,8 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                 <button
                   key={p}
                   onClick={() => setRange(p)}
-                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
-                    range === p ? 'bg-pink-500/20 text-pink-300' : 'text-white/40 hover:text-white/70'
-                  }`}
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${range === p ? 'bg-pink-500/20 text-pink-300' : 'text-white/40 hover:text-white/70'
+                    }`}
                 >
                   {RANGE_LABELS[p]}
                 </button>
@@ -1625,7 +1608,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                         ? events.filter(e => e.event_type === 'flash_coupon_shown' && e.item_id === c.id).length
                         : 0;
                       const live = (!c.end_date || c.end_date.split('T')[0] >= today) &&
-                                   (!c.start_date || c.start_date.split('T')[0] <= today);
+                        (!c.start_date || c.start_date.split('T')[0] <= today);
                       return (
                         <tr key={c.id} className="border-b border-white/[0.03]">
                           <td className="px-3 py-2 text-white/80">
@@ -1662,19 +1645,28 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
           {/* CRM / Docs resumen */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 space-y-1.5">
-              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Contacto</p>
-              <p className="text-xs text-white/70">{store.representative_name || <span className="text-white/20">Sin representante</span>}</p>
-              <p className="text-xs text-white/50">{store.contact_email || '—'}</p>
-              <p className="text-xs text-white/50">{store.contact_phone || '—'}</p>
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Dueño Vinculado</p>
+              
+              {linkedUser ? (
+                <div className="space-y-1">
+                  <p className="text-xs text-white/90">{linkedUser.full_name || <span className="text-white/20">Sin nombre</span>}</p>
+                  {linkedUser.email && <p className="text-xs text-white/50">{linkedUser.email}</p>}
+                  {linkedUser.telefono_personal && <p className="text-xs text-white/50">{linkedUser.telefono_personal}</p>}
+                </div>
+              ) : (
+                <p className="text-xs text-white/30 italic">Ningún cliente vinculado a esta tienda todavía.</p>
+              )}
             </div>
             <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 space-y-1.5">
-              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Documentación</p>
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Datos Tienda</p>
               <p className="text-xs">
                 <span className={store.contract_url ? 'text-emerald-400' : 'text-white/20'}>● Contrato</span>{' '}
                 <span className={store.mercantil_url ? 'text-emerald-400' : 'text-white/20'} >● Mercantil</span>{' '}
-                <span className={store.cedula_url ? 'text-emerald-400' : 'text-white/20'}>● Cédula</span>
+                <span className={linkedUser?.cedula_url ? 'text-emerald-400' : 'text-white/20'}>● Cédula</span>
               </p>
               <p className="text-xs text-white/50">RIF: <span className="font-mono">{store.rif || '—'}</span></p>
+              <p className="text-xs text-white/50">Correo: <span className="font-mono">{store.contact_email || '—'}</span></p>
+              <p className="text-xs text-white/50">Teléfono: <span className="font-mono">{store.contact_phone || '—'}</span></p>
               <p className="text-xs text-white/50">Vence contrato: <span className="font-mono">{store.contract_expiry_date || '—'}</span></p>
             </div>
           </div>

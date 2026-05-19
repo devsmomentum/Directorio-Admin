@@ -11,8 +11,6 @@ export type ClienteStore = {
   rif: string | null;
   contract_expiry_date: string | null;
   description?: string | null;
-  contact_phone?: string | null;
-  contact_email?: string | null;
   categories?: { id: string; name: string; icon: string } | null;
 };
 

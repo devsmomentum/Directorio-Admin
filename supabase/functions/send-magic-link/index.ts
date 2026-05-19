@@ -25,8 +25,7 @@
 //     profile?: {
 //       full_name?: string,
 //       cedula_numero?: string,
-//       telefono_personal?: string,
-//       correo_personal?: string,
+//       telefono_personal?: string
 //     } }
 //
 // Los campos de `profile` se persisten en public.users con UPDATE/COALESCE: si
@@ -93,7 +92,6 @@ Deno.serve(async (req: Request) => {
     full_name?: string | null
     cedula_numero?: string | null
     telefono_personal?: string | null
-    correo_personal?: string | null
   }
   let body: {
     email?: string
@@ -149,7 +147,7 @@ Deno.serve(async (req: Request) => {
   // Sólo escribimos campos no-vacíos; los vacíos los descartamos para no pisar
   // valores ya existentes con NULL. (Equivalente a COALESCE del lado SQL.)
   const profilePatch: Record<string, string> = {}
-  for (const k of ['full_name', 'cedula_numero', 'telefono_personal', 'correo_personal'] as const) {
+  for (const k of ['full_name', 'cedula_numero', 'telefono_personal'] as const) {
     const v = (profile[k] ?? '').toString().trim()
     if (v) profilePatch[k] = v
   }

@@ -2,7 +2,7 @@
 -- Portal del Cliente / Aliado — Migración de Auth + RLS (Multi-tienda)
 -- ----------------------------------------------------------------------------
 -- 1) Crea public.users espejo de auth.users con role + datos personales
---    (full_name, cedula_numero, telefono_personal, correo_personal).
+--    (full_name, cedula_numero, telefono_personal).
 -- 2) Crea tabla pivote public.user_stores para vincular un usuario a UNA O
 --    VARIAS tiendas (relación N:M).
 -- 3) Crea tabla public.plan_requests para las solicitudes de plan del cliente.
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS public.users (
   full_name          text,
   cedula_numero      text,
   telefono_personal  text,
-  correo_personal    text,
+
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
@@ -524,8 +524,7 @@ CREATE OR REPLACE FUNCTION public.admin_link_store_user(
   p_store_id          uuid,
   p_full_name         text DEFAULT NULL,
   p_cedula_numero     text DEFAULT NULL,
-  p_telefono_personal text DEFAULT NULL,
-  p_correo_personal   text DEFAULT NULL
+  p_telefono_personal text DEFAULT NULL
 )
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth
 AS $$
@@ -542,13 +541,12 @@ BEGIN
   END IF;
 
   -- Upsert datos personales del usuario (sin tocar role)
-  INSERT INTO public.users (id, email, role, full_name, cedula_numero, telefono_personal, correo_personal)
-  VALUES (v_user_id, p_email, 'cliente', p_full_name, p_cedula_numero, p_telefono_personal, p_correo_personal)
+  INSERT INTO public.users (id, email, role, full_name, cedula_numero, telefono_personal)
+  VALUES (v_user_id, p_email, 'cliente', p_full_name, p_cedula_numero, p_telefono_personal)
   ON CONFLICT (id) DO UPDATE SET
     full_name         = COALESCE(EXCLUDED.full_name,         public.users.full_name),
     cedula_numero     = COALESCE(EXCLUDED.cedula_numero,     public.users.cedula_numero),
     telefono_personal = COALESCE(EXCLUDED.telefono_personal, public.users.telefono_personal),
-    correo_personal   = COALESCE(EXCLUDED.correo_personal,   public.users.correo_personal),
     updated_at        = now();
 
   -- 1 tienda = 1 usuario: si la tienda ya tenía otro dueño, reemplazarlo.
@@ -563,7 +561,7 @@ BEGIN
   RETURN v_user_id;
 END $$;
 
-GRANT EXECUTE ON FUNCTION public.admin_link_store_user(text, uuid, text, text, text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_link_store_user(text, uuid, text, text, text) TO authenticated;
 
 
 -- Helper para desvincular (sin borrar el auth.user)
