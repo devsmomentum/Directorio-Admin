@@ -8,7 +8,8 @@
       "Read(//home/andres-parra/Desktop/Andres/Morna/**)",
       "Bash(dart analyze *)",
       "Bash(git rm *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(node ./node_modules/typescript/bin/tsc --noEmit)"
     ]
   }
 }

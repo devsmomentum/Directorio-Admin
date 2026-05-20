@@ -12,19 +12,15 @@ import {
   methodLabel,
 } from '../payment-fields';
 
-const PLAN_OPTIONS = [
-  { key: 'DIAMANTE', label: 'Diamante' },
-  { key: 'ORO', label: 'Oro' },
-  { key: 'IA_PERFORMANCE', label: 'IA Performance' },
-  { key: 'PUBLI_PROMO_DIARIO', label: 'Publi Promo · Diario' },
-  { key: 'PUBLI_PROMO_SEMANAL', label: 'Publi Promo · Semanal' },
-  { key: 'FLASH_COUPON_DIARIO', label: 'Flash Coupon · Diario' },
-  { key: 'FLASH_COUPON_SEMANAL', label: 'Flash Coupon · Semanal' },
-];
-
-const PLAN_LABELS: Record<string, string> = Object.fromEntries(
-  PLAN_OPTIONS.map(p => [p.key, p.label])
-);
+const PLAN_LABELS: Record<string, string> = {
+  DIAMANTE: 'Diamante',
+  ORO: 'Oro',
+  IA_PERFORMANCE: 'IA Performance',
+  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
+  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
+  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
+  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
+};
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
@@ -36,39 +32,71 @@ const PLAN_COLORS: Record<string, string> = {
   FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
 };
 
-function monthOptions(): string[] {
-  const out: string[] = [];
-  const now = new Date();
-  for (let i = -3; i < 10; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    out.push(`${d.toLocaleString('es-VE', { month: 'long' })} ${d.getFullYear()}`);
+/**
+ * A partir del vencimiento del contrato y la cantidad de ciclos a pagar,
+ * computa el rango que va a quedar cubierto. La fecha de inicio es
+ * (contract_expiry_date + 1 día) o, si el contrato ya venció, hoy.
+ */
+function computePeriod(
+  contractExpiry: string | null | undefined,
+  durationDays: number,
+  cycles: number,
+  todayISO: string,
+): { label: string; start: string; end: string } {
+  const startDate = new Date(`${todayISO}T00:00:00`);
+  if (contractExpiry && contractExpiry >= todayISO) {
+    const d = new Date(`${contractExpiry}T00:00:00`);
+    d.setDate(d.getDate() + 1);
+    startDate.setTime(d.getTime());
   }
-  return out.map(m => m.charAt(0).toUpperCase() + m.slice(1));
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + (durationDays * Math.max(1, cycles)) - 1);
+
+  const fmtMonth = (d: Date) => {
+    const s = d.toLocaleString('es-VE', { month: 'long', year: 'numeric' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
+  const fmtDay = (d: Date) => d.toLocaleDateString('es-VE');
+
+  let label: string;
+  if (durationDays >= 30) {
+    const a = fmtMonth(startDate);
+    const b = fmtMonth(endDate);
+    label = a === b ? a : `${a} → ${b}`;
+  } else {
+    label = `${fmtDay(startDate)} → ${fmtDay(endDate)}`;
+  }
+  return {
+    label,
+    start: startDate.toISOString().split('T')[0],
+    end:   endDate.toISOString().split('T')[0],
+  };
 }
 
 export default function ClientePagosPage() {
   const { selectedStore: store } = useClienteStore();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [activePlan, setActivePlan] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
-  const [period, setPeriod] = useState('');
-  const [plan, setPlan] = useState('');
   const [months, setMonths] = useState(1);
   const [payment, setPayment] = useState<PaymentState>(emptyPaymentState());
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
 
-  const monthsCatalog = useMemo(monthOptions, []);
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
     setLoading(true);
-    const [txRes, reqRes] = await Promise.all([
+    const planQ = store.plan_type
+      ? supabase.from('plans').select('*').eq('plan_key', store.plan_type).maybeSingle()
+      : Promise.resolve({ data: null });
+    const [txRes, reqRes, planRes] = await Promise.all([
       supabase.from('transactions')
         .select('*')
         .eq('transaction_type', 'plan_payment')
@@ -79,23 +107,65 @@ export default function ClientePagosPage() {
         .select('*')
         .eq('store_id', store.id)
         .order('created_at', { ascending: false }),
+      planQ,
     ]);
     setTransactions(txRes.data || []);
     setRequests(reqRes.data || []);
+    setActivePlan(planRes.data ?? null);
     setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, [store]);
 
+  // El form solo se puede abrir si la tienda tiene plan vigente Y contrato con
+  // fecha de vencimiento conocida Y no hay otra solicitud/pago pendiente.
+  // Esto evita reportes simultáneos para la misma tienda.
+  const renewalBlocker = useMemo<string | null>(() => {
+    if (!store) return 'Selecciona una tienda.';
+    if (!store.plan_type) return 'Tu tienda no tiene un plan activo. Solicita un plan primero.';
+    if (!activePlan) return 'No se pudo cargar el plan activo. Reintenta más tarde.';
+    if (!store.contract_expiry_date) {
+      return 'Tu contrato no tiene fecha de vencimiento configurada. Contacta a la administración antes de pagar la renovación.';
+    }
+    const pendingReq = requests.find(r => r.status === 'pending');
+    if (pendingReq) {
+      return `Tienes una solicitud (${PLAN_LABELS[pendingReq.plan_key] || pendingReq.plan_key}) en revisión. Espera a que la administración la verifique antes de registrar otro pago.`;
+    }
+    const scheduledChange = requests.find(r =>
+      r.status === 'approved' && r.effective_date && r.effective_date > today
+    );
+    if (scheduledChange) {
+      return `Tienes un cambio a ${PLAN_LABELS[scheduledChange.plan_key] || scheduledChange.plan_key} agendado para el ${scheduledChange.effective_date}. No puedes renovar el plan actual mientras esté pendiente de activación.`;
+    }
+    const pendingTx = transactions.find(t => (t.status ?? 'pending') === 'pending');
+    if (pendingTx) {
+      return 'Tienes un pago en revisión para esta tienda. Espera a que sea verificado antes de registrar otro.';
+    }
+    return null;
+  }, [store, activePlan, requests, transactions, today]);
+
+  const computedPeriod = useMemo(() => {
+    if (!store || !activePlan) return null;
+    return computePeriod(
+      store.contract_expiry_date,
+      activePlan.duration_days || 30,
+      months,
+      today,
+    );
+  }, [store, activePlan, months, today]);
+
   const openForm = () => {
-    setPeriod(''); setPlan(''); setMonths(1);
+    setMonths(1);
     setPayment(emptyPaymentState()); setNotes('');
     setFormErr(null); setShowForm(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!store) return;
+    if (!store || !activePlan || !computedPeriod || renewalBlocker) {
+      setFormErr(renewalBlocker || 'No se puede registrar el pago en este momento.');
+      return;
+    }
     setFormErr(null);
 
     const built = buildPaymentPayload(payment);
@@ -112,13 +182,14 @@ export default function ClientePagosPage() {
 
     setSubmitting(true);
     const { data: { user } } = await supabase.auth.getUser();
-    const itemName = `Pago plan ${plan} · ${store.name} · ${period} · ${months} ciclo(s)`;
+    const itemName = `Renovación ${activePlan.name} · ${store.name} · ${computedPeriod.label} · ${months} ciclo(s)`;
     const notesParts = [
       p.reference ? `Ref: ${p.reference}` : null,
       p.bank ? `Banco/Plataforma: ${p.bank}` : null,
       p.amountBs != null ? `Bs ${p.amountBs.toLocaleString('es-VE')}` : null,
       p.bcvRate != null ? `BCV ${p.bcvRate}` : null,
       `Ciclos: ${months}`,
+      `Cubre: ${computedPeriod.start} → ${computedPeriod.end}`,
       notes,
     ].filter(Boolean).join(' · ');
 
@@ -132,9 +203,10 @@ export default function ClientePagosPage() {
       status: 'pending',
       user_email: user?.email ?? null,
       store_id: store.id,
-      period,
+      period: computedPeriod.label,
+      months_paid: months,
       notes: notesParts || null,
-      payment_date: new Date().toISOString().split('T')[0],
+      payment_date: today,
     }]);
 
     setSubmitting(false);
@@ -165,8 +237,8 @@ export default function ClientePagosPage() {
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="flex items-end justify-between flex-wrap gap-3">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">
             Cobranzas · {store.name}
           </p>
@@ -178,11 +250,53 @@ export default function ClientePagosPage() {
         </div>
         <button
           onClick={openForm}
-          className="text-sm font-semibold bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg px-4 py-2.5 hover:opacity-90 transition-opacity"
+          disabled={!!renewalBlocker}
+          className="shrink-0 text-sm font-semibold bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg px-4 py-2.5 hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed self-start sm:self-auto"
         >
-          + Registrar pago / renovación
+          + Registrar renovación
         </button>
       </div>
+
+      {renewalBlocker && (
+        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 flex items-start gap-2.5">
+          <svg className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <p className="text-amber-200/90 text-xs leading-relaxed">{renewalBlocker}</p>
+        </div>
+      )}
+
+      {!renewalBlocker && store.contract_expiry_date && (() => {
+        const t = new Date(); t.setHours(0,0,0,0);
+        const exp = new Date(store.contract_expiry_date + 'T00:00:00');
+        const days = Math.round((exp.getTime() - t.getTime()) / 86400000);
+        if (days > 7 || days < 0) return null;
+        const tone = days <= 1 ? 'red' : days <= 3 ? 'orange' : 'amber';
+        const cls = tone === 'red'
+          ? 'bg-red-500/10 border-red-500/30 text-red-200'
+          : tone === 'orange'
+            ? 'bg-orange-500/10 border-orange-500/30 text-orange-200'
+            : 'bg-amber-500/10 border-amber-500/30 text-amber-200';
+        return (
+          <div className={`border rounded-lg p-3 flex items-start gap-2.5 ${cls}`}>
+            <svg className="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="text-xs leading-relaxed">
+              <p className="font-semibold">
+                {days === 0 ? 'Tu plan vence HOY'
+                  : days === 1 ? 'Tu plan vence MAÑANA'
+                  : `Tu plan vence en ${days} días`}{' '}
+                <span className="font-mono opacity-80">({store.contract_expiry_date})</span>
+              </p>
+              <p className="text-white/70 mt-0.5">
+                Si no registras la renovación antes del vencimiento, tu slot quedará libre y otra
+                tienda podrá ocuparlo.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent border border-amber-500/20 rounded-xl p-5">
         <p className="text-amber-300 text-sm font-bold uppercase tracking-wider mb-2">
@@ -380,32 +494,33 @@ export default function ClientePagosPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Mes correspondiente</label>
-                  <select
-                    required value={period} onChange={(e) => setPeriod(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-                  >
-                    <option value="">Seleccionar...</option>
-                    {monthsCatalog.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
+              {/* Plan + tienda: read-only, derivados de la sesión */}
+              <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Tienda</span>
+                  <span className="text-sm text-white/90 font-medium">{store.name}</span>
                 </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan</label>
-                  <select
-                    required value={plan} onChange={(e) => setPlan(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-                  >
-                    <option value="">Seleccionar...</option>
-                    {PLAN_OPTIONS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-                  </select>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Plan activo</span>
+                  {activePlan ? (
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${PLAN_COLORS[activePlan.plan_key] || 'text-white/60 bg-white/5'}`}>
+                      {activePlan.name}
+                    </span>
+                  ) : (
+                    <span className="text-amber-300 text-xs">Sin plan</span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Contrato vence</span>
+                  <span className="text-sm text-white/70 font-mono">
+                    {store.contract_expiry_date || '—'}
+                  </span>
                 </div>
               </div>
 
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                  Ciclos / meses a pagar
+                  Ciclos a pagar {activePlan ? `(${activePlan.duration_days} días c/u)` : ''}
                 </label>
                 <div className="flex items-center gap-2">
                   <button
@@ -413,16 +528,29 @@ export default function ClientePagosPage() {
                     className="w-9 h-9 bg-white/5 hover:bg-white/10 rounded-lg text-white/70 font-bold"
                   >−</button>
                   <input
-                    type="number" min="1" step="1" value={months}
-                    onChange={(e) => setMonths(Math.max(1, parseInt(e.target.value) || 1))}
+                    type="number" min="1" max="12" step="1" value={months}
+                    onChange={(e) => setMonths(Math.min(12, Math.max(1, parseInt(e.target.value) || 1)))}
                     className="flex-1 bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white text-center focus:outline-none focus:border-cyan-500/50"
                   />
                   <button
-                    type="button" onClick={() => setMonths(m => m + 1)} disabled={months >= 12}
+                    type="button" onClick={() => setMonths(m => Math.min(12, m + 1))} disabled={months >= 12}
                     className="w-9 h-9 bg-white/5 hover:bg-white/10 rounded-lg text-white/70 font-bold"
                   >+</button>
                 </div>
               </div>
+
+              {/* Periodo cubierto: autocomputado, read-only */}
+              {computedPeriod && (
+                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
+                  <p className="text-[10px] text-emerald-300/80 uppercase tracking-wider mb-1">
+                    Período cubierto con este pago
+                  </p>
+                  <p className="text-emerald-200 text-sm font-semibold">{computedPeriod.label}</p>
+                  <p className="text-[10px] text-white/40 mt-0.5 font-mono">
+                    {computedPeriod.start} → {computedPeriod.end}
+                  </p>
+                </div>
+              )}
 
               <PaymentFields value={payment} onChange={setPayment} />
 

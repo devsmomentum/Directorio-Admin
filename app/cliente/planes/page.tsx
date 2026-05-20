@@ -34,25 +34,45 @@ export default function ClientePlanesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [widgetErr, setWidgetErr] = useState<string | null>(null);
 
+  const [pendingTxCount, setPendingTxCount] = useState(0);
+  const [nextFreeByPlan, setNextFreeByPlan] = useState<Record<string, string>>({});
+
   useEffect(() => {
     if (!store) { setLoading(false); return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [plansRes, reqRes, storesRes] = await Promise.all([
+      const [plansRes, reqRes, storesRes, txRes] = await Promise.all([
         supabase.from('plans').select('*').eq('is_active', true).order('display_order', { ascending: true }),
-        supabase.from('plan_requests').select('plan_key, status').eq('store_id', store.id),
-        supabase.from('stores').select('plan_type'),
+        supabase.from('plan_requests').select('plan_key, status, effective_date').eq('store_id', store.id),
+        supabase.from('stores').select('plan_type, contract_expiry_date'),
+        supabase.from('transactions')
+          .select('id', { count: 'exact', head: true })
+          .eq('store_id', store.id)
+          .eq('transaction_type', 'plan_payment')
+          .eq('status', 'pending'),
       ]);
       if (cancelled) return;
       setPlans(plansRes.data || []);
       setRequests(reqRes.data || []);
+      setPendingTxCount(txRes.count ?? 0);
 
       const counts: Record<string, number> = {};
+      const nextFreeByPlan: Record<string, string> = {};
+      const todayIso = new Date().toISOString().split('T')[0];
       for (const s of (storesRes.data || [])) {
-        if (s.plan_type) counts[s.plan_type] = (counts[s.plan_type] || 0) + 1;
+        if (!s.plan_type) continue;
+        counts[s.plan_type] = (counts[s.plan_type] || 0) + 1;
+        // Próximo vencimiento por plan (solo expiry futura)
+        if (s.contract_expiry_date && s.contract_expiry_date >= todayIso) {
+          const prev = nextFreeByPlan[s.plan_type];
+          if (!prev || s.contract_expiry_date < prev) {
+            nextFreeByPlan[s.plan_type] = s.contract_expiry_date;
+          }
+        }
       }
       setStoreCounts(counts);
+      setNextFreeByPlan(nextFreeByPlan);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -75,10 +95,12 @@ export default function ClientePlanesPage() {
     return () => { cancelled = true; };
   }, [store, requests.length]);
 
-  const hasPendingRequest = useMemo(
-    () => requests.some(r => r.status === 'pending'),
-    [requests]
-  );
+  const hasPendingRequest = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    return requests.some(r => r.status === 'pending')
+      || requests.some(r => r.status === 'approved' && r.effective_date && r.effective_date > today)
+      || pendingTxCount > 0;
+  }, [requests, pendingTxCount]);
 
   // Fecha en que entrará en vigor un cambio (si aplica).
   const effectiveDate = useMemo<string | null>(() => {
@@ -254,6 +276,22 @@ export default function ClientePlanesPage() {
                       {avail.full && ' · sin cupo'}
                     </p>
                   )}
+                  {avail.full && nextFreeByPlan[p.plan_key] && (() => {
+                    const exp = new Date(nextFreeByPlan[p.plan_key] + 'T00:00:00');
+                    exp.setDate(exp.getDate() + 1);
+                    const nextFree = exp.toISOString().split('T')[0];
+                    return (
+                      <div className="bg-amber-500/5 border border-amber-500/20 rounded-md p-2 mt-1">
+                        <p className="text-[10px] text-amber-200 leading-snug">
+                          <span className="font-semibold">Próximo slot estimado: </span>
+                          <span className="font-mono">{nextFree}</span>
+                        </p>
+                        <p className="text-[9px] text-white/40 mt-0.5 leading-snug">
+                          Aplica solo si la tienda que ocupa ese slot no renueva su contrato a tiempo.
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {p.features?.length > 0 && (

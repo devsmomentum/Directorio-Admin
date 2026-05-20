@@ -170,6 +170,27 @@ export default function ClienteDashboardPage() {
     return dates[0] || null;
   }, [requests, today]);
 
+  // Cambio de plan ya aprobado y pagado, pendiente de activarse
+  const scheduledChange = useMemo(() => {
+    return requests.find(r =>
+      r.status === 'approved'
+      && r.effective_date
+      && r.effective_date > today
+    ) || null;
+  }, [requests, today]);
+
+  // Solicitud aún en revisión por la administración
+  const pendingChange = useMemo(() => {
+    return requests.find(r => r.status === 'pending') || null;
+  }, [requests]);
+
+  const expiryDaysLeft = useMemo<number | null>(() => {
+    if (!store?.contract_expiry_date) return null;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const exp = new Date(store.contract_expiry_date + 'T00:00:00');
+    return Math.round((exp.getTime() - today.getTime()) / 86400000);
+  }, [store]);
+
   if (!store) {
     return (
       <div className="max-w-2xl mx-auto mt-20">
@@ -233,6 +254,183 @@ export default function ClienteDashboardPage() {
           ))}
         </div>
       </div>
+
+      {store.plan_type && store.contract_expiry_date && expiryDaysLeft != null
+        && expiryDaysLeft <= 7 && expiryDaysLeft >= 0
+        && !scheduledChange && !pendingChange && (
+        <div className={`border rounded-xl p-4 flex items-start gap-3 ${
+          expiryDaysLeft <= 1
+            ? 'bg-red-500/10 border-red-500/30'
+            : expiryDaysLeft <= 3
+              ? 'bg-orange-500/10 border-orange-500/30'
+              : 'bg-amber-500/10 border-amber-500/30'
+        }`}>
+          <svg className={`w-5 h-5 mt-0.5 shrink-0 ${
+            expiryDaysLeft <= 1 ? 'text-red-300'
+            : expiryDaysLeft <= 3 ? 'text-orange-300'
+            : 'text-amber-300'
+          }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="flex-1 min-w-0">
+            <p className={`text-sm font-semibold ${
+              expiryDaysLeft <= 1 ? 'text-red-200'
+              : expiryDaysLeft <= 3 ? 'text-orange-200'
+              : 'text-amber-200'
+            }`}>
+              {expiryDaysLeft === 0
+                ? `Tu plan ${PLAN_LABELS[store.plan_type] || store.plan_type} vence HOY`
+                : expiryDaysLeft === 1
+                ? `Tu plan ${PLAN_LABELS[store.plan_type] || store.plan_type} vence MAÑANA`
+                : `Tu plan ${PLAN_LABELS[store.plan_type] || store.plan_type} vence en ${expiryDaysLeft} días`}
+            </p>
+            <p className="text-xs text-white/70 mt-1 leading-relaxed">
+              Si no registras la renovación antes del{' '}
+              <span className="font-mono font-semibold">{store.contract_expiry_date}</span>,
+              tu slot quedará libre y otra empresa podrá tomarlo. Renueva ahora para mantenerlo.
+            </p>
+            <Link
+              href="/cliente/pagos"
+              className="inline-block mt-2.5 text-xs font-semibold text-white bg-white/10 hover:bg-white/20 rounded-md px-3 py-1.5"
+            >
+              Renovar ahora →
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {(store.plan_type || scheduledChange || pendingChange) && (
+        <div className="bg-[#0A0A0A] border border-white/10 rounded-2xl overflow-hidden">
+          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/10">
+            {/* Plan vigente */}
+            <div className="p-5">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">
+                Plan vigente
+              </p>
+              {store.plan_type ? (
+                <>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <h3 className="text-xl font-bold text-white">
+                      {PLAN_LABELS[store.plan_type] || store.plan_type}
+                    </h3>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider ${PLAN_COLORS[store.plan_type] || 'text-white/40 bg-white/5'}`}>
+                      ACTIVO
+                    </span>
+                  </div>
+                  {store.contract_expiry_date ? (
+                    <p className="text-xs mt-2">
+                      <span className="text-white/40">Vence el </span>
+                      <span className={`font-mono font-semibold ${
+                        expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-400'
+                        : expiryDaysLeft != null && expiryDaysLeft <= 7 ? 'text-amber-300'
+                        : 'text-white/80'
+                      }`}>
+                        {store.contract_expiry_date}
+                      </span>
+                      {expiryDaysLeft != null && expiryDaysLeft >= 0 && (
+                        <span className="text-white/40"> · en {expiryDaysLeft} día{expiryDaysLeft === 1 ? '' : 's'}</span>
+                      )}
+                      {expiryDaysLeft != null && expiryDaysLeft < 0 && (
+                        <span className="text-red-400"> · vencido</span>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-xs mt-2 text-white/40">Sin fecha de vencimiento configurada</p>
+                  )}
+                  {!scheduledChange && !pendingChange && store.contract_expiry_date && (
+                    <Link href="/cliente/pagos" className="inline-block mt-3 text-[11px] text-cyan-300 hover:text-cyan-200 font-medium">
+                      Renovar →
+                    </Link>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h3 className="text-xl font-bold text-amber-300">Sin plan asignado</h3>
+                  <p className="text-xs text-white/40 mt-2">Tu tienda aún no tiene un plan publicitario activo.</p>
+                  <Link href="/cliente/planes" className="inline-block mt-3 text-[11px] text-cyan-300 hover:text-cyan-200 font-medium">
+                    Ver catálogo de planes →
+                  </Link>
+                </>
+              )}
+            </div>
+
+            {/* Próximo plan (agendado o en revisión) */}
+            <div className={`p-5 ${
+              scheduledChange ? 'bg-cyan-500/5'
+              : pendingChange ? 'bg-amber-500/5'
+              : ''
+            }`}>
+              {scheduledChange ? (
+                <>
+                  <p className="text-[10px] text-cyan-300/80 uppercase tracking-widest font-medium mb-2 flex items-center gap-1.5">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    Próximo plan · pago confirmado
+                  </p>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <h3 className="text-xl font-bold text-white">
+                      {PLAN_LABELS[scheduledChange.plan_key] || scheduledChange.plan_key}
+                    </h3>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider ${PLAN_COLORS[scheduledChange.plan_key] || 'text-white/40 bg-white/5'}`}>
+                      AGENDADO
+                    </span>
+                  </div>
+                  <p className="text-xs mt-2">
+                    <span className="text-white/40">Se activa el </span>
+                    <span className="font-mono font-semibold text-cyan-200">
+                      {scheduledChange.effective_date}
+                    </span>
+                    {scheduledChange.expires_at && (
+                      <>
+                        <span className="text-white/40"> · vence el </span>
+                        <span className="font-mono text-white/70">{scheduledChange.expires_at}</span>
+                      </>
+                    )}
+                  </p>
+                  <p className="text-[10px] text-white/40 mt-2">
+                    Tu plan actual sigue activo hasta su fecha de vencimiento. El cambio entra en
+                    vigor automáticamente al día siguiente.
+                  </p>
+                </>
+              ) : pendingChange ? (
+                <>
+                  <p className="text-[10px] text-amber-300/80 uppercase tracking-widest font-medium mb-2 flex items-center gap-1.5">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    Solicitud en revisión
+                  </p>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <h3 className="text-xl font-bold text-white">
+                      {PLAN_LABELS[pendingChange.plan_key] || pendingChange.plan_key}
+                    </h3>
+                    <span className="text-[10px] font-semibold tracking-wider text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded">
+                      PENDIENTE
+                    </span>
+                  </div>
+                  <p className="text-xs mt-2 text-white/60">
+                    La administración está verificando tu pago. Te notificaremos al aprobarse.
+                  </p>
+                  <Link href="/cliente/pagos" className="inline-block mt-3 text-[11px] text-amber-300 hover:text-amber-200 font-medium">
+                    Ver solicitud →
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">
+                    Próximo plan
+                  </p>
+                  <p className="text-sm text-white/40">Sin cambios programados.</p>
+                  <p className="text-[10px] text-white/30 mt-2 leading-relaxed">
+                    Para cambiar de plan, solicita el plan deseado en el catálogo y reporta el pago.
+                    El cambio se activará cuando tu plan actual venza.
+                  </p>
+                  <Link href="/cliente/planes" className="inline-block mt-3 text-[11px] text-cyan-300 hover:text-cyan-200 font-medium">
+                    Ver catálogo →
+                  </Link>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Tile label="Impresiones" value={totalImpressions.toLocaleString('es-VE')} accent="text-orange-400"

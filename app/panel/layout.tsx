@@ -16,6 +16,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const router = useRouter();
   const [authorized, setAuthorized] = useState<boolean | null>(null);
+  const [pendingCount, setPendingCount] = useState<number>(0);
 
   useEffect(() => {
     let mounted = true;
@@ -51,6 +52,36 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     return () => { mounted = false; subscription.unsubscribe(); };
   }, [router]);
 
+  // Pendientes en la cola del admin (solicitudes + pagos de renovación).
+  // Refresca: al montar, al cambiar de ruta y cada 30s para que el badge
+  // refleje en ~tiempo real lo que llega del cliente.
+  useEffect(() => {
+    if (authorized !== true) return;
+    let cancelled = false;
+    const load = async () => {
+      const [reqRes, txRes] = await Promise.all([
+        supabase.from('plan_requests')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'pending'),
+        supabase.from('transactions')
+          .select('id', { count: 'exact', head: true })
+          .eq('transaction_type', 'plan_payment')
+          .eq('status', 'pending'),
+      ]);
+      if (cancelled) return;
+      setPendingCount((reqRes.count ?? 0) + (txRes.count ?? 0));
+    };
+    load();
+    const id = setInterval(load, 30_000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [authorized, pathname]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut({ scope: 'local' });
     router.replace('/login');
@@ -70,6 +101,9 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     )},
     { name: 'Clientes', path: '/panel/clientes', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-5.13a4 4 0 11-8 0 4 4 0 018 0zm6 0a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+    )},
+    { name: 'Solicitudes', path: '/panel/solicitudes', icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
     )},
     { name: 'Cupones y Combos', path: '/panel/cupons', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
@@ -110,6 +144,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           {menuItems.map((item) => {
             const isActive = pathname === item.path;
+            const showBadge = item.path === '/panel/solicitudes' && pendingCount > 0;
             return (
               <Link key={item.path} href={item.path}>
                 <span className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
@@ -117,8 +152,18 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
                     ? 'bg-gradient-to-r from-[#FF007A]/20 to-[#FF5900]/20 border border-[#FF007A]/50 text-white'
                     : 'text-white/70 hover:bg-white/5 hover:text-white'
                 }`}>
-                  <span className="shrink-0">{item.icon}</span>
-                  <span className="font-medium text-sm">{item.name}</span>
+                  <span className="shrink-0 relative">
+                    {item.icon}
+                    {showBadge && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-[#111111] animate-pulse" />
+                    )}
+                  </span>
+                  <span className="font-medium text-sm flex-1">{item.name}</span>
+                  {showBadge && (
+                    <span className="ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[10px] font-bold text-white shadow-lg shadow-amber-500/30">
+                      {pendingCount > 99 ? '99+' : pendingCount}
+                    </span>
+                  )}
                 </span>
               </Link>
             );
