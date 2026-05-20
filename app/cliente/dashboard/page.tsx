@@ -50,6 +50,7 @@ export default function ClienteDashboardPage() {
   const [coupons, setCoupons] = useState<any[]>([]);
   const [impressions, setImpressions] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
   const [range, setRange] = useState<Range>('30d');
   const [loading, setLoading] = useState(true);
 
@@ -63,13 +64,17 @@ export default function ClienteDashboardPage() {
       try {
         const start = rangeStart(range);
 
-        const [campRes, couponsRes] = await Promise.all([
+        const [campRes, couponsRes, reqRes] = await Promise.all([
           supabase.from('ad_campaigns')
             .select('id, brand_name, plan_type, start_date, end_date, is_active, payment_status, suspended_at, created_at, media_url, media_type, duration_seconds')
             .eq('store_id', store.id).order('created_at', { ascending: false }),
           supabase.from('coupons')
             .select('id, title, plan_type, code, amount_available, price_usd, category, start_date, end_date, campaign_id, created_at')
             .eq('store_id', store.id).order('created_at', { ascending: false }),
+          supabase.from('plan_requests')
+            .select('*')
+            .eq('store_id', store.id)
+            .order('created_at', { ascending: false }),
         ]);
 
         if (cancelled) return;
@@ -77,6 +82,7 @@ export default function ClienteDashboardPage() {
         const cps = couponsRes.data || [];
         setCampaigns(camps);
         setCoupons(cps);
+        setRequests(reqRes.data || []);
 
         const campIds = camps.map(c => c.id);
         let impQ = supabase.from('ad_impressions_daily')
@@ -150,6 +156,19 @@ export default function ClienteDashboardPage() {
       (c.payment_status ?? 'pending') !== 'overdue' &&
       !c.suspended_at) || null,
     [campaigns, today]);
+
+  const pendingRequests = useMemo(
+    () => requests.filter(r => r.status === 'pending').length,
+    [requests]
+  );
+
+  const nextRenewal = useMemo(() => {
+    const dates = requests
+      .filter(r => r.status === 'approved' && r.expires_at && r.expires_at >= today)
+      .map(r => r.expires_at as string)
+      .sort();
+    return dates[0] || null;
+  }, [requests, today]);
 
   if (!store) {
     return (
@@ -237,7 +256,16 @@ export default function ClienteDashboardPage() {
             ? (store.contract_expiry_date < today ? 'Vencido' : 'Vigente')
             : '—'}
           sub={store.contract_expiry_date ? `Vence ${store.contract_expiry_date}` : 'Sin contrato'} />
+        <Tile label="Próximo vencimiento"
+          accent={nextRenewal ? 'text-amber-300' : 'text-white/40'}
+          value={nextRenewal || '—'}
+          sub={nextRenewal ? 'Recuerda renovar antes' : 'Sin plan aprobado'} />
+        <Tile label="Solicitudes pendientes"
+          accent={pendingRequests > 0 ? 'text-amber-300' : 'text-white/40'}
+          value={pendingRequests}
+          sub={`${requests.length} solicitudes totales`} />
       </div>
+
 
       <div>
         <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Campañas ({campaigns.length})</p>
