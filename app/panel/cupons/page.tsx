@@ -43,7 +43,13 @@ const FLASH_COUPON_BRAND_LIMITS: Record<string, { max: number; windowDays: numbe
   FLASH_COUPON_SEMANAL: { max: 30, windowDays: 5, label: 'semana (5 días)' },
 };
 
-interface Store { id: string; name: string; plan_type: string | null; }
+interface Store {
+  id: string;
+  name: string;
+  plan_type: string | null;
+  flash_coupon_plan: string | null;
+  flash_coupon_expiry_date: string | null;
+}
 interface Campaign { id: string; brand_name: string; }
 
 interface Coupon {
@@ -99,7 +105,11 @@ export default function CuponsAdminPage() {
   const fetchData = async () => {
     setRefreshing(true);
     const [storesRes, campaignsRes, couponsRes] = await Promise.all([
-      supabase.from('stores').select('id, name, plan_type').order('name').limit(500),
+      supabase
+        .from('stores')
+        .select('id, name, plan_type, flash_coupon_plan, flash_coupon_expiry_date')
+        .order('name')
+        .limit(500),
       supabase.from('ad_campaigns').select('id, brand_name').order('brand_name').limit(200),
       supabase.from('coupons').select('*, stores(name)').order('created_at', { ascending: false }).limit(500),
     ]);
@@ -159,7 +169,6 @@ export default function CuponsAdminPage() {
   const pg = usePagination(filteredCoupons);
 
   const handleEditClick = (coupon: Coupon) => {
-    const store = stores.find(s => s.id === coupon.store_id);
     setEditingCouponId(coupon.id);
     setSelectedStoreId(coupon.store_id || '');
     setStoreSearch(coupon.stores?.name || '');
@@ -168,13 +177,38 @@ export default function CuponsAdminPage() {
     setPriceUsd(coupon.price_usd || 0);
     setImagePreview(coupon.image_url || '');
     setImageFile(null);
-    setPlanType(store?.plan_type || '');
+    // El plan_type del cupón se respeta tal cual (sea base o addon flash).
+    setPlanType(coupon.plan_type || '');
     setCategory(coupon.category || '');
     setStartDate(coupon.start_date ? coupon.start_date.split('T')[0] : new Date().toISOString().split('T')[0]);
     setEndDate(coupon.end_date ? coupon.end_date.split('T')[0] : '');
     setCampaignId(coupon.campaign_id || '');
     setShowForm(true);
   };
+
+  // Opciones de plan_type emitible para una tienda: su plan base + cualquier
+  // flavor de addon Flash Coupon que tenga vigente.
+  const selectedStore = useMemo(
+    () => stores.find(s => s.id === selectedStoreId) || null,
+    [stores, selectedStoreId]
+  );
+
+  const flashAddonActive = useMemo(() => {
+    if (!selectedStore?.flash_coupon_plan) return false;
+    const exp = selectedStore.flash_coupon_expiry_date;
+    if (!exp) return true;
+    return exp >= new Date().toISOString().split('T')[0];
+  }, [selectedStore]);
+
+  const planOptionsForStore = useMemo<string[]>(() => {
+    if (!selectedStore) return [];
+    const opts: string[] = [];
+    if (selectedStore.plan_type) opts.push(selectedStore.plan_type);
+    if (flashAddonActive && selectedStore.flash_coupon_plan) {
+      opts.push(selectedStore.flash_coupon_plan);
+    }
+    return opts;
+  }, [selectedStore, flashAddonActive]);
 
   const validateImage = (file: File): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -205,6 +239,17 @@ export default function CuponsAdminPage() {
     e.preventDefault();
     if (!selectedStoreId) { alert('Debes seleccionar una tienda.'); return; }
     if (!endDate) { alert('La fecha de vencimiento es requerida por el esquema.'); return; }
+    if (!planType) { alert('Debes seleccionar el plan del cupón.'); return; }
+
+    // Elegibilidad: el plan_type del cupón debe coincidir con el plan base de
+    // la tienda o con su addon Flash Coupon vigente.
+    if (!planOptionsForStore.includes(planType)) {
+      alert(
+        `La tienda seleccionada no puede emitir cupones bajo el plan ${PLAN_LABELS[planType] || planType}. ` +
+        `Activa el plan base o el addon Flash Coupon en /panel/tiendas antes de continuar.`
+      );
+      return;
+    }
 
     // Cap de 20 marcas en galería para planes Flash Coupon
     if (FLASH_COUPON_PLANS.has(planType)) {
@@ -418,6 +463,9 @@ export default function CuponsAdminPage() {
                             className="px-3 py-2 text-sm text-white hover:bg-white/5 cursor-pointer truncate"
                             onClick={() => {
                               setSelectedStoreId(store.id);
+                              // Auto-seleccionamos el plan base si existe; si la tienda
+                              // solo tiene addon flash, dejamos al admin que elija
+                              // explícitamente el flavor en el selector de Plan.
                               setPlanType(store.plan_type || '');
                               setStoreSearch(store.name);
                               setStoreDropdownOpen(false);
@@ -432,18 +480,37 @@ export default function CuponsAdminPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de la Tienda</label>
-                  <div className="w-full bg-[#0A0A0A] border border-white/5 rounded-lg px-3 py-2.5 text-sm flex items-center min-h-[42px] cursor-default select-none">
-                    {planType ? (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[planType] || 'text-white/40 bg-white/5'}`}>
-                        {PLAN_LABELS[planType] || planType}
-                      </span>
-                    ) : (
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan del Cupón</label>
+                  {planOptionsForStore.length > 0 ? (
+                    <select
+                      required
+                      value={planType}
+                      onChange={e => setPlanType(e.target.value)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    >
+                      <option value="">Seleccionar...</option>
+                      {planOptionsForStore.map(opt => (
+                        <option key={opt} value={opt}>
+                          {FLASH_COUPON_PLANS.has(opt) ? '⚡ ' : ''}
+                          {PLAN_LABELS[opt] || opt}
+                          {FLASH_COUPON_PLANS.has(opt) ? ' (addon flash)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="w-full bg-[#0A0A0A] border border-white/5 rounded-lg px-3 py-2.5 text-sm flex items-center min-h-[42px] cursor-default select-none">
                       <span className="text-white/20 text-xs">
-                        {selectedStoreId ? 'Sin plan asignado' : 'Selecciona una tienda'}
+                        {selectedStoreId
+                          ? 'Esta tienda no tiene plan base ni addon flash activo.'
+                          : 'Selecciona una tienda'}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
+                  {selectedStore?.flash_coupon_plan && !flashAddonActive && (
+                    <p className="text-[10px] text-amber-400 mt-1">
+                      Addon Flash Coupon vencido el {selectedStore.flash_coupon_expiry_date}. Para emitir cupones flash debe renovarse.
+                    </p>
+                  )}
                   {/* Aviso de cupos restantes para Flash Coupon */}
                   {selectedStoreId && FLASH_COUPON_PLANS.has(planType) && (() => {
                     const limit = FLASH_COUPON_BRAND_LIMITS[planType];
@@ -606,9 +673,19 @@ export default function CuponsAdminPage() {
                     {coupon.category && <span className="text-white/20 text-[10px] block mt-0.5">{coupon.category}</span>}
                   </td>
                   <td className="px-5 py-3.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[coupon.plan_type] || 'text-white/40 bg-white/5'}`}>
-                      {PLAN_LABELS[coupon.plan_type] || coupon.plan_type}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {FLASH_COUPON_PLANS.has(coupon.plan_type) && (
+                        <span
+                          title="Cupón Flash: aparece en la galería con captura de datos"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold tracking-wider bg-pink-500/20 text-pink-300 border border-pink-500/40"
+                        >
+                          ⚡ FLASH
+                        </span>
+                      )}
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[coupon.plan_type] || 'text-white/40 bg-white/5'}`}>
+                        {PLAN_LABELS[coupon.plan_type] || coupon.plan_type}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-5 py-3.5">
                     <span className="text-white/40 text-xs block">{new Date(coupon.start_date).toLocaleDateString()}</span>

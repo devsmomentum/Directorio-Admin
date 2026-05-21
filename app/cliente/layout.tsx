@@ -52,7 +52,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
     const { data } = await supabase
       .from('stores')
-      .select('id, name, plan_type, floor_level, local_number, rif, contract_expiry_date, description, categories(id, name, icon)')
+      .select('id, name, plan_type, floor_level, local_number, rif, contract_expiry_date, flash_coupon_plan, flash_coupon_expiry_date, description, categories(id, name, icon)')
       .in('id', storeIds)
       .order('name', { ascending: true });
     const list = (data || []) as any as ClienteStore[];

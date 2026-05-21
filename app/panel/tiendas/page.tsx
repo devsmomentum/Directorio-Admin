@@ -5,15 +5,15 @@ import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 
-// Planes asignables a una tienda (PDF "PLANES DIRECTORIOS")
+// Planes BASE asignables a una tienda (PDF "PLANES DIRECTORIOS").
+// Flash Coupon ya no es plan base: vive como addon en flash_coupon_plan +
+// flash_coupon_expiry_date y se gestiona aparte (ver FLASH_ADDON_OPTIONS).
 const PLAN_TYPES = [
   'DIAMANTE',
   'ORO',
   'IA_PERFORMANCE',
   'PUBLI_PROMO_DIARIO',
   'PUBLI_PROMO_SEMANAL',
-  'FLASH_COUPON_DIARIO',
-  'FLASH_COUPON_SEMANAL',
 ] as const;
 
 // Capacidad máxima de tiendas activas por plan (null = ilimitado)
@@ -23,10 +23,11 @@ const PLAN_MAX_BRANDS: Record<string, number | null> = {
   IA_PERFORMANCE: null,
   PUBLI_PROMO_DIARIO: null,
   PUBLI_PROMO_SEMANAL: null,
-  FLASH_COUPON_DIARIO: 20,
-  FLASH_COUPON_SEMANAL: 20,
-  PROMO_FLASH: 20, // legacy
 };
+
+// Addon Flash Coupon: 20 marcas simultáneas en la galería por flavor.
+const FLASH_ADDON_OPTIONS = ['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL'] as const;
+const FLASH_ADDON_MAX_BRANDS = 20;
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
@@ -36,7 +37,6 @@ const PLAN_COLORS: Record<string, string> = {
   PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10',
   FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
   FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
-  PROMO_FLASH: 'text-pink-400 bg-pink-500/10', // legacy
 };
 
 const PLAN_LABELS: Record<string, string> = {
@@ -47,7 +47,6 @@ const PLAN_LABELS: Record<string, string> = {
   PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
   FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
   FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
-  PROMO_FLASH: 'Promo Flash', // legacy
 };
 
 // Logos → bucket público 'publicidad'
@@ -204,6 +203,10 @@ export default function TiendasCRUD() {
   const [mercantilUrl, setMercantilUrl] = useState('');
   const [contractExpiryDate, setContractExpiryDate] = useState('');
 
+  // Addon Flash Coupon (independiente del plan base)
+  const [flashCouponPlan, setFlashCouponPlan] = useState<string>('');
+  const [flashCouponExpiryDate, setFlashCouponExpiryDate] = useState('');
+
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
@@ -239,6 +242,16 @@ export default function TiendasCRUD() {
     for (const s of stores) {
       if (!s.plan_type) continue;
       byPlan[s.plan_type] = (byPlan[s.plan_type] || 0) + 1;
+    }
+    return byPlan;
+  }, [stores]);
+
+  // Uso por flavor de addon Flash Coupon (FLASH_COUPON_DIARIO / SEMANAL)
+  const flashAddonUsage = useMemo(() => {
+    const byPlan: Record<string, number> = {};
+    for (const s of stores) {
+      if (!s.flash_coupon_plan) continue;
+      byPlan[s.flash_coupon_plan] = (byPlan[s.flash_coupon_plan] || 0) + 1;
     }
     return byPlan;
   }, [stores]);
@@ -286,7 +299,7 @@ export default function TiendasCRUD() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validación de capacidad del plan (Diamante ≤ 2, Oro ≤ 30, Flash Coupon ≤ 20)
+    // Validación de capacidad del plan base (Diamante ≤ 2, Oro ≤ 30)
     if (planType) {
       const cap = PLAN_MAX_BRANDS[planType];
       if (cap != null) {
@@ -301,6 +314,20 @@ export default function TiendasCRUD() {
           );
           return;
         }
+      }
+    }
+
+    // Validación de capacidad del addon Flash Coupon (≤ 20 marcas por flavor)
+    if (flashCouponPlan) {
+      const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
+      const wasSameAddon = editingStore?.flash_coupon_plan === flashCouponPlan;
+      const currentCount = (flashAddonUsage[flashCouponPlan] || 0) - (wasSameAddon ? 1 : 0);
+      if (currentCount >= FLASH_ADDON_MAX_BRANDS) {
+        alert(
+          `Límite alcanzado: ${currentCount}/${FLASH_ADDON_MAX_BRANDS} tiendas con addon ${PLAN_LABELS[flashCouponPlan]}.\n\n` +
+          `Libera un cupo desactivando el addon en otra tienda.`
+        );
+        return;
       }
     }
 
@@ -337,6 +364,8 @@ export default function TiendasCRUD() {
         contract_url: finalContractUrl || null,
         mercantil_url: finalMercantilUrl || null,
         contract_expiry_date: contractExpiryDate || null,
+        flash_coupon_plan: flashCouponPlan || null,
+        flash_coupon_expiry_date: flashCouponPlan ? (flashCouponExpiryDate || null) : null,
       };
 
       let storeId: string | null = editingId;
@@ -379,6 +408,8 @@ export default function TiendasCRUD() {
     setMercantilUrl(store.mercantil_url || '');
     setMercantilFile(null);
     setContractExpiryDate(store.contract_expiry_date || '');
+    setFlashCouponPlan(store.flash_coupon_plan || '');
+    setFlashCouponExpiryDate(store.flash_coupon_expiry_date || '');
 
     // Cargar el usuario vinculado a esta tienda (read-only). La gestión vive
     // en /panel/clientes.
@@ -418,6 +449,8 @@ export default function TiendasCRUD() {
     setContractFile(null); setContractUrl('');
     setMercantilFile(null); setMercantilUrl('');
     setContractExpiryDate('');
+    setFlashCouponPlan('');
+    setFlashCouponExpiryDate('');
     setLinkedUser(null);
     setShowForm(false);
   };
@@ -438,10 +471,9 @@ export default function TiendasCRUD() {
       );
     }
     const planWeight: Record<string, number> = {
-      DIAMANTE: 7, ORO: 6,
-      FLASH_COUPON_SEMANAL: 5, FLASH_COUPON_DIARIO: 4,
+      DIAMANTE: 5, ORO: 4,
       PUBLI_PROMO_SEMANAL: 3, PUBLI_PROMO_DIARIO: 2,
-      IA_PERFORMANCE: 1, PROMO_FLASH: 1,
+      IA_PERFORMANCE: 1,
     };
     return [...result].sort((a, b) => {
       const diff = (planWeight[b.plan_type] || 0) - (planWeight[a.plan_type] || 0);
@@ -501,6 +533,25 @@ export default function TiendasCRUD() {
             <p className="text-white/40 text-xs">Tiendas con cada plan asignado en BD</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {FLASH_ADDON_OPTIONS.map(opt => {
+              const used = flashAddonUsage[opt] || 0;
+              const saturated = used >= FLASH_ADDON_MAX_BRANDS;
+              const tight = used >= FLASH_ADDON_MAX_BRANDS - 2;
+              return (
+                <span
+                  key={opt}
+                  title="Addon Flash Coupon (no es plan base)"
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${saturated
+                    ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                    : tight
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                      : `${PLAN_COLORS[opt]} border-transparent`
+                  }`}
+                >
+                  + {PLAN_LABELS[opt]} <span className="font-mono">{used}/{FLASH_ADDON_MAX_BRANDS}</span>
+                </span>
+              );
+            })}
             {PLAN_TYPES.map(p => {
               const cap = PLAN_MAX_BRANDS[p];
               const used = planUsage[p] || 0;
@@ -828,6 +879,67 @@ export default function TiendasCRUD() {
                 })()}
               </div>
 
+              {/* ── Sección: Addon Flash Coupon ── */}
+              <div className="border-t border-white/5 pt-5">
+                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Addon Flash Coupon</p>
+                <p className="text-[11px] text-white/40 mb-3">
+                  Cupones flash en la galería con captura de datos. Es independiente del plan base:
+                  una tienda con plan Oro o Diamante puede acumular este addon sin renunciar a su plan.
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button" onClick={() => { setFlashCouponPlan(''); setFlashCouponExpiryDate(''); }}
+                    className={`py-2 text-xs font-medium rounded-lg border transition-colors ${!flashCouponPlan
+                      ? 'bg-white/10 text-white border-white/20'
+                      : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'}`}
+                  >
+                    Sin addon
+                  </button>
+                  {FLASH_ADDON_OPTIONS.map(opt => {
+                    const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
+                    const wasSameAddon = editingStore?.flash_coupon_plan === opt;
+                    const used = (flashAddonUsage[opt] || 0) - (wasSameAddon ? 1 : 0);
+                    const saturated = used >= FLASH_ADDON_MAX_BRANDS;
+                    const isSelected = flashCouponPlan === opt;
+                    return (
+                      <button
+                        key={opt} type="button"
+                        onClick={() => { if (!saturated || isSelected) setFlashCouponPlan(opt); }}
+                        disabled={saturated && !isSelected}
+                        title={saturated && !isSelected ? `Addon saturado: ${used}/${FLASH_ADDON_MAX_BRANDS}` : undefined}
+                        className={`py-2 text-xs font-medium rounded-lg border transition-colors ${isSelected
+                          ? `${PLAN_COLORS[opt]} border-current`
+                          : saturated
+                            ? 'bg-red-500/5 text-red-400/50 border-red-500/20 cursor-not-allowed'
+                            : 'bg-white/5 text-white/30 border-white/10 hover:bg-white/10'
+                          }`}
+                      >
+                        <div>{PLAN_LABELS[opt]}</div>
+                        <div className="text-[9px] opacity-70 font-mono mt-0.5">{used}/{FLASH_ADDON_MAX_BRANDS}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {flashCouponPlan && (
+                  <div className="mt-3">
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+                      Vencimiento del addon
+                    </label>
+                    <input
+                      type="date"
+                      value={flashCouponExpiryDate}
+                      onChange={(e) => setFlashCouponExpiryDate(e.target.value)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                    />
+                    {flashCouponExpiryDate && new Date(flashCouponExpiryDate) < new Date(new Date().toDateString()) && (
+                      <p className="text-[10px] text-red-400 mt-1">
+                        Addon vencido: la tienda no podrá subir cupones flash hasta renovarlo.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* ── Sección: Logo ── */}
               <div className="border-t border-white/5 pt-5">
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
@@ -962,13 +1074,31 @@ export default function TiendasCRUD() {
                     </div>
                   </td>
                   <td className="px-5 py-3.5">
-                    {store.plan_type ? (
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[store.plan_type] || 'text-white/40 bg-white/5'}`}>
-                        {PLAN_LABELS[store.plan_type] || store.plan_type}
-                      </span>
-                    ) : (
-                      <span className="text-white/15 text-xs">—</span>
-                    )}
+                    <div className="flex flex-col items-start gap-1">
+                      {store.plan_type ? (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[store.plan_type] || 'text-white/40 bg-white/5'}`}>
+                          {PLAN_LABELS[store.plan_type] || store.plan_type}
+                        </span>
+                      ) : !store.flash_coupon_plan ? (
+                        <span className="text-white/15 text-xs">—</span>
+                      ) : null}
+                      {store.flash_coupon_plan && (() => {
+                        const exp = store.flash_coupon_expiry_date as string | null;
+                        const expired = exp ? exp < new Date().toISOString().split('T')[0] : false;
+                        return (
+                          <span
+                            title={exp ? `Addon vence ${exp}` : 'Addon sin fecha de vencimiento'}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${
+                              expired
+                                ? 'text-red-400 bg-red-500/10 line-through'
+                                : PLAN_COLORS[store.flash_coupon_plan]
+                            }`}
+                          >
+                            +{PLAN_LABELS[store.flash_coupon_plan] || store.flash_coupon_plan}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1">

@@ -9,7 +9,13 @@
       "Bash(dart analyze *)",
       "Bash(git rm *)",
       "Bash(npx tsc *)",
-      "Bash(node ./node_modules/typescript/bin/tsc --noEmit)"
+      "Bash(node ./node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(grep -E \"\\\\.sql$\")",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(node node_modules/eslint/bin/eslint.js app/panel/tiendas/page.tsx app/panel/cupons/page.tsx app/cliente/planes/page.tsx app/cliente/dashboard/page.tsx app/cliente/layout.tsx app/cliente/store-context.tsx)",
+      "Bash(git stash *)"
     ]
   }
 }

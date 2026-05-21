@@ -299,7 +299,7 @@ export default function ClienteDashboardPage() {
         </div>
       )}
 
-      {(store.plan_type || scheduledChange || pendingChange) && (
+      {(store.plan_type || store.flash_coupon_plan || scheduledChange || pendingChange) && (
         <div className="bg-[#0A0A0A] border border-white/10 rounded-2xl overflow-hidden">
           <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/10">
             {/* Plan vigente */}
@@ -352,6 +352,36 @@ export default function ClienteDashboardPage() {
                   </Link>
                 </>
               )}
+              {/* Addon Flash Coupon (independiente del plan base) */}
+              {store.flash_coupon_plan && (() => {
+                const exp = store.flash_coupon_expiry_date;
+                const expired = exp ? exp < today : false;
+                return (
+                  <div className="mt-4 pt-3 border-t border-white/5">
+                    <p className="text-[10px] text-pink-300/70 uppercase tracking-widest font-medium mb-1.5">
+                      Addon Flash Coupon
+                    </p>
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                      <span className="text-sm font-bold text-white">
+                        {PLAN_LABELS[store.flash_coupon_plan] || store.flash_coupon_plan}
+                      </span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider ${
+                        expired
+                          ? 'bg-red-500/15 text-red-400'
+                          : 'bg-pink-500/15 text-pink-300'
+                      }`}>
+                        {expired ? 'VENCIDO' : 'ACTIVO'}
+                      </span>
+                    </div>
+                    {exp && (
+                      <p className="text-[11px] mt-1 text-white/50">
+                        {expired ? 'Venció el ' : 'Vence el '}
+                        <span className="font-mono">{exp}</span>
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Próximo plan (agendado o en revisión) */}

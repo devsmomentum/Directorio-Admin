@@ -10,6 +10,8 @@ export type ClienteStore = {
   local_number: string | null;
   rif: string | null;
   contract_expiry_date: string | null;
+  flash_coupon_plan: string | null;
+  flash_coupon_expiry_date: string | null;
   description?: string | null;
   categories?: { id: string; name: string; icon: string } | null;
 };

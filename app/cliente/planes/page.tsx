@@ -20,6 +20,10 @@ const PLAN_COLORS: Record<string, string> = {
   FLASH_COUPON_SEMANAL: 'from-pink-500/20 to-rose-500/10 border-pink-500/30 text-pink-300',
 };
 
+// Helper: el plan_key corresponde a addon Flash Coupon, no a plan base.
+const isFlashPlan = (key: string) =>
+  key === 'FLASH_COUPON_DIARIO' || key === 'FLASH_COUPON_SEMANAL';
+
 export default function ClientePlanesPage() {
   const { selectedStore: store } = useClienteStore();
   const [plans, setPlans] = useState<any[]>([]);
@@ -95,24 +99,36 @@ export default function ClientePlanesPage() {
     return () => { cancelled = true; };
   }, [store, requests.length]);
 
-  const hasPendingRequest = useMemo(() => {
+  // Hay pendientes en este track (base/flash). El addon Flash Coupon vive en
+  // paralelo al plan base: una solicitud pendiente de Oro NO debe bloquear que
+  // el cliente solicite también un addon Flash Coupon (y viceversa).
+  const hasPendingFor = (planKey: string): boolean => {
     const today = new Date().toISOString().split('T')[0];
-    return requests.some(r => r.status === 'pending')
-      || requests.some(r => r.status === 'approved' && r.effective_date && r.effective_date > today)
-      || pendingTxCount > 0;
-  }, [requests, pendingTxCount]);
+    const wantFlash = isFlashPlan(planKey);
+    if (requests.some(r =>
+      isFlashPlan(r.plan_key) === wantFlash
+      && (r.status === 'pending'
+          || (r.status === 'approved' && r.effective_date && r.effective_date > today)))) {
+      return true;
+    }
+    // Un pago en revisión bloquea todo (consistencia con finanzas y con el RPC).
+    return pendingTxCount > 0;
+  };
 
-  // Fecha en que entrará en vigor un cambio (si aplica).
-  const effectiveDate = useMemo<string | null>(() => {
-    if (!store?.plan_type) return null; // sin plan → activa hoy
-    const exp = store.contract_expiry_date;
-    if (!exp) return null; // bloqueado: admin debe configurar vencimiento
+  // Fecha efectiva de la nueva activación, en función del track.
+  const effectiveDateFor = (planKey: string): string | null => {
+    if (!store) return null;
+    const flash = isFlashPlan(planKey);
+    const currentKey = flash ? store.flash_coupon_plan : store.plan_type;
+    const currentExp = flash ? store.flash_coupon_expiry_date : store.contract_expiry_date;
+    if (!currentKey) return null;
+    if (!currentExp) return null; // bloqueado: admin debe configurar vencimiento
     const today = new Date().toISOString().split('T')[0];
-    if (exp < today) return today;
-    const d = new Date(exp + 'T00:00:00');
+    if (currentExp < today) return today;
+    const d = new Date(currentExp + 'T00:00:00');
     d.setDate(d.getDate() + 1);
     return d.toISOString().split('T')[0];
-  }, [store]);
+  };
 
   const planAvailability = (p: any): { used: number; total: number | null; full: boolean } => {
     if (p.max_brands == null) return { used: 0, total: null, full: false };
@@ -206,13 +222,26 @@ export default function ClientePlanesPage() {
         </p>
       </div>
 
-      {store.plan_type && (
-        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4">
-          <p className="text-emerald-300 text-sm font-semibold">
-            Plan actual de {store.name}: <span className="font-bold">{store.plan_type}</span>
-          </p>
-          <p className="text-white/50 text-xs mt-1">
-            Si quieres cambiar o renovar, solicita el plan deseado y reporta el pago correspondiente.
+      {(store.plan_type || store.flash_coupon_plan) && (
+        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 space-y-1">
+          {store.plan_type && (
+            <p className="text-emerald-300 text-sm font-semibold">
+              Plan base de {store.name}: <span className="font-bold">{store.plan_type}</span>
+              {store.contract_expiry_date && (
+                <span className="text-white/50 text-xs font-normal"> · vence {store.contract_expiry_date}</span>
+              )}
+            </p>
+          )}
+          {store.flash_coupon_plan && (
+            <p className="text-pink-300 text-sm font-semibold">
+              Addon Flash Coupon: <span className="font-bold">{store.flash_coupon_plan}</span>
+              {store.flash_coupon_expiry_date && (
+                <span className="text-white/50 text-xs font-normal"> · vence {store.flash_coupon_expiry_date}</span>
+              )}
+            </p>
+          )}
+          <p className="text-white/50 text-xs">
+            Para cambiar o renovar, solicita el plan/addon deseado y reporta el pago correspondiente.
           </p>
         </div>
       )}
@@ -235,16 +264,29 @@ export default function ClientePlanesPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {plans.map(p => {
             const colors = PLAN_COLORS[p.plan_key] || 'from-white/5 to-white/0 border-white/10 text-white/70';
-            const isCurrent = store.plan_type === p.plan_key;
-            const isChange  = !!store.plan_type && !isCurrent;
-            const noExpiry  = isChange && !store.contract_expiry_date;
+            const flash = isFlashPlan(p.plan_key);
+            const currentKey = flash ? store.flash_coupon_plan : store.plan_type;
+            const currentExp = flash ? store.flash_coupon_expiry_date : store.contract_expiry_date;
+            const today = new Date().toISOString().split('T')[0];
+            const isCurrent = currentKey === p.plan_key && (!currentExp || currentExp >= today);
+            const isChange  = !!currentKey && !isCurrent;
+            const noExpiry  = isChange && !currentExp;
+            const pendingThisTrack = hasPendingFor(p.plan_key);
             const avail = planAvailability(p);
-            const disabled = isCurrent || hasPendingRequest || avail.full || noExpiry;
+            const disabled = isCurrent || pendingThisTrack || avail.full || noExpiry;
+            const effDate = effectiveDateFor(p.plan_key);
             return (
               <div key={p.id} className={`bg-gradient-to-br ${colors} border rounded-2xl p-5 flex flex-col`}>
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <h3 className="text-lg font-bold text-white">{p.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-white">{p.name}</h3>
+                      {flash && (
+                        <span className="text-[9px] font-bold tracking-wider bg-pink-500/20 text-pink-200 border border-pink-500/40 px-1.5 py-0.5 rounded-md">
+                          ADDON
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[11px] text-white/50 font-mono uppercase tracking-wider mt-0.5">
                       {p.plan_key}
                     </p>
@@ -255,6 +297,11 @@ export default function ClientePlanesPage() {
                     </span>
                   )}
                 </div>
+                {flash && (
+                  <p className="text-[10px] text-pink-200/80 bg-pink-500/5 border border-pink-500/15 rounded-md px-2 py-1.5 mb-3">
+                    Se contrata sobre tu plan base. No reemplaza Diamante / Oro / IA Performance / Publi Promo.
+                  </p>
+                )}
 
                 {p.description && (
                   <p className="text-white/60 text-xs mb-4 leading-relaxed">{p.description}</p>
@@ -313,7 +360,7 @@ export default function ClientePlanesPage() {
                   className={`w-full text-sm font-semibold rounded-lg px-4 py-2.5 transition-colors ${
                     isCurrent
                       ? 'bg-emerald-500/10 text-emerald-400 cursor-default'
-                      : hasPendingRequest
+                      : pendingThisTrack
                       ? 'bg-amber-500/10 text-amber-400 cursor-default'
                       : avail.full
                       ? 'bg-red-500/10 text-red-400 cursor-not-allowed'
@@ -325,25 +372,27 @@ export default function ClientePlanesPage() {
                   } disabled:opacity-60`}
                 >
                   {isCurrent
-                    ? 'Plan actual'
-                    : hasPendingRequest
+                    ? (flash ? 'Addon activo' : 'Plan actual')
+                    : pendingThisTrack
                     ? 'Solicitud pendiente'
                     : avail.full
                     ? 'Sin cupo'
                     : noExpiry
                     ? 'Sin fecha de venc.'
                     : isChange
-                    ? 'Solicitar cambio'
-                    : 'Solicitar plan'}
+                    ? (flash ? 'Cambiar addon' : 'Solicitar cambio')
+                    : (flash ? 'Adquirir addon' : 'Solicitar plan')}
                 </button>
-                {isChange && !disabled && effectiveDate && (
+                {isChange && !disabled && effDate && (
                   <p className="text-[10px] text-white/40 mt-1.5 text-center">
-                    Cambio activo el <span className="text-blue-300 font-mono">{effectiveDate}</span>
+                    Activo el <span className="text-blue-300 font-mono">{effDate}</span>
                   </p>
                 )}
                 {noExpiry && (
                   <p className="text-[10px] text-amber-300/80 mt-1.5 text-center">
-                    Tu plan actual no tiene fecha de venc. — contacta a la admin.
+                    {flash
+                      ? 'Tu addon actual no tiene fecha de venc. — contacta a la admin.'
+                      : 'Tu plan actual no tiene fecha de venc. — contacta a la admin.'}
                   </p>
                 )}
               </div>
@@ -358,21 +407,31 @@ export default function ClientePlanesPage() {
           <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className={`bg-gradient-to-br ${PLAN_COLORS[widgetPlan.plan_key] || 'from-white/5 to-white/0'} px-6 py-5 border-b border-white/10`}>
               <div className="flex items-start justify-between">
+                {(() => {
+                  const flashW = isFlashPlan(widgetPlan.plan_key);
+                  const currentKey = flashW ? store.flash_coupon_plan : store.plan_type;
+                  const currentExp = flashW ? store.flash_coupon_expiry_date : store.contract_expiry_date;
+                  const effW = effectiveDateFor(widgetPlan.plan_key);
+                  return (
                 <div>
                   <p className="text-[11px] text-white/60 uppercase tracking-widest mb-1">
-                    {store.plan_type ? `Cambiar de ${store.plan_type} a` : 'Solicitar plan'}
+                    {flashW
+                      ? (currentKey ? `Renovar / cambiar addon (${currentKey})` : 'Adquirir addon Flash Coupon')
+                      : (currentKey ? `Cambiar de ${currentKey} a` : 'Solicitar plan')}
                   </p>
                   <h3 className="text-2xl font-bold text-white">{widgetPlan.name}</h3>
                   <p className="text-[11px] text-white/50 font-mono mt-1">{widgetPlan.plan_key}</p>
-                  {store.plan_type && effectiveDate && (
+                  {currentKey && effW && (
                     <p className="text-[11px] text-white/70 mt-2">
-                      Tu plan actual vence el{' '}
-                      <span className="font-mono text-amber-200">{store.contract_expiry_date || '—'}</span>.
+                      Tu {flashW ? 'addon' : 'plan'} actual vence el{' '}
+                      <span className="font-mono text-amber-200">{currentExp || '—'}</span>.
                       El cambio se activará el{' '}
-                      <span className="font-mono text-cyan-200">{effectiveDate}</span>.
+                      <span className="font-mono text-cyan-200">{effW}</span>.
                     </p>
                   )}
                 </div>
+                  );
+                })()}
                 <button
                   onClick={closeWidget} disabled={submitting}
                   className="text-white/40 hover:text-white/80 disabled:opacity-30"
