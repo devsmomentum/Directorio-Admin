@@ -38,6 +38,12 @@ export default function ClientePlanesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [widgetErr, setWidgetErr] = useState<string | null>(null);
 
+  // Widget de abono a una solicitud existente con saldo pendiente
+  const [abonoRequest, setAbonoRequest] = useState<any | null>(null);
+  const [abonoPayment, setAbonoPayment] = useState<PaymentState>(emptyPaymentState());
+  const [abonoSubmitting, setAbonoSubmitting] = useState(false);
+  const [abonoErr, setAbonoErr] = useState<string | null>(null);
+
   const [pendingTxCount, setPendingTxCount] = useState(0);
   const [nextFreeByPlan, setNextFreeByPlan] = useState<Record<string, string>>({});
 
@@ -48,7 +54,10 @@ export default function ClientePlanesPage() {
       setLoading(true);
       const [plansRes, reqRes, storesRes, txRes] = await Promise.all([
         supabase.from('plans').select('*').eq('is_active', true).order('display_order', { ascending: true }),
-        supabase.from('plan_requests').select('plan_key, status, effective_date').eq('store_id', store.id),
+        supabase.from('plan_requests')
+          .select('id, plan_key, status, effective_date, total_amount_usd, paid_amount_usd, months_requested, created_at')
+          .eq('store_id', store.id)
+          .order('created_at', { ascending: false }),
         supabase.from('stores').select('plan_type, contract_expiry_date'),
         supabase.from('transactions')
           .select('id', { count: 'exact', head: true })
@@ -90,7 +99,7 @@ export default function ClientePlanesPage() {
       const { data } = await supabase
         .from('plan_requests')
         .select('plan_key')
-        .eq('status', 'pending');
+        .in('status', ['pending','partial']);
       if (cancelled) return;
       const m: Record<string, number> = {};
       for (const r of (data || [])) m[r.plan_key] = (m[r.plan_key] || 0) + 1;
@@ -107,13 +116,18 @@ export default function ClientePlanesPage() {
     const wantFlash = isFlashPlan(planKey);
     if (requests.some(r =>
       isFlashPlan(r.plan_key) === wantFlash
-      && (r.status === 'pending'
+      && (r.status === 'pending' || r.status === 'partial'
           || (r.status === 'approved' && r.effective_date && r.effective_date > today)))) {
       return true;
     }
-    // Un pago en revisión bloquea todo (consistencia con finanzas y con el RPC).
-    return pendingTxCount > 0;
+    return false;
   };
+
+  // Solicitudes con saldo abierto (para mostrar banner de abono)
+  const openRequests = useMemo(
+    () => requests.filter((r: any) => r.status === 'pending' || r.status === 'partial'),
+    [requests]
+  );
 
   // Fecha efectiva de la nueva activación, en función del track.
   const effectiveDateFor = (planKey: string): string | null => {
@@ -163,6 +177,11 @@ export default function ClientePlanesPage() {
       return;
     }
     const p = built.payload;
+    const reported = Number(p.amountUsd ?? totalUsd);
+    if (reported > totalUsd + 0.005) {
+      setWidgetErr(`El monto reportado (${reported.toFixed(2)} USD) supera el costo total del plan (${totalUsd.toFixed(2)} USD).`);
+      return;
+    }
 
     setSubmitting(true);
     const { data, error } = await supabase.rpc('request_plan_atomic', {
@@ -190,6 +209,47 @@ export default function ClientePlanesPage() {
     });
     if (data) setRequests(r => [data as any, ...r]);
     setWidgetPlan(null);
+  };
+
+  const handleAbonoSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!abonoRequest) return;
+    setAbonoErr(null);
+    const built = buildPaymentPayload(abonoPayment);
+    if (built.error || !built.payload) {
+      setAbonoErr(built.error || 'Datos de pago incompletos.');
+      return;
+    }
+    const p = built.payload;
+    const outstanding = Math.max(
+      Number(abonoRequest.total_amount_usd ?? 0) - Number(abonoRequest.paid_amount_usd ?? 0),
+      0,
+    );
+    const reported = Number(p.amountUsd ?? 0);
+    if (reported <= 0) {
+      setAbonoErr('Indica el monto en USD.');
+      return;
+    }
+    if (reported > outstanding + 0.005) {
+      setAbonoErr(`El abono (${reported.toFixed(2)} USD) supera el saldo pendiente (${outstanding.toFixed(2)} USD).`);
+      return;
+    }
+    setAbonoSubmitting(true);
+    const { error } = await supabase.rpc('report_additional_payment_atomic', {
+      p_request_id:        abonoRequest.id,
+      p_payment_method:    p.method,
+      p_payment_reference: p.reference,
+      p_payment_bank:      p.bank,
+      p_amount_bs:         p.amountBs,
+      p_amount_usd:        p.amountUsd ?? 0,
+      p_bcv_rate:          p.bcvRate,
+      p_notes:             `Abono a solicitud ${abonoRequest.plan_key}`,
+    });
+    setAbonoSubmitting(false);
+    if (error) { setAbonoErr(error.message); return; }
+    setFeedback({ type: 'ok', msg: 'Abono reportado. Será verificado por la administración.' });
+    setAbonoRequest(null);
+    setAbonoPayment(emptyPaymentState());
   };
 
   if (!store) {
@@ -245,6 +305,101 @@ export default function ClientePlanesPage() {
           </p>
         </div>
       )}
+
+      {openRequests.length > 0 && (
+        <div className="space-y-2">
+          {openRequests.map((r: any) => {
+            const total = Number(r.total_amount_usd ?? 0);
+            const paid  = Number(r.paid_amount_usd ?? 0);
+            const outstanding = Math.max(total - paid, 0);
+            return (
+              <div key={r.id} className="bg-amber-500/[0.06] border border-amber-500/25 rounded-xl p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-amber-200 text-sm font-semibold">
+                      Solicitud en curso · {r.plan_key}
+                      <span className="ml-2 text-[10px] font-mono uppercase bg-amber-500/15 text-amber-300 px-1.5 py-0.5 rounded">
+                        {r.status === 'partial' ? 'PARCIAL' : 'EN REVISIÓN'}
+                      </span>
+                    </p>
+                    <p className="text-white/60 text-xs mt-1">
+                      Pagado <span className="font-mono text-emerald-300">${paid.toFixed(2)}</span> de{' '}
+                      <span className="font-mono text-white">${total.toFixed(2)}</span> · saldo{' '}
+                      <span className="font-mono text-amber-300 font-bold">${outstanding.toFixed(2)}</span>
+                    </p>
+                    <p className="text-white/40 text-[11px] mt-0.5">
+                      El plan se activa cuando el saldo llegue a $0.00.
+                    </p>
+                  </div>
+                  {outstanding > 0 && (
+                    <button
+                      onClick={() => { setAbonoRequest(r); setAbonoPayment(emptyPaymentState()); setAbonoErr(null); }}
+                      className="shrink-0 text-sm font-semibold bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-100 rounded-lg px-4 py-2"
+                    >
+                      Reportar abono
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {abonoRequest && (() => {
+        const total = Number(abonoRequest.total_amount_usd ?? 0);
+        const paid  = Number(abonoRequest.paid_amount_usd ?? 0);
+        const outstanding = Math.max(total - paid, 0);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!abonoSubmitting) setAbonoRequest(null); }} />
+            <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[92vh] overflow-y-auto">
+              <div className="bg-gradient-to-br from-amber-500/15 to-orange-500/5 px-6 py-5 border-b border-white/10">
+                <p className="text-[11px] text-white/60 uppercase tracking-widest mb-1">
+                  Abono a solicitud
+                </p>
+                <h3 className="text-xl font-bold text-white">{abonoRequest.plan_key}</h3>
+                <div className="grid grid-cols-3 gap-3 mt-4 text-center">
+                  <div className="bg-white/[0.04] rounded-lg p-2">
+                    <p className="text-[9px] text-white/40 uppercase">Total</p>
+                    <p className="text-white font-mono text-sm font-bold">${total.toFixed(2)}</p>
+                  </div>
+                  <div className="bg-white/[0.04] rounded-lg p-2">
+                    <p className="text-[9px] text-white/40 uppercase">Pagado</p>
+                    <p className="text-emerald-300 font-mono text-sm font-bold">${paid.toFixed(2)}</p>
+                  </div>
+                  <div className="bg-amber-500/10 rounded-lg p-2">
+                    <p className="text-[9px] text-amber-300/70 uppercase">Saldo</p>
+                    <p className="text-amber-300 font-mono text-sm font-bold">${outstanding.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+              <form onSubmit={handleAbonoSubmit} className="px-6 py-5 space-y-4">
+                <PaymentFields value={abonoPayment} onChange={setAbonoPayment} />
+                {abonoErr && (
+                  <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg p-2.5 text-xs">
+                    {abonoErr}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button" onClick={() => setAbonoRequest(null)} disabled={abonoSubmitting}
+                    className="flex-1 px-4 py-2.5 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit" disabled={abonoSubmitting}
+                    className="flex-1 px-4 py-2.5 text-sm font-semibold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 rounded-lg disabled:opacity-50"
+                  >
+                    {abonoSubmitting ? 'Enviando…' : 'Reportar abono'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
       {feedback && (
         <div className={`rounded-lg p-3 text-sm border ${

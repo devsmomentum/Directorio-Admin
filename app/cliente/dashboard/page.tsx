@@ -181,7 +181,7 @@ export default function ClienteDashboardPage() {
 
   // Solicitud aún en revisión por la administración
   const pendingChange = useMemo(() => {
-    return requests.find(r => r.status === 'pending') || null;
+    return requests.find(r => r.status === 'pending' || r.status === 'partial') || null;
   }, [requests]);
 
   const expiryDaysLeft = useMemo<number | null>(() => {
@@ -432,14 +432,38 @@ export default function ClienteDashboardPage() {
                       {PLAN_LABELS[pendingChange.plan_key] || pendingChange.plan_key}
                     </h3>
                     <span className="text-[10px] font-semibold tracking-wider text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded">
-                      PENDIENTE
+                      {pendingChange.status === 'partial' ? 'PARCIAL' : 'PENDIENTE'}
                     </span>
                   </div>
+                  {(() => {
+                    const total = Number(pendingChange.total_amount_usd ?? 0);
+                    const paid  = Number(pendingChange.paid_amount_usd ?? 0);
+                    const outstanding = Math.max(total - paid, 0);
+                    if (total <= 0) return null;
+                    return (
+                      <div className="grid grid-cols-3 gap-2 mt-3">
+                        <div className="bg-white/[0.04] rounded p-1.5 text-center">
+                          <p className="text-[9px] text-white/40 uppercase">Total</p>
+                          <p className="text-white font-mono text-xs font-bold">${total.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-white/[0.04] rounded p-1.5 text-center">
+                          <p className="text-[9px] text-white/40 uppercase">Pagado</p>
+                          <p className="text-emerald-300 font-mono text-xs font-bold">${paid.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-amber-500/10 rounded p-1.5 text-center">
+                          <p className="text-[9px] text-amber-300/70 uppercase">Saldo</p>
+                          <p className="text-amber-300 font-mono text-xs font-bold">${outstanding.toFixed(2)}</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <p className="text-xs mt-2 text-white/60">
-                    La administración está verificando tu pago. Te notificaremos al aprobarse.
+                    {pendingChange.status === 'partial'
+                      ? 'Solicitud en curso con saldo pendiente. Reporta el faltante para activar el plan.'
+                      : 'La administración está verificando tu pago. Te notificaremos al aprobarse.'}
                   </p>
-                  <Link href="/cliente/pagos" className="inline-block mt-3 text-[11px] text-amber-300 hover:text-amber-200 font-medium">
-                    Ver solicitud →
+                  <Link href="/cliente/planes" className="inline-block mt-3 text-[11px] text-amber-300 hover:text-amber-200 font-medium">
+                    {pendingChange.status === 'partial' ? 'Reportar abono →' : 'Ver solicitud →'}
                   </Link>
                 </>
               ) : (

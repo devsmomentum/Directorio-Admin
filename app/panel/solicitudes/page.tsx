@@ -35,13 +35,12 @@ const METHOD_LABEL: Record<string, string> = {
   otro: 'Otro',
 };
 
-type Tab = 'requests' | 'payments';
+type Tab = 'payments';
 type StatusFilter = 'pending' | 'resolved' | 'all';
 
 type StoreLite = { id: string; name: string; local_number: string | null };
 
 export default function SolicitudesPanelPage() {
-  const [tab, setTab] = useState<Tab>('requests');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
   const [requests, setRequests] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -75,13 +74,14 @@ export default function SolicitudesPanelPage() {
     setRefreshing(false);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // Mapa de solicitudes por id, para enriquecer los pagos en la lista/modal.
+  const requestById = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const r of requests) m[r.id] = r;
+    return m;
+  }, [requests]);
 
-  const filteredRequests = useMemo(() => {
-    if (statusFilter === 'all') return requests;
-    if (statusFilter === 'pending') return requests.filter(r => r.status === 'pending');
-    return requests.filter(r => r.status !== 'pending');
-  }, [requests, statusFilter]);
+  useEffect(() => { fetchData(); }, []);
 
   const filteredPayments = useMemo(() => {
     if (statusFilter === 'all') return payments;
@@ -91,22 +91,15 @@ export default function SolicitudesPanelPage() {
     return payments.filter(p => (p.status ?? 'pending') !== 'pending');
   }, [payments, statusFilter]);
 
-  const pendingReqCount = useMemo(() => requests.filter(r => r.status === 'pending').length, [requests]);
   const pendingPayCount = useMemo(
     () => payments.filter(p => (p.status ?? 'pending') === 'pending').length,
     [payments]
   );
 
-  const approveRequest = async (row: any) => {
-    setBusy(true); setFeedback(null);
-    const { error } = await supabase.rpc('admin_approve_plan_request', { p_request_id: row.id });
-    setBusy(false);
-    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
-    setFeedback({ type: 'ok', msg: `Solicitud aprobada y plan activado.` });
-    setDetail(null);
-    fetchData();
-  };
-  const rejectRequest = async (row: any) => {
+  // Helper sin uso: el rechazo de la solicitud entera ahora se hace vía RPC
+  // cuando se rechaza un pago (admin_reject_plan_payment). Se deja stub para
+  // no tocar imports.
+  const _rejectRequest = async (row: any) => {
     setBusy(true); setFeedback(null);
     const { error } = await supabase.rpc('admin_reject_plan_request', {
       p_request_id: row.id, p_reason: rejectReason || null,
@@ -179,36 +172,14 @@ export default function SolicitudesPanelPage() {
 
       <div className="flex flex-wrap gap-2 items-center">
         <div className="flex bg-white/[0.03] border border-white/10 rounded-lg p-1">
-          <button
-            onClick={() => setTab('requests')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              tab === 'requests'
-                ? 'bg-[#FF007A]/20 text-[#FF99CC]'
-                : 'text-white/50 hover:text-white/80'
-            }`}
-          >
-            Solicitudes de plan
-            {pendingReqCount > 0 && (
-              <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-amber-500/20 text-amber-300 rounded text-[10px] font-bold">
-                {pendingReqCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setTab('payments')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              tab === 'payments'
-                ? 'bg-[#FF007A]/20 text-[#FF99CC]'
-                : 'text-white/50 hover:text-white/80'
-            }`}
-          >
-            Renovaciones
+          <span className="px-3 py-1.5 text-xs font-medium rounded-md bg-[#FF007A]/20 text-[#FF99CC]">
+            Pagos
             {pendingPayCount > 0 && (
               <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-amber-500/20 text-amber-300 rounded text-[10px] font-bold">
                 {pendingPayCount}
               </span>
             )}
-          </button>
+          </span>
         </div>
 
         <div className="flex bg-white/[0.03] border border-white/10 rounded-lg p-1">
@@ -228,50 +199,34 @@ export default function SolicitudesPanelPage() {
         </div>
       </div>
 
-      {tab === 'requests' ? (
-        filteredRequests.length === 0 ? (
-          <EmptyState text="Sin solicitudes" />
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filteredRequests.map(r => (
-              <SolicitudCard
-                key={r.id}
-                kind="requests"
-                row={r}
-                store={storesById[r.store_id]}
-                onOpen={() => { setRejectReason(''); setDetail({ kind: 'requests', row: r }); }}
-              />
-            ))}
-          </div>
-        )
+      {filteredPayments.length === 0 ? (
+        <EmptyState text="Sin pagos" />
       ) : (
-        filteredPayments.length === 0 ? (
-          <EmptyState text="Sin pagos" />
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filteredPayments.map(p => (
-              <SolicitudCard
-                key={p.id}
-                kind="payments"
-                row={p}
-                store={storesById[p.store_id]}
-                onOpen={() => { setRejectReason(''); setDetail({ kind: 'payments', row: p }); }}
-              />
-            ))}
-          </div>
-        )
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {filteredPayments.map(p => (
+            <SolicitudCard
+              key={p.id}
+              kind="payments"
+              row={p}
+              store={storesById[p.store_id]}
+              requestById={requestById}
+              onOpen={() => { setRejectReason(''); setDetail({ kind: 'payments', row: p }); }}
+            />
+          ))}
+        </div>
       )}
 
       {detail && (
         <DetailModal
           detail={detail}
           storesById={storesById}
+          requestById={requestById}
           rejectReason={rejectReason}
           setRejectReason={setRejectReason}
           busy={busy}
           onClose={() => { if (!busy) { setDetail(null); setRejectReason(''); } }}
-          onApprove={() => detail.kind === 'requests' ? approveRequest(detail.row) : approvePayment(detail.row)}
-          onReject={() => detail.kind === 'requests' ? rejectRequest(detail.row) : rejectPayment(detail.row)}
+          onApprove={() => approvePayment(detail.row)}
+          onReject={() => rejectPayment(detail.row)}
         />
       )}
     </div>
@@ -279,11 +234,12 @@ export default function SolicitudesPanelPage() {
 }
 
 function DetailModal({
-  detail, storesById, rejectReason, setRejectReason, busy,
+  detail, storesById, requestById, rejectReason, setRejectReason, busy,
   onClose, onApprove, onReject,
 }: {
   detail: { kind: Tab; row: any };
   storesById: Record<string, StoreLite>;
+  requestById: Record<string, any>;
   rejectReason: string;
   setRejectReason: (s: string) => void;
   busy: boolean;
@@ -291,12 +247,15 @@ function DetailModal({
   onApprove: () => void;
   onReject: () => void;
 }) {
-  const { kind, row } = detail;
+  const { row } = detail;
   const store = storesById[row.store_id];
-  const isPending = kind === 'requests'
-    ? row.status === 'pending'
-    : (row.status ?? 'pending') === 'pending';
-  const title = kind === 'requests' ? 'Solicitud de plan' : 'Pago de renovación';
+  const isPaymentPending = (row.status ?? 'pending') === 'pending';
+  const title = 'Pago';
+  // Saldo: leer de la solicitud enlazada (row.plan_request_id)
+  const linked = row.plan_request_id ? requestById[row.plan_request_id] : null;
+  const total = Number(linked?.total_amount_usd ?? 0);
+  const paid  = Number(linked?.paid_amount_usd ?? 0);
+  const outstanding = Math.max(total - paid, 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -316,25 +275,22 @@ function DetailModal({
         </div>
 
         <div className="px-6 py-5 space-y-4 text-sm">
-          <DetailRow label="Plan">
-            {kind === 'requests' ? (
-              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${PLAN_COLORS[row.plan_key] || 'text-white/40 bg-white/5'}`}>
-                {PLAN_LABELS[row.plan_key] || row.plan_key}
-              </span>
-            ) : (
-              <span className="text-white/80">{row.item_name}</span>
-            )}
+          <DetailRow label="Concepto">
+            <span className="text-white/80">{row.item_name}</span>
           </DetailRow>
+          {linked?.plan_key && (
+            <DetailRow label="Plan">
+              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${PLAN_COLORS[linked.plan_key] || 'text-white/40 bg-white/5'}`}>
+                {PLAN_LABELS[linked.plan_key] || linked.plan_key}
+              </span>
+            </DetailRow>
+          )}
           <DetailRow label="Estado">
-            <span className="uppercase font-semibold text-[11px]">
-              {kind === 'requests' ? row.status : (row.status ?? 'pending')}
-            </span>
+            <span className="uppercase font-semibold text-[11px]">{row.status ?? 'pending'}</span>
           </DetailRow>
           <DetailRow label="Método">{METHOD_LABEL[row.payment_method] || row.payment_method || '—'}</DetailRow>
           <DetailRow label="Monto USD">
-            <span className="text-emerald-300 font-mono">
-              ${Number(row.amount_usd ?? 0).toFixed(2)}
-            </span>
+            <span className="text-emerald-300 font-mono">${Number(row.amount_usd ?? 0).toFixed(2)}</span>
           </DetailRow>
           {row.amount_bs != null && (
             <DetailRow label="Monto Bs">
@@ -347,40 +303,43 @@ function DetailModal({
             </DetailRow>
           )}
           {row.payment_bank && <DetailRow label="Banco / plataforma">{row.payment_bank}</DetailRow>}
-          {row.payment_reference && (
-            <DetailRow label="Referencia">
-              <span className="font-mono break-all">{row.payment_reference}</span>
-            </DetailRow>
+          <DetailRow label="Ciclos">{row.months_paid || linked?.months_requested || '—'}</DetailRow>
+          <DetailRow label="Período">{row.period || '—'}</DetailRow>
+          {row.payment_date && (
+            <DetailRow label="Fecha pago"><span className="font-mono">{row.payment_date}</span></DetailRow>
           )}
-          {kind === 'requests' && (
-            <>
-              <DetailRow label="Ciclos">{row.months_requested || '—'}</DetailRow>
-              <DetailRow label="Fecha efectiva">
-                <span className="font-mono">{row.effective_date || '—'}</span>
+
+          {linked && total > 0 && (
+            <div className="border-t border-white/10 pt-3 space-y-1.5">
+              <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">
+                Estado de cuenta de la solicitud
+              </p>
+              <DetailRow label="Costo total">
+                <span className="text-white font-mono">${total.toFixed(2)}</span>
               </DetailRow>
-              {row.expires_at && (
-                <DetailRow label="Vencerá">
-                  <span className="font-mono text-amber-300">{row.expires_at}</span>
-                </DetailRow>
+              <DetailRow label="Pagado (aprobado)">
+                <span className="text-emerald-300 font-mono">${paid.toFixed(2)}</span>
+              </DetailRow>
+              <DetailRow label="Saldo pendiente">
+                <span className={`font-mono font-bold ${outstanding > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                  ${outstanding.toFixed(2)}
+                </span>
+              </DetailRow>
+              {outstanding > 0 && (
+                <p className="text-[11px] text-white/40 pt-1">
+                  Al aprobar este pago, si el saldo llega a $0.00 el plan se activa automáticamente.
+                </p>
               )}
-            </>
+            </div>
           )}
-          {kind === 'payments' && (
-            <>
-              <DetailRow label="Ciclos">{row.months_paid || '—'}</DetailRow>
-              <DetailRow label="Período">{row.period || '—'}</DetailRow>
-              {row.payment_date && (
-                <DetailRow label="Fecha pago"><span className="font-mono">{row.payment_date}</span></DetailRow>
-              )}
-            </>
-          )}
+
           {row.notes && (
             <DetailRow label="Notas">
               <pre className="whitespace-pre-wrap text-[11px] text-white/60 font-sans">{row.notes}</pre>
             </DetailRow>
           )}
 
-          {isPending && (
+          {isPaymentPending && (
             <div className="border-t border-white/10 pt-4 space-y-3">
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
@@ -399,19 +358,18 @@ function DetailModal({
                   onClick={onReject} disabled={busy}
                   className="flex-1 px-4 py-2.5 text-sm font-semibold bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 rounded-lg disabled:opacity-50"
                 >
-                  {busy ? 'Procesando…' : 'Rechazar'}
+                  {busy ? 'Procesando…' : 'Rechazar pago'}
                 </button>
                 <button
                   onClick={onApprove} disabled={busy}
                   className="flex-1 px-4 py-2.5 text-sm font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-lg disabled:opacity-50"
                 >
-                  {busy ? 'Procesando…' : 'Aprobar y registrar ingreso'}
+                  {busy ? 'Procesando…' : 'Aprobar pago'}
                 </button>
               </div>
               <p className="text-[10px] text-white/30">
-                Al aprobar, se valida el cupo del plan, se actualiza el contrato de la tienda y se
-                registra la transacción como ingreso en finanzas. La operación es atómica: si dos
-                admins aprueban simultáneamente, solo una pasa.
+                Aprobar el pago lo registra como ingreso. Si la solicitud asociada cubre su saldo con
+                esta aprobación, el plan se activa en la misma operación.
               </p>
             </div>
           )}
@@ -439,32 +397,36 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function SolicitudCard({
-  kind, row, store, onOpen,
+  kind: _kind, row, store, requestById, onOpen,
 }: {
   kind: Tab;
   row: any;
   store?: StoreLite;
+  requestById?: Record<string, any>;
   onOpen: () => void;
 }) {
-  const isRequest = kind === 'requests';
-  const planKey = isRequest ? row.plan_key : null;
-  const planChip = isRequest
-    ? (PLAN_LABELS[row.plan_key] || row.plan_key)
+  // Sólo manejamos pagos en la lista. Para mostrar el plan, leemos de la
+  // solicitud enlazada cuando exista; los pagos legacy (renovaciones puras)
+  // muestran solo el item_name.
+  const linked = row.plan_request_id ? requestById?.[row.plan_request_id] : null;
+  const planKey = linked?.plan_key || null;
+  const planChip = planKey
+    ? (PLAN_LABELS[planKey] || planKey)
     : (row.item_name || 'Renovación');
-  const planClr = isRequest
-    ? (PLAN_COLORS[row.plan_key] || 'text-white/40 bg-white/5')
+  const planClr = planKey
+    ? (PLAN_COLORS[planKey] || 'text-white/40 bg-white/5')
     : 'text-white/70 bg-white/5';
 
-  const st = isRequest ? row.status : (row.status ?? 'pending');
-  const sUi = isRequest
-    ? (st === 'approved'  ? { txt: 'APROBADA',  cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' }
-      : st === 'rejected' ? { txt: 'RECHAZADA', cls: 'text-red-400 bg-red-500/10 border-red-500/20' }
-      : { txt: 'REVISIÓN', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/20' })
-    : (st === 'completed' ? { txt: 'COMPLETADO', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' }
-      : st === 'rejected' ? { txt: 'RECHAZADO',  cls: 'text-red-400 bg-red-500/10 border-red-500/20' }
-      : { txt: 'REVISIÓN', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/20' });
+  const st = row.status ?? 'pending';
+  const sUi = st === 'completed' ? { txt: 'COMPLETADO', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' }
+    : st === 'rejected' ? { txt: 'RECHAZADO',  cls: 'text-red-400 bg-red-500/10 border-red-500/20' }
+    : { txt: 'REVISIÓN', cls: 'text-amber-400 bg-amber-500/10 border-amber-500/20' };
 
   const isPending = st === 'pending';
+  // Saldo de la solicitud enlazada
+  const total = Number(linked?.total_amount_usd ?? 0);
+  const paid  = Number(linked?.paid_amount_usd ?? 0);
+  const outstanding = Math.max(total - paid, 0);
 
   return (
     <button
@@ -488,13 +450,33 @@ function SolicitudCard({
 
       {/* Plan chip */}
       <div className="mb-3">
-        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${planClr} ${!isRequest ? 'whitespace-normal break-words' : ''}`}>
+        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold whitespace-normal break-words ${planClr}`}>
           {planChip}
         </span>
         {planKey && (
           <span className="ml-1.5 text-[9px] text-white/30 font-mono uppercase">{planKey}</span>
         )}
       </div>
+
+      {/* Saldo de la solicitud enlazada (si aplica) */}
+      {total > 0 && (
+        <div className="mb-3 bg-white/[0.03] border border-white/5 rounded-lg p-2 grid grid-cols-3 gap-1 text-[10px]">
+          <div>
+            <p className="text-white/30 uppercase tracking-wider text-[9px]">Total</p>
+            <p className="text-white font-mono">${total.toFixed(2)}</p>
+          </div>
+          <div>
+            <p className="text-white/30 uppercase tracking-wider text-[9px]">Pagado</p>
+            <p className="text-emerald-300 font-mono">${paid.toFixed(2)}</p>
+          </div>
+          <div>
+            <p className="text-white/30 uppercase tracking-wider text-[9px]">Saldo</p>
+            <p className={`font-mono font-bold ${outstanding > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
+              ${outstanding.toFixed(2)}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Métricas */}
       <div className="grid grid-cols-2 gap-2 mb-3 text-[11px]">
@@ -514,17 +496,10 @@ function SolicitudCard({
             <p className="text-white/80 font-mono">{Number(row.amount_bs).toLocaleString('es-VE')}</p>
           </div>
         )}
-        {isRequest ? (
-          <div>
-            <p className="text-white/30 text-[9px] uppercase tracking-wider">Ciclos</p>
-            <p className="text-white/80 font-mono">{row.months_requested || '—'}</p>
-          </div>
-        ) : (
-          <div>
-            <p className="text-white/30 text-[9px] uppercase tracking-wider">Período</p>
-            <p className="text-white/80 truncate">{row.period || '—'}</p>
-          </div>
-        )}
+        <div>
+          <p className="text-white/30 text-[9px] uppercase tracking-wider">Período</p>
+          <p className="text-white/80 truncate">{row.period || '—'}</p>
+        </div>
       </div>
 
       {/* Footer */}
