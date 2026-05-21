@@ -43,26 +43,43 @@ export default function ClienteTutorialPage() {
           profesional en las pantallas de 24 pulgadas, tus creativos deben cumplir estas especificaciones:
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Video */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Campaña (video) */}
           <div className="bg-gradient-to-br from-cyan-500/10 to-blue-500/5 border border-cyan-500/20 rounded-xl p-5">
-            <p className="text-[10px] text-cyan-300 uppercase tracking-widest font-bold mb-2">📺 Video</p>
-            <h4 className="text-white font-bold mb-1">Slots Diamante y Oro</h4>
+            <p className="text-[10px] text-cyan-300 uppercase tracking-widest font-bold mb-2">📺 Campaña</p>
+            <h4 className="text-white font-bold mb-1">Video del loop publicitario</h4>
+            <p className="text-[10px] text-white/40 mt-0.5">Diamante · Oro · Publi Promo</p>
             <div className="space-y-2 mt-4">
-              <Spec label="Resolución" value="1080 × 1920 px (Vertical / Full HD)" />
-              <Spec label="Duración" value="Máximo 15 segundos" />
-              <Spec label="Formato" value=".MP4 (H.264)" />
+              <Spec label="Resolución" value="1080 × 1920 px (vertical · 9:16)" />
+              <Spec label="Duración" value="15 segundos (fija)" />
+              <Spec label="Formato" value=".MP4 (H.264) o .WebM" />
+              <Spec label="Peso máx." value="30 MB" />
             </div>
           </div>
 
-          {/* Imagen */}
-          <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/20 rounded-xl p-5">
-            <p className="text-[10px] text-amber-300 uppercase tracking-widest font-bold mb-2">🖼 Imagen</p>
-            <h4 className="text-white font-bold mb-1">Banners y Cuponera</h4>
+          {/* Banner */}
+          <div className="bg-gradient-to-br from-purple-500/10 to-fuchsia-500/5 border border-purple-500/20 rounded-xl p-5">
+            <p className="text-[10px] text-purple-300 uppercase tracking-widest font-bold mb-2">🖼 Banner</p>
+            <h4 className="text-white font-bold mb-1">Franja del menú kiosco</h4>
+            <p className="text-[10px] text-white/40 mt-0.5">Exclusivo plan Diamante</p>
             <div className="space-y-2 mt-4">
-              <Spec label="Resolución" value="1080 × 450 px (banners de menú)" />
-              <Spec label="Formato" value=".PNG o .JPG de alta calidad" />
-              <Spec label="Nota" value="Menos texto es más impacto" />
+              <Spec label="Resolución" value="1080 × 192 px (≈ 5.625:1)" />
+              <Spec label="Formato" value=".PNG o .JPG" />
+              <Spec label="Peso máx." value="2 MB" />
+              <Spec label="Nota" value="Recorte cover, texto centrado" />
+            </div>
+          </div>
+
+          {/* Cupón */}
+          <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/20 rounded-xl p-5">
+            <p className="text-[10px] text-amber-300 uppercase tracking-widest font-bold mb-2">🎟️ Cupón</p>
+            <h4 className="text-white font-bold mb-1">Tarjeta de la cuponera</h4>
+            <p className="text-[10px] text-white/40 mt-0.5">Cupón normal o ⚡ Flash</p>
+            <div className="space-y-2 mt-4">
+              <Spec label="Resolución" value="1200 × 900 px (4:3)" />
+              <Spec label="Formato" value=".PNG o .JPG" />
+              <Spec label="Peso máx." value="500 KB" />
+              <Spec label="Nota" value="Logo/QR centrado, fondo limpio" />
             </div>
           </div>
         </div>

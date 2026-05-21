@@ -15,7 +15,8 @@
       "Bash(node node_modules/typescript/bin/tsc --noEmit)",
       "Bash(echo \"exit=$?\")",
       "Bash(node node_modules/eslint/bin/eslint.js app/panel/tiendas/page.tsx app/panel/cupons/page.tsx app/cliente/planes/page.tsx app/cliente/dashboard/page.tsx app/cliente/layout.tsx app/cliente/store-context.tsx)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(node_modules/.bin/tsc --noEmit -p .)"
     ]
   }
 }

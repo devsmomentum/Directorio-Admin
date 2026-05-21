@@ -227,10 +227,15 @@ export default function BannersAdminPage() {
       let finalUrl = mediaPreview;
       if (mediaFile) {
         const ext = mediaFile.name.split('.').pop();
-        const fileName = `banner_${uiPosition}_${Date.now()}.${ext}`;
-        const { error: upErr } = await supabase.storage.from('publicidad').upload(`banners/${fileName}`, mediaFile, { upsert: true });
+        // Path neutral: evitamos las palabras "banner"/"ad"/"ads" porque las
+        // listas EasyList (uBlock, AdBlock, etc.) bloquean cualquier URL que
+        // las contenga con `ERR_BLOCKED_BY_CLIENT`, aunque el contenido sea
+        // legítimo. Usamos `slots/<posicion>_<ts>.<ext>` que es seguro.
+        const fileName = `${uiPosition}_${Date.now()}.${ext}`;
+        const path = `slots/${fileName}`;
+        const { error: upErr } = await supabase.storage.from('publicidad').upload(path, mediaFile, { upsert: true });
         if (upErr) throw upErr;
-        const { data: pubData } = supabase.storage.from('publicidad').getPublicUrl(`banners/${fileName}`);
+        const { data: pubData } = supabase.storage.from('publicidad').getPublicUrl(path);
         finalUrl = pubData.publicUrl;
       }
       const payload: any = {
@@ -431,7 +436,7 @@ export default function BannersAdminPage() {
                     </label>
                     <input type="file" accept="image/*,video/*" onChange={handleFileChange}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white/70 file:text-xs" />
-                    <p className="text-[10px] text-white/20 mt-1">Imagen máx 2 MB · Video máx 15 MB</p>
+                    <p className="text-[10px] text-white/20 mt-1">Imagen máx 2 MB · Video máx 15 MB · Recomendado <span className="text-white/40">1080 × 192 px (5.625:1)</span> — el slot del kiosco recorta a esa franja con <code className="text-white/30">cover</code>.</p>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button type="button" onClick={resetForm}
