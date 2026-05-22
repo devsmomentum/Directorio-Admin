@@ -75,6 +75,11 @@ export default function ClientePromocionesPage() {
 
   const [submitting, setSubmitting] = useState(false);
 
+  // Modal de conflicto: una empresa solo puede tener UNA campaña activa a la vez.
+  const [conflict, setConflict] = useState<{ active: any; step: 'choose' | 'queue-dates' } | null>(null);
+  const [qStartDate, setQStartDate] = useState('');
+  const [qEndDate, setQEndDate] = useState('');
+
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   const planActive = !!store?.plan_type
@@ -304,6 +309,13 @@ export default function ClientePromocionesPage() {
     }
   };
 
+  const findActiveCampaign = () =>
+    campaigns.find(c =>
+      c.id !== aEditingId &&
+      c.is_active &&
+      (!c.end_date || c.end_date >= today)
+    );
+
   const submitCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!store) return;
@@ -321,6 +333,24 @@ export default function ClientePromocionesPage() {
       }
     }
 
+    // Una empresa solo puede tener una campaña activa a la vez.
+    // En creación, si ya hay activa, abrimos el modal de elección.
+    if (!aEditingId) {
+      const active = findActiveCampaign();
+      if (active) {
+        setConflict({ active, step: 'choose' });
+        return;
+      }
+    }
+
+    await persistCampaign('normal');
+  };
+
+  const persistCampaign = async (
+    mode: 'normal' | 'replace' | 'queue',
+    activeConflict?: any,
+  ) => {
+    if (!store) return;
     setSubmitting(true); setFeedback(null);
     try {
       let finalMediaUrl = aMediaUrl;
@@ -348,20 +378,52 @@ export default function ClientePromocionesPage() {
         if (error) throw error;
         setFeedback({ type: 'ok', msg: 'Campaña actualizada.' });
       } else {
+        // Si reemplazamos: desactivar la actual primero.
+        if (mode === 'replace' && activeConflict) {
+          const { error: deactErr } = await supabase.from('ad_campaigns')
+            .update({ is_active: false })
+            .eq('id', activeConflict.id);
+          if (deactErr) throw deactErr;
+        }
+
+        // Si encolamos: la nueva usa el rango elegido por el usuario.
+        // Queda inactiva como borrador: el día que toque se activa manualmente
+        // desde el listado. Así garantizamos que solo haya una activa a la vez.
+        let startDate = aStartDate;
+        let endDate: string | null = aEndDate || null;
+        let isActiveFlag = true;
+        if (mode === 'queue') {
+          startDate = qStartDate;
+          endDate = qEndDate || null;
+          isActiveFlag = false;
+        }
+
         const { error } = await supabase.from('ad_campaigns').insert([{
           brand_name: aBrandName,
           description: aDescription,
           media_url: finalMediaUrl,
           media_type: finalMediaType,
           duration_seconds: CAMPAIGN_DURATION_SECONDS,
-          start_date: aStartDate,
-          end_date: aEndDate || null,
+          start_date: startDate,
+          end_date: endDate,
           plan_type: store.plan_type,
           store_id: store.id,
+          is_active: isActiveFlag,
         }]);
         if (error) throw error;
-        setFeedback({ type: 'ok', msg: 'Campaña creada y publicada en el loop.' });
+
+        if (mode === 'replace') {
+          setFeedback({ type: 'ok', msg: 'Campaña anterior desactivada. Tu nueva campaña ya está en el loop.' });
+        } else if (mode === 'queue') {
+          setFeedback({
+            type: 'ok',
+            msg: `Campaña programada del ${qStartDate} al ${qEndDate || '—'}. Quedó como borrador; actívala desde el listado el ${qStartDate}.`,
+          });
+        } else {
+          setFeedback({ type: 'ok', msg: 'Campaña creada y publicada en el loop.' });
+        }
       }
+      setConflict(null);
       closeForm();
       fetchData();
     } catch (err: any) {
@@ -845,6 +907,213 @@ export default function ClientePromocionesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict modal: solo una campaña activa por empresa */}
+      {conflict && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/75 backdrop-blur-sm"
+            onClick={() => { if (!submitting) setConflict(null); }}
+          />
+          <div className="relative bg-[#0E0E0E] border border-amber-500/30 rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="px-6 py-4 border-b border-white/10">
+              <h3 className="text-sm font-semibold text-amber-200 flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Ya tienes una campaña activa
+              </h3>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm text-white/70 leading-relaxed">
+                Tu tienda <span className="text-white font-semibold">{store.name}</span> solo puede tener una campaña en el loop a la vez.
+              </p>
+              <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-3">
+                <p className="text-[10px] text-white/40 uppercase tracking-wider">Campaña activa</p>
+                <p className="text-sm text-white font-semibold mt-1">{conflict.active.brand_name}</p>
+                <p className="text-[11px] text-white/50 mt-0.5">
+                  {conflict.active.start_date}
+                  {conflict.active.end_date ? ` → ${conflict.active.end_date}` : ' · sin fecha de fin'}
+                </p>
+              </div>
+              {conflict.step === 'choose' && (() => {
+                const planExpiry = store.contract_expiry_date || null;
+                const minStart = conflict.active.end_date
+                  ? (() => {
+                      const d = new Date(conflict.active.end_date);
+                      d.setUTCDate(d.getUTCDate() + 1);
+                      return d.toISOString().split('T')[0];
+                    })()
+                  : null;
+                const planAllowsQueue = !!minStart && (!planExpiry || planExpiry >= minStart);
+                const queueDisabledReason = !conflict.active.end_date
+                  ? 'La campaña activa no tiene fecha de fin definida.'
+                  : !planAllowsQueue
+                    ? `Tu plan vence el ${planExpiry} y no deja ventana después de la campaña actual (termina ${conflict.active.end_date}).`
+                    : null;
+                return (
+                  <>
+                    <p className="text-xs text-white/50 leading-snug">
+                      ¿Qué quieres hacer con tu nueva campaña?
+                    </p>
+
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        disabled={submitting || !!queueDisabledReason}
+                        onClick={() => {
+                          setQStartDate(minStart || '');
+                          setQEndDate(planExpiry || '');
+                          setConflict({ ...conflict, step: 'queue-dates' });
+                        }}
+                        className="w-full text-left bg-[#0A0A0A] border border-white/10 hover:border-cyan-500/40 hover:bg-cyan-500/[0.05] disabled:opacity-40 disabled:cursor-not-allowed rounded-lg p-3 transition-colors"
+                      >
+                        <p className="text-sm font-semibold text-cyan-100">
+                          Programarla para cuando termine la actual
+                        </p>
+                        <p className="text-[11px] text-white/50 mt-1 leading-snug">
+                          {queueDisabledReason
+                            ?? 'Elige el rango de fechas en el siguiente paso. Queda como borrador y se activa desde el listado.'}
+                        </p>
+                      </button>
+
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => persistCampaign('replace', conflict.active)}
+                      className="w-full text-left bg-[#0A0A0A] border border-white/10 hover:border-red-500/40 hover:bg-red-500/[0.05] disabled:opacity-40 disabled:cursor-not-allowed rounded-lg p-3 transition-colors"
+                    >
+                      <p className="text-sm font-semibold text-red-200">
+                        Desactivar la actual y publicar la nueva ahora
+                      </p>
+                      <p className="text-[11px] text-white/50 mt-1 leading-snug">
+                        “{conflict.active.brand_name}” se desactivará. Tu nueva campaña entrará al loop de inmediato.
+                      </p>
+                    </button>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => setConflict(null)}
+                      className="px-4 py-2 text-xs text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                  </>
+                );
+              })()}
+
+              {conflict.step === 'queue-dates' && (() => {
+                const minStart = (() => {
+                  const d = new Date(conflict.active.end_date);
+                  d.setUTCDate(d.getUTCDate() + 1);
+                  return d.toISOString().split('T')[0];
+                })();
+                const maxEnd = store.contract_expiry_date || undefined;
+                // Otras campañas del store cuyo rango también debemos respetar
+                // (la activa ya se cubre con minStart; aquí filtramos cualquier
+                // borrador/programada futura para que la nueva no se le solape).
+                const otherRanges = campaigns
+                  .filter(c => c.id !== conflict.active.id && c.start_date)
+                  .map(c => ({
+                    brand: c.brand_name,
+                    start: c.start_date as string,
+                    end: (c.end_date as string | null) || null,
+                  }));
+                const overlapWith = qStartDate && qEndDate
+                  ? otherRanges.find(r =>
+                      r.start <= qEndDate && (r.end == null || r.end >= qStartDate)
+                    )
+                  : null;
+                const inPlanRange =
+                  !!qStartDate &&
+                  !!qEndDate &&
+                  qStartDate >= minStart &&
+                  qEndDate >= qStartDate &&
+                  (!maxEnd || qEndDate <= maxEnd);
+                const datesValid = inPlanRange && !overlapWith;
+                return (
+                  <>
+                    <p className="text-xs text-white/60 leading-snug">
+                      Elige el rango de fechas de la nueva campaña. Debe empezar después de que termine la actual
+                      {' '}(<span className="font-mono text-white/80">{conflict.active.end_date}</span>)
+                      {maxEnd && <> y caer dentro de tu plan (vence <span className="font-mono text-white/80">{maxEnd}</span>)</>}.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio</label>
+                        <input
+                          type="date"
+                          required
+                          value={qStartDate}
+                          min={minStart}
+                          max={maxEnd}
+                          onChange={(e) => setQStartDate(e.target.value)}
+                          className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fin</label>
+                        <input
+                          type="date"
+                          required
+                          value={qEndDate}
+                          min={qStartDate || minStart}
+                          max={maxEnd}
+                          onChange={(e) => setQEndDate(e.target.value)}
+                          className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-white/40">
+                      Ventana disponible: <span className="font-mono text-white/70">{minStart}</span>
+                      {maxEnd ? <> → <span className="font-mono text-white/70">{maxEnd}</span></> : ' en adelante'}.
+                    </p>
+                    {!inPlanRange && (qStartDate || qEndDate) && (
+                      <p className="text-[11px] text-amber-300">
+                        Revisa el rango: el inicio debe ser igual o posterior a {minStart}
+                        {maxEnd ? ` y el fin no puede pasar de ${maxEnd}` : ''}.
+                      </p>
+                    )}
+                    {inPlanRange && overlapWith && (
+                      <p className="text-[11px] text-amber-300">
+                        Choca con otra campaña tuya
+                        {' '}(<span className="text-white/70">{overlapWith.brand}</span>:
+                        {' '}<span className="font-mono">{overlapWith.start}</span>
+                        {overlapWith.end ? <> → <span className="font-mono">{overlapWith.end}</span></> : ' sin fin'}).
+                        Ajusta el rango o elimina esa campaña primero.
+                      </p>
+                    )}
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setConflict({ ...conflict, step: 'choose' })}
+                        className="px-4 py-2 text-xs text-white/60 hover:text-white/90 bg-white/5 hover:bg-white/10 rounded-lg"
+                      >
+                        ← Volver
+                      </button>
+                      <button
+                        type="button"
+                        disabled={submitting || !datesValid}
+                        onClick={() => persistCampaign('queue', conflict.active)}
+                        className="flex-1 px-4 py-2 text-xs font-semibold bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {submitting ? 'Programando…' : 'Programar campaña'}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
           </div>
         </div>
       )}
