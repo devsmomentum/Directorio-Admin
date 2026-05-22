@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { ClienteStore, ClienteStoreContext } from './store-context';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 type ClienteProfile = {
   id: string;
@@ -22,6 +23,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   const [stores, setStores] = useState<ClienteStore[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Ya no hay rutas hijas que el layout deba dejar pasar sin guard: el login y
   // el callback unificado viven fuera de /cliente/* (en /login y /auth/callback).
@@ -119,6 +121,9 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     };
   }, [router, isBypassRoute, fetchStores]);
 
+  // Cierra drawer móvil al cambiar de ruta
+  useEffect(() => { setSidebarOpen(false); }, [pathname]);
+
   const handleLogout = async () => {
     if (typeof window !== 'undefined') localStorage.removeItem(STORE_LS_KEY);
     await supabase.auth.signOut({ scope: 'local' });
@@ -148,9 +153,12 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
   if (isAuthorized === null) {
     return (
-      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center space-y-4">
-        <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin" />
-        <p className="text-white/50 text-sm font-mono tracking-widest uppercase">Verificando acceso...</p>
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center space-y-4">
+        <div className="relative h-12 w-12">
+          <div className="absolute inset-0 rounded-full border-2 border-line" />
+          <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[color:var(--brand-cliente-from)] border-r-[color:var(--brand-cliente-to)] animate-spin" />
+        </div>
+        <p className="text-fg-muted text-xs font-mono tracking-[0.3em] uppercase">Verificando acceso</p>
       </div>
     );
   }
@@ -176,39 +184,84 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     )},
   ];
 
+  const initials = (profile?.full_name || profile?.email || '?')
+    .split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(p => p[0]?.toUpperCase()).join('') || '?';
+
   return (
     <ClienteStoreContext.Provider value={ctxValue}>
-      <div className="flex h-screen bg-[#050505] text-white overflow-hidden">
-        <aside className="w-64 bg-[#111111] border-r border-white/10 flex flex-col">
-          <div className="p-6 border-b border-white/10">
-            <h1 className="text-xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">
-              PORTAL CLIENTE
-            </h1>
-            <p className="text-xs text-white/50 mt-1">Millennium Mall</p>
+      <div className="relative flex h-screen overflow-hidden bg-bg text-fg">
+        <div className="halo-cliente pointer-events-none absolute -top-32 right-0 h-[400px] w-[600px] opacity-60" />
+
+        {/* Drawer móvil */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden
+          />
+        )}
+
+        <aside
+          className={`fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 flex-col border-r border-line bg-surface transition-transform duration-300 md:static md:translate-x-0 ${
+            sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+          }`}
+        >
+          {/* logo */}
+          <div className="relative border-b border-line p-6">
+            <div className="absolute inset-x-0 top-0 h-px brand-cliente opacity-70" />
+            <div className="flex items-center gap-3">
+              <div className="brand-cliente glow-cliente flex h-10 w-10 items-center justify-center rounded-xl">
+                <svg className="h-5 w-5 text-fg-on-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-base font-black tracking-wider text-brand-cliente">MI COMERCIO</h1>
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Millennium Mall</p>
+              </div>
+            </div>
           </div>
 
+          {/* perfil */}
           {profile && (
-            <div className="px-4 py-3 border-b border-white/5">
-              <p className="text-[10px] text-white/30 uppercase tracking-wider">Sesión</p>
-              <p className="text-sm text-white/80 truncate font-medium">
-                {profile.full_name || <span className="text-white/40 italic">Sin nombre</span>}
-              </p>
-              <p className="text-[10px] text-white/40 truncate">{profile.email}</p>
+            <div className="border-b border-line p-4">
+              <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 p-3">
+                <div className="brand-cliente flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-bold text-fg-on-brand text-xs">
+                  {initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-fg">
+                    {profile.full_name || <span className="italic text-fg-faint">Sin nombre</span>}
+                  </p>
+                  <p className="truncate text-[11px] text-fg-subtle">{profile.email}</p>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Selector de tienda */}
-          <div className="px-4 py-3 border-b border-white/5">
-            <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Tienda activa</p>
+          <div className="border-b border-line px-4 py-3">
+            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-fg-subtle">Tienda activa</p>
             {stores.length === 0 ? (
-              <p className="text-[11px] text-amber-400">⚠ Sin tiendas vinculadas</p>
+              <p
+                className="rounded-md border px-2 py-1.5 text-[11px]"
+                style={{
+                  background: 'var(--warning-bg)',
+                  borderColor: 'color-mix(in oklab, var(--warning) 30%, transparent)',
+                  color: 'var(--warning)',
+                }}
+              >
+                ⚠ Sin tiendas vinculadas
+              </p>
             ) : stores.length === 1 ? (
-              <p className="text-sm text-white/80 truncate font-medium">{stores[0].name}</p>
+              <p className="truncate text-sm font-medium text-fg">{stores[0].name}</p>
             ) : (
               <select
                 value={selectedId ?? ''}
                 onChange={(e) => handleSelect(e.target.value)}
-                className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
+                className="w-full rounded-lg border border-line bg-surface-2 px-2 py-1.5 text-sm text-fg focus:outline-none focus:ring-2"
+                style={{ '--tw-ring-color': 'var(--brand-cliente-from)' } as React.CSSProperties}
               >
                 {stores.map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
@@ -216,42 +269,77 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
               </select>
             )}
             {stores.length > 1 && (
-              <p className="text-[10px] text-white/30 mt-1.5">{stores.length} tiendas vinculadas</p>
+              <p className="mt-1.5 text-[10px] text-fg-subtle">{stores.length} tiendas vinculadas</p>
             )}
           </div>
 
-          <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          {/* nav */}
+          <nav className="flex-1 space-y-1 overflow-y-auto p-3">
             {menuItems.map((item) => {
               const isActive = pathname === item.path;
               return (
-                <Link key={item.path} href={item.path}>
-                  <span className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
-                    isActive
-                      ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 border border-cyan-500/50 text-white'
-                      : 'text-white/70 hover:bg-white/5 hover:text-white'
-                  }`}>
-                    <span className="shrink-0">{item.icon}</span>
-                    <span className="font-medium text-sm">{item.name}</span>
+                <Link key={item.path} href={item.path} className="block">
+                  <span
+                    className={`group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-surface-2 text-fg shadow-[var(--shadow-card)]'
+                        : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+                    }`}
+                  >
+                    {isActive && (
+                      <span className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-r-full brand-cliente" />
+                    )}
+                    <span className={`shrink-0 transition-colors ${isActive ? 'text-brand-cliente' : ''}`}>
+                      {item.icon}
+                    </span>
+                    <span className="flex-1">{item.name}</span>
                   </span>
                 </Link>
               );
             })}
           </nav>
 
-          <div className="p-4 border-t border-white/10">
+          {/* footer: tema + logout */}
+          <div className="space-y-2 border-t border-line p-3">
+            <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3 py-2">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-wider text-fg-subtle">Apariencia</p>
+                <p className="text-xs text-fg-muted">Modo del sistema</p>
+              </div>
+              <ThemeToggle />
+            </div>
             <button
               onClick={handleLogout}
-              className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-xl text-white/70 hover:bg-red-500/10 hover:text-red-500 transition-colors text-sm font-medium"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-transparent px-3 py-2.5 text-sm font-medium text-fg-muted transition-colors hover:border-line hover:bg-surface-2 hover:text-[color:var(--danger)]"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-              <span>Cerrar Sesión</span>
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+              <span>Cerrar sesión</span>
             </button>
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto p-8">
-          {children}
-        </main>
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* topbar móvil */}
+          <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Abrir menú"
+              className="rounded-lg border border-line p-2 text-fg-muted hover:text-fg"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h1 className="text-sm font-bold tracking-wider text-brand-cliente">MI COMERCIO</h1>
+            <ThemeToggle />
+          </header>
+
+          <main className="relative flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-[1600px] p-6 md:p-8">
+              {children}
+            </div>
+          </main>
+        </div>
       </div>
     </ClienteStoreContext.Provider>
   );

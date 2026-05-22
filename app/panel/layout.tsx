@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 // Shell del panel admin. Guard + sidebar fijo + área de contenido scrollable.
 // Guard:
@@ -17,6 +18,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const [authorized, setAuthorized] = useState<boolean | null>(null);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -82,13 +84,14 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     };
   }, [authorized, pathname]);
 
+  // Cierra drawer móvil al navegar
+  useEffect(() => { setSidebarOpen(false); }, [pathname]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut({ scope: 'local' });
     router.replace('/login');
   };
 
-  // Sidebar items. Paths bajo /panel/*. Mantengo SVGs inline para no añadir
-  // dependencias de iconos.
   const menuItems = [
     { name: 'Inicio', path: '/panel/inicio', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
@@ -124,43 +127,75 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
 
   if (authorized === null) {
     return (
-      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center space-y-4">
-        <div className="w-12 h-12 border-4 border-[#FF007A]/20 border-t-[#FF007A] rounded-full animate-spin" />
-        <p className="text-white/50 text-sm font-mono tracking-widest uppercase">Verificando credenciales...</p>
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center space-y-4">
+        <div className="relative h-12 w-12">
+          <div className="absolute inset-0 rounded-full border-2 border-line" />
+          <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[color:var(--brand-admin-from)] border-r-[color:var(--brand-admin-to)] animate-spin" />
+        </div>
+        <p className="text-fg-muted text-xs font-mono tracking-[0.3em] uppercase">Verificando credenciales</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-[#050505] text-white overflow-hidden">
-      <aside className="w-64 bg-[#111111] border-r border-white/10 flex flex-col shrink-0">
-        <div className="p-6 border-b border-white/10">
-          <h1 className="text-xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-[#FF007A] to-[#FF5900]">
-            MILLENNIUM
-          </h1>
-          <p className="text-xs text-white/50 mt-1">Panel interno</p>
+    <div className="relative flex h-screen overflow-hidden bg-bg text-fg">
+      {/* halo de marca, decorativo */}
+      <div className="halo-admin pointer-events-none absolute -top-32 right-0 h-[400px] w-[600px] opacity-60" />
+
+      {/* Drawer móvil */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 flex-col border-r border-line bg-surface transition-transform duration-300 md:static md:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        }`}
+      >
+        {/* logo */}
+        <div className="relative border-b border-line p-6">
+          <div className="absolute inset-x-0 top-0 h-px brand-admin opacity-70" />
+          <div className="flex items-center gap-3">
+            <div className="brand-admin glow-admin flex h-10 w-10 items-center justify-center rounded-xl">
+              <span className="font-mono text-sm font-black text-fg-on-brand">M</span>
+            </div>
+            <div>
+              <h1 className="text-base font-black tracking-wider text-brand-admin">MILLENNIUM</h1>
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Panel admin</p>
+            </div>
+          </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+        {/* nav */}
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {menuItems.map((item) => {
             const isActive = pathname === item.path;
             const showBadge = item.path === '/panel/solicitudes' && pendingCount > 0;
             return (
-              <Link key={item.path} href={item.path}>
-                <span className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
-                  isActive
-                    ? 'bg-gradient-to-r from-[#FF007A]/20 to-[#FF5900]/20 border border-[#FF007A]/50 text-white'
-                    : 'text-white/70 hover:bg-white/5 hover:text-white'
-                }`}>
-                  <span className="shrink-0 relative">
+              <Link key={item.path} href={item.path} className="block">
+                <span
+                  className={`group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-surface-2 text-fg shadow-[var(--shadow-card)]'
+                      : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+                  }`}
+                >
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-r-full brand-admin" />
+                  )}
+                  <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-admin' : ''}`}>
                     {item.icon}
                     {showBadge && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-[#111111] animate-pulse" />
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-2 ring-surface animate-pulse" />
                     )}
                   </span>
-                  <span className="font-medium text-sm flex-1">{item.name}</span>
+                  <span className="flex-1">{item.name}</span>
                   {showBadge && (
-                    <span className="ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[10px] font-bold text-white shadow-lg shadow-amber-500/30">
+                    <span className="ml-auto inline-flex min-w-[20px] items-center justify-center rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
                       {pendingCount > 99 ? '99+' : pendingCount}
                     </span>
                   )}
@@ -170,20 +205,47 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           })}
         </nav>
 
-        <div className="p-4 border-t border-white/10">
+        {/* footer: tema + logout */}
+        <div className="border-t border-line p-3 space-y-2">
+          <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3 py-2">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-fg-subtle">Apariencia</p>
+              <p className="text-xs text-fg-muted">Modo del sistema</p>
+            </div>
+            <ThemeToggle />
+          </div>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-xl text-white/70 hover:bg-red-500/10 hover:text-red-500 transition-colors text-sm font-medium"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-transparent px-3 py-2.5 text-sm font-medium text-fg-muted transition-colors hover:border-line hover:bg-surface-2 hover:text-[color:var(--danger)]"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
             <span>Cerrar sesión</span>
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto p-8">
-        {children}
-      </main>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* topbar móvil */}
+        <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Abrir menú"
+            className="rounded-lg border border-line p-2 text-fg-muted hover:text-fg"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <h1 className="text-sm font-bold tracking-wider text-brand-admin">MILLENNIUM</h1>
+          <ThemeToggle />
+        </header>
+
+        <main className="relative flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[1600px] p-6 md:p-8">
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

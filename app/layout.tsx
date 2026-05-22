@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ThemeScript } from "./components/ThemeScript";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Millennium Admin",
-  description: "Panel de administracion de kioscos Millennium",
+  title: "Directorio Digital",
+  description: "Plataforma multi-mall para comercios: promociones, analíticas y gestión.",
 };
 
 export default function RootLayout({
@@ -24,10 +25,14 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="min-h-full flex flex-col bg-bg text-fg">{children}</body>
     </html>
   );
 }

@@ -1,34 +1,989 @@
 @import "tailwindcss";
 
+/* Permite usar `dark:` en Tailwind v4 con data-theme o .dark */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *));
+
+/* =============================================================
+   Millennium — Design Tokens
+   Default: light. Override: [data-theme="dark"] o .dark
+   ============================================================= */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* superficies */
+  --bg-base: #eef1f8;
+  --bg-elev-1: #ffffff;
+  --bg-elev-2: #f4f6fb;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong: rgba(255, 255, 255, 0.92);
+
+  /* bordes */
+  --line-subtle: rgba(15, 23, 42, 0.06);
+  --line: rgba(15, 23, 42, 0.12);
+  --line-strong: rgba(15, 23, 42, 0.22);
+
+  /* texto */
+  --fg: #0b1220;
+  --fg-muted: #475569;
+  --fg-subtle: #64748b;
+  --fg-faint: #94a3b8;
+  --fg-on-brand: #ffffff;
+
+  /* marca */
+  --brand-admin-from: #ff007a;
+  --brand-admin-to: #ff5900;
+  --brand-cliente-from: #06b6d4;
+  --brand-cliente-to: #6366f1;
+
+  /* estados */
+  --success: #059669;
+  --success-bg: rgba(5, 150, 105, 0.10);
+  --warning: #b45309;
+  --warning-bg: rgba(180, 83, 9, 0.10);
+  --danger: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.10);
+  --info: #0284c7;
+  --info-bg: rgba(2, 132, 199, 0.10);
+
+  /* efectos */
+  --glow-admin: 0 0 30px rgba(255, 0, 122, 0.22), 0 8px 24px -8px rgba(255, 0, 122, 0.30);
+  --glow-cliente: 0 0 30px rgba(6, 182, 212, 0.22), 0 8px 24px -8px rgba(6, 182, 212, 0.30);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04),
+                 0 8px 24px -12px rgba(15, 23, 42, 0.14);
+  --shadow-pop: 0 24px 60px -20px rgba(15, 23, 42, 0.24);
+
+  /* fondos decorativos */
+  --grid-color: rgba(15, 23, 42, 0.05);
+  --halo-admin: radial-gradient(60% 50% at 80% 0%, rgba(255, 0, 122, 0.10), transparent 70%);
+  --halo-cliente: radial-gradient(60% 50% at 80% 0%, rgba(6, 182, 212, 0.10), transparent 70%);
+  --mesh-bg:
+    radial-gradient(at 8% 12%, rgba(255, 0, 122, 0.18) 0px, transparent 50%),
+    radial-gradient(at 90% 8%, rgba(255, 89, 0, 0.14) 0px, transparent 50%),
+    radial-gradient(at 88% 92%, rgba(99, 102, 241, 0.16) 0px, transparent 50%),
+    radial-gradient(at 12% 90%, rgba(6, 182, 212, 0.18) 0px, transparent 50%);
+
+  color-scheme: light;
+}
+
+[data-theme="dark"],
+.dark {
+  --bg-base: #05070d;
+  --bg-elev-1: #0a0d16;
+  --bg-elev-2: #0f1320;
+  --surface-glass: rgba(255, 255, 255, 0.04);
+  --surface-glass-strong: rgba(255, 255, 255, 0.07);
+
+  --line-subtle: rgba(148, 163, 184, 0.08);
+  --line: rgba(148, 163, 184, 0.14);
+  --line-strong: rgba(148, 163, 184, 0.26);
+
+  --fg: #e6edf7;
+  --fg-muted: #94a3b8;
+  --fg-subtle: #64748b;
+  --fg-faint: #475569;
+  --fg-on-brand: #ffffff;
+
+  --brand-admin-from: #ff1493;
+  --brand-admin-to: #ff6a00;
+  --brand-cliente-from: #22d3ee;
+  --brand-cliente-to: #818cf8;
+
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.10);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.10);
+  --danger: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.10);
+  --info: #38bdf8;
+  --info-bg: rgba(56, 189, 248, 0.10);
+
+  --glow-admin: 0 0 30px rgba(255, 20, 147, 0.45), 0 8px 30px -8px rgba(255, 20, 147, 0.40);
+  --glow-cliente: 0 0 30px rgba(34, 211, 238, 0.45), 0 8px 30px -8px rgba(34, 211, 238, 0.40);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4),
+                 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+
+  --grid-color: rgba(148, 163, 184, 0.06);
+  --halo-admin: radial-gradient(60% 50% at 80% 0%, rgba(255, 20, 147, 0.18), transparent 70%);
+  --halo-cliente: radial-gradient(60% 50% at 80% 0%, rgba(34, 211, 238, 0.18), transparent 70%);
+  --mesh-bg:
+    radial-gradient(at 8% 12%, rgba(255, 20, 147, 0.30) 0px, transparent 50%),
+    radial-gradient(at 90% 8%, rgba(255, 106, 0, 0.22) 0px, transparent 50%),
+    radial-gradient(at 88% 92%, rgba(129, 140, 248, 0.28) 0px, transparent 50%),
+    radial-gradient(at 12% 90%, rgba(34, 211, 238, 0.30) 0px, transparent 50%);
+
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-bg: var(--bg-base);
+  --color-surface: var(--bg-elev-1);
+  --color-surface-2: var(--bg-elev-2);
+  --color-glass: var(--surface-glass);
+  --color-glass-strong: var(--surface-glass-strong);
+  --color-line: var(--line);
+  --color-line-subtle: var(--line-subtle);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-on-brand: var(--fg-on-brand);
+  --color-brand-admin-from: var(--brand-admin-from);
+  --color-brand-admin-to: var(--brand-admin-to);
+  --color-brand-cliente-from: var(--brand-cliente-from);
+  --color-brand-cliente-to: var(--brand-cliente-to);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--fg);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background-color 240ms ease, color 240ms ease;
+}
+
+/* Patrones decorativos */
+.bg-grid {
+  background-image:
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.bg-grid-fade {
+  position: relative;
+}
+.bg-grid-fade::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(ellipse at top, #000 35%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at top, #000 35%, transparent 75%);
+  pointer-events: none;
+}
+
+.bg-mesh {
+  background-color: var(--bg-base);
+  background-image: var(--mesh-bg);
+}
+
+.halo-admin { background-image: var(--halo-admin); }
+.halo-cliente { background-image: var(--halo-cliente); }
+
+.surface-glass {
+  background-color: var(--surface-glass);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--line);
+}
+
+.surface-glass-strong {
+  background-color: var(--surface-glass-strong);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid var(--line);
+}
+
+.brand-admin {
+  background-image: linear-gradient(135deg, var(--brand-admin-from), var(--brand-admin-to));
+}
+.brand-cliente {
+  background-image: linear-gradient(135deg, var(--brand-cliente-from), var(--brand-cliente-to));
+}
+.brand-mix {
+  background-image: linear-gradient(135deg,
+    var(--brand-admin-from) 0%,
+    var(--brand-admin-to) 35%,
+    var(--brand-cliente-to) 70%,
+    var(--brand-cliente-from) 100%);
+}
+.text-brand-admin {
+  background-image: linear-gradient(135deg, var(--brand-admin-from), var(--brand-admin-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.text-brand-cliente {
+  background-image: linear-gradient(135deg, var(--brand-cliente-from), var(--brand-cliente-to));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.text-brand-mix {
+  background-image: linear-gradient(135deg,
+    var(--brand-admin-from) 0%,
+    var(--brand-admin-to) 35%,
+    var(--brand-cliente-to) 70%,
+    var(--brand-cliente-from) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.glow-admin { box-shadow: var(--glow-admin); }
+.glow-cliente { box-shadow: var(--glow-cliente); }
+
+/* Marco con gradiente (anillo de marca para tarjetas) */
+.ring-brand {
+  position: relative;
+}
+.ring-brand::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg,
+    var(--brand-admin-from),
+    var(--brand-admin-to),
+    var(--brand-cliente-to),
+    var(--brand-cliente-from));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* Scrollbar */
+@media (pointer: fine) {
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); background-clip: padding-box; }
 }
 
 button,
 [role="button"],
 input[type="submit"],
 input[type="button"],
-a[href] {
-  cursor: pointer;
+a[href] { cursor: pointer; }
+
+input::placeholder,
+textarea::placeholder { color: var(--fg-faint); }
+
+:focus-visible {
+  outline: 2px solid var(--brand-cliente-from);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* === Animaciones === */
+@keyframes orb-float {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(20px, -30px, 0) scale(1.06); }
+}
+@keyframes orb-float-2 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-25px, 20px, 0) scale(0.94); }
+}
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.55; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+  50% { box-shadow: 0 0 0 8px transparent; }
+}
+.orb-1 { animation: orb-float 14s ease-in-out infinite; }
+.orb-2 { animation: orb-float-2 18s ease-in-out infinite; }
+.spin-slow { animation: spin-slow 24s linear infinite; }
+.pulse-soft { animation: pulse-soft 2.6s ease-in-out infinite; }
+.pulse-glow { animation: pulse-glow 2.2s ease-in-out infinite; }
+
+.shimmer {
+  background-image: linear-gradient(110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 70%);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s linear infinite;
+}
+
+/* ===== Elementos HUD / futuristas ===== */
+
+/* Corner brackets — esquinas en L estilo viewfinder */
+.hud-corners { position: relative; }
+.hud-corners::before,
+.hud-corners::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--brand-cliente-from);
+  pointer-events: none;
+  opacity: 0.85;
+}
+.hud-corners::before {
+  top: -5px; left: -5px;
+  border-right: none;
+  border-bottom: none;
+  border-top-left-radius: 4px;
+}
+.hud-corners::after {
+  bottom: -5px; right: -5px;
+  border-left: none;
+  border-top: none;
+  border-bottom-right-radius: 4px;
+}
+.hud-corners-admin::before,
+.hud-corners-admin::after { border-color: var(--brand-admin-from); }
+.hud-corners-4 { position: relative; }
+.hud-corners-4 > .hud-c {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--brand-cliente-from);
+  opacity: 0.75;
+  pointer-events: none;
+}
+.hud-corners-4 > .hud-c.tl { top: -6px; left: -6px; border-right: none; border-bottom: none; }
+.hud-corners-4 > .hud-c.tr { top: -6px; right: -6px; border-left: none; border-bottom: none; }
+.hud-corners-4 > .hud-c.bl { bottom: -6px; left: -6px; border-right: none; border-top: none; }
+.hud-corners-4 > .hud-c.br { bottom: -6px; right: -6px; border-left: none; border-top: none; }
+
+/* Línea de scan que recorre verticalmente */
+@keyframes scan-line {
+  0% { transform: translateY(-100%); opacity: 0; }
+  10% { opacity: 0.7; }
+  90% { opacity: 0.7; }
+  100% { transform: translateY(2400%); opacity: 0; }
+}
+.scanline {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.scanline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background: linear-gradient(90deg,
+    transparent,
+    color-mix(in oklab, var(--brand-cliente-from) 80%, transparent),
+    color-mix(in oklab, var(--brand-admin-from) 70%, transparent),
+    transparent);
+  filter: blur(0.5px);
+  animation: scan-line 7s linear infinite;
+}
+
+/* Líneas verticales de "ticks" como una escala holográfica */
+.hud-ticks {
+  background-image:
+    linear-gradient(to bottom,
+      var(--line-strong) 0,
+      var(--line-strong) 1px,
+      transparent 1px,
+      transparent 12px);
+  background-size: 100% 12px;
+  background-repeat: repeat-y;
+  width: 1px;
+}
+
+/* Borde con halo brand (tarjeta con resplandor) */
+.brand-halo {
+  position: relative;
+}
+.brand-halo::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from 0deg,
+    var(--brand-admin-from),
+    var(--brand-admin-to),
+    var(--brand-cliente-to),
+    var(--brand-cliente-from),
+    var(--brand-admin-from));
+  filter: blur(8px);
+  opacity: 0.45;
+  z-index: -1;
+}
+
+/* Punto de status pulsante (compacto) */
+.tech-dot {
+  position: relative;
+  display: inline-block;
+  height: 6px;
+  width: 6px;
+  border-radius: 999px;
+  background: var(--success);
+}
+.tech-dot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  background: var(--success);
+  opacity: 0.4;
+  animation: pulse-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes pulse-ping {
+  75%, 100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* "Data bar" — barra horizontal con segmentos animados */
+@keyframes data-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.9; }
+}
+.data-bars {
+  display: inline-flex;
+  align-items: end;
+  gap: 2px;
+  height: 12px;
+}
+.data-bars > span {
+  display: block;
+  width: 2px;
+  background: currentColor;
+  border-radius: 1px;
+  animation: data-pulse 1.4s ease-in-out infinite;
+}
+.data-bars > span:nth-child(1) { height: 40%; animation-delay: 0s; }
+.data-bars > span:nth-child(2) { height: 70%; animation-delay: 0.18s; }
+.data-bars > span:nth-child(3) { height: 100%; animation-delay: 0.36s; }
+.data-bars > span:nth-child(4) { height: 55%; animation-delay: 0.54s; }
+.data-bars > span:nth-child(5) { height: 85%; animation-delay: 0.72s; }
+
+/* Botón primario con look "brand" */
+.btn-brand {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: var(--fg-on-brand);
+  background-image: linear-gradient(135deg, var(--brand-admin-from), var(--brand-admin-to));
+  box-shadow: var(--glow-admin);
+  transition: filter 200ms ease, transform 120ms ease;
+}
+.btn-brand:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-brand:active:not(:disabled) { transform: translateY(1px); }
+.btn-brand:disabled { opacity: 0.5; box-shadow: none; cursor: not-allowed; }
+.btn-brand::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 70%);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.btn-brand:hover:not(:disabled)::after {
+  opacity: 1;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Input con focus brand — en @layer components para que las utilities
+   de Tailwind (pl-10, pr-12, py-X, etc.) puedan sobreescribir el padding. */
+@layer components {
+  .input-brand {
+    background-color: var(--bg-elev-2);
+    border: 1px solid var(--line);
+    color: var(--fg);
+    border-radius: 12px;
+    padding-block: 0.75rem;
+    padding-inline: 1rem;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    width: 100%;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+  }
+  .input-brand:hover { border-color: var(--line-strong); }
+  .input-brand:focus {
+    outline: none;
+    border-color: transparent;
+    box-shadow: 0 0 0 2px var(--brand-cliente-from),
+                0 0 0 4px color-mix(in oklab, var(--brand-cliente-from) 20%, transparent);
+    background-color: var(--bg-elev-1);
+  }
+  .input-brand:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+/* =============================================================
+   Capa de compatibilidad para light mode
+   Las páginas internas (panel/*, cliente/*) usan clases hardcoded
+   pensadas para dark (text-white/X, bg-[#0A0A0A], bg-white/X,
+   border-white/X). En light las remapeo a tokens semánticos
+   para que el contenido sea legible sin migrar 27 archivos.
+
+   Excepción: si el elemento o un ancestro usa un gradiente de
+   marca (bg-gradient-to-*, brand-admin/cliente/mix), el texto
+   blanco se respeta — son botones/badges sobre superficies de color.
+   ============================================================= */
+
+[data-theme="light"] {
+  /* ---- texto blanco translúcido → tokens fg ---- */
+  .text-white\/90 { color: var(--fg); }
+  .text-white\/85 { color: var(--fg); }
+  .text-white\/80 { color: var(--fg); }
+  .text-white\/75 { color: var(--fg-muted); }
+  .text-white\/70 { color: var(--fg-muted); }
+  .text-white\/60 { color: var(--fg-muted); }
+  .text-white\/50 { color: var(--fg-subtle); }
+  .text-white\/40 { color: var(--fg-subtle); }
+  .text-white\/30 { color: var(--fg-faint); }
+  .text-white\/25 { color: var(--fg-faint); }
+  .text-white\/20 { color: var(--fg-faint); }
+  .text-white\/15 { color: var(--fg-faint); }
+  .text-white\/10 { color: color-mix(in oklab, var(--fg-faint) 70%, transparent); }
+
+  /* hover variants */
+  .hover\:text-white\/80:hover { color: var(--fg); }
+  .hover\:text-white\/70:hover { color: var(--fg-muted); }
+  .hover\:text-white\/60:hover { color: var(--fg-muted); }
+  .hover\:text-white\/50:hover { color: var(--fg-subtle); }
+
+  /* text-white plano → fg (se respeta blanco si está sobre marca, ver más abajo) */
+  .text-white { color: var(--fg); }
+  .hover\:text-white:hover { color: var(--fg); }
+
+  /* placeholder white/X */
+  .placeholder-white\/20::placeholder,
+  .placeholder\:text-white\/20::placeholder,
+  .placeholder-white\/30::placeholder,
+  .placeholder\:text-white\/30::placeholder,
+  .placeholder-white\/40::placeholder,
+  .placeholder\:text-white\/40::placeholder { color: var(--fg-faint); }
+
+  /* ---- backgrounds dark hex → surfaces ---- */
+  .bg-\[\#050505\],
+  .bg-\[\#0a0a0a\],
+  .bg-\[\#0A0A0A\],
+  .bg-\[\#0d0d0d\],
+  .bg-\[\#0D0D0D\],
+  .bg-\[\#0e0e0e\],
+  .bg-\[\#0E0E0E\],
+  .bg-\[\#0f0f0f\],
+  .bg-\[\#0F0F0F\] { background-color: var(--bg-base); }
+
+  .bg-\[\#111\],
+  .bg-\[\#111111\] { background-color: var(--bg-elev-1); }
+
+  .bg-\[\#1a1a1a\],
+  .bg-\[\#1A1A1A\] { background-color: var(--bg-elev-2); }
+
+  /* dropdown options de <select> heredan del padre */
+  option.bg-\[\#111\],
+  option.bg-\[\#111111\] {
+    background-color: var(--bg-elev-1);
+    color: var(--fg);
+  }
+
+  /* ---- bg-white translúcido → glass ---- */
+  .bg-white\/5 { background-color: rgba(15, 23, 42, 0.04); }
+  .bg-white\/10 { background-color: rgba(15, 23, 42, 0.06); }
+  .bg-white\/15 { background-color: rgba(15, 23, 42, 0.08); }
+  .bg-white\/20 { background-color: rgba(15, 23, 42, 0.10); }
+  .bg-white\/30 { background-color: rgba(15, 23, 42, 0.14); }
+
+  .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
+  .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 42, 0.08); }
+  .hover\:bg-white\/15:hover { background-color: rgba(15, 23, 42, 0.10); }
+  .hover\:bg-white\/20:hover { background-color: rgba(15, 23, 42, 0.14); }
+
+  /* ---- borders white/X → line ---- */
+  .border-white\/5 { border-color: var(--line-subtle); }
+  .border-white\/10 { border-color: var(--line); }
+  .border-white\/15 { border-color: var(--line); }
+  .border-white\/20 { border-color: var(--line-strong); }
+  .divide-white\/5 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line-subtle); }
+  .divide-white\/10 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line); }
+  .hover\:border-white\/20:hover { border-color: var(--line-strong); }
+  .hover\:border-white\/10:hover { border-color: var(--line); }
+
+  /* ---- ring-white/X ---- */
+  .ring-white\/5 { --tw-ring-color: var(--line-subtle); }
+  .ring-white\/10 { --tw-ring-color: var(--line); }
+  .ring-white\/20 { --tw-ring-color: var(--line-strong); }
+
+  /* ---- excepción: blanco se respeta SOLO sobre superficies sólidas
+     de marca (gradientes con hex completos o colores saturados al 100%).
+     Importante: NO incluyo `bg-gradient-to-*` genérico porque las cards
+     de planes usan `from-X-500/20 to-Y-500/10` que en light se vuelven
+     casi blancas — ahí el texto blanco sería invisible. */
+  [class*="from-[#"] .text-white,
+  [class*="from-[#"].text-white,
+  [class*="brand-admin"] .text-white,
+  [class*="brand-admin"].text-white,
+  [class*="brand-cliente"] .text-white,
+  [class*="brand-cliente"].text-white,
+  [class*="brand-mix"] .text-white,
+  [class*="brand-mix"].text-white,
+  .bg-pink-500 .text-white,
+  .bg-pink-500.text-white,
+  .bg-pink-600 .text-white,
+  .bg-pink-600.text-white,
+  .bg-pink-700 .text-white,
+  .bg-pink-700.text-white,
+  .bg-orange-500 .text-white,
+  .bg-orange-500.text-white,
+  .bg-orange-600 .text-white,
+  .bg-orange-600.text-white,
+  .bg-cyan-500 .text-white,
+  .bg-cyan-500.text-white,
+  .bg-cyan-600 .text-white,
+  .bg-cyan-600.text-white,
+  .bg-blue-500 .text-white,
+  .bg-blue-500.text-white,
+  .bg-blue-600 .text-white,
+  .bg-blue-600.text-white,
+  .bg-indigo-500 .text-white,
+  .bg-indigo-500.text-white,
+  .bg-violet-500 .text-white,
+  .bg-violet-500.text-white,
+  .bg-purple-500 .text-white,
+  .bg-purple-500.text-white,
+  .bg-purple-600 .text-white,
+  .bg-purple-600.text-white,
+  .bg-amber-500 .text-white,
+  .bg-amber-500.text-white,
+  .bg-amber-600 .text-white,
+  .bg-amber-600.text-white,
+  .bg-yellow-500 .text-white,
+  .bg-yellow-500.text-white,
+  .bg-red-500 .text-white,
+  .bg-red-500.text-white,
+  .bg-red-600 .text-white,
+  .bg-red-600.text-white,
+  .bg-emerald-500 .text-white,
+  .bg-emerald-500.text-white,
+  .bg-emerald-600 .text-white,
+  .bg-emerald-600.text-white,
+  .bg-green-500 .text-white,
+  .bg-green-500.text-white,
+  .bg-warning .text-white,
+  .bg-warning.text-white,
+  .bg-success .text-white,
+  .bg-success.text-white,
+  .bg-danger .text-white,
+  .bg-danger.text-white { color: #fff; }
+
+  /* ---- inline style con background sólido brand → conserva blanco ----
+     Algunos badges usan style={{ background: 'var(--brand-X)' }} en vez
+     de utilities. Estas reglas son defensivas pero necesarias. */
+  [style*="brand-admin"] .text-white,
+  [style*="brand-cliente"] .text-white,
+  [style*="--success"] .text-white,
+  [style*="--warning"] .text-white,
+  [style*="--danger"] .text-white,
+  [style*="--info"] .text-white { color: #fff; }
+
+  /* ---- texto de color claro (100/200/300/400) → variantes oscuras ----
+     En dark estos tonos son legibles sobre fondos negros; en light hay
+     que oscurecerlos para que se vean sobre superficies blancas, conservando
+     el significado semántico (rojo = error, ámbar = warning, etc.). */
+
+  /* AMBER / YELLOW / ORANGE (warning + acentos cálidos) */
+  .text-amber-100, .text-amber-200, .text-amber-300, .text-amber-400 { color: #b45309; }
+  .text-amber-300\/50 { color: rgb(180 83 9 / 0.5); }
+  .text-amber-300\/70 { color: rgb(180 83 9 / 0.7); }
+  .text-amber-300\/80 { color: rgb(180 83 9 / 0.8); }
+  .text-amber-200\/90 { color: rgb(180 83 9 / 0.9); }
+  .text-amber-400\/60 { color: rgb(217 119 6 / 0.6); }
+  .text-amber-400\/70 { color: rgb(217 119 6 / 0.7); }
+  .text-amber-500 { color: #b45309; }
+  .text-yellow-300, .text-yellow-400 { color: #a16207; }
+  .text-orange-200, .text-orange-300, .text-orange-400 { color: #c2410c; }
+
+  /* RED / ROSE (error + danger) */
+  .text-red-200, .text-red-300, .text-red-400 { color: #b91c1c; }
+  .text-red-300\/50 { color: rgb(185 28 28 / 0.5); }
+  .text-red-400\/40 { color: rgb(185 28 28 / 0.4); }
+  .text-red-400\/50 { color: rgb(185 28 28 / 0.5); }
+  .text-red-400\/60 { color: rgb(185 28 28 / 0.6); }
+  .text-red-500 { color: #b91c1c; }
+  .text-rose-300, .text-rose-400 { color: #be123c; }
+
+  /* EMERALD / GREEN / LIME (success + healthy states) */
+  .text-emerald-200, .text-emerald-300, .text-emerald-400 { color: #047857; }
+  .text-emerald-300\/80 { color: rgb(4 120 87 / 0.8); }
+  .text-emerald-400\/50 { color: rgb(4 120 87 / 0.5); }
+  .text-emerald-400\/60 { color: rgb(4 120 87 / 0.6); }
+  .text-emerald-400\/70 { color: rgb(4 120 87 / 0.7); }
+  .text-emerald-500\/60 { color: rgb(4 120 87 / 0.6); }
+  .text-green-300, .text-green-400 { color: #15803d; }
+  .text-green-400\/60 { color: rgb(21 128 61 / 0.6); }
+  .text-green-400\/70 { color: rgb(21 128 61 / 0.7); }
+  .text-lime-300, .text-lime-400 { color: #4d7c0f; }
+
+  /* CYAN / SKY / BLUE / TEAL (info + marca cliente) */
+  .text-cyan-100, .text-cyan-200, .text-cyan-300, .text-cyan-400 { color: #0e7490; }
+  .text-cyan-300\/70 { color: rgb(14 116 144 / 0.7); }
+  .text-cyan-300\/80 { color: rgb(14 116 144 / 0.8); }
+  .text-blue-200, .text-blue-300, .text-blue-400 { color: #1d4ed8; }
+  .text-sky-300, .text-sky-400 { color: #0369a1; }
+  .text-teal-300, .text-teal-400 { color: #0f766e; }
+
+  /* PINK / FUCHSIA (marca admin + acentos) */
+  .text-pink-100, .text-pink-200, .text-pink-300, .text-pink-400 { color: #be185d; }
+  .text-pink-200\/80 { color: rgb(190 24 93 / 0.8); }
+  .text-pink-300\/70 { color: rgb(190 24 93 / 0.7); }
+  .text-pink-400\/70 { color: rgb(190 24 93 / 0.7); }
+  .text-pink-500 { color: #be185d; }
+  .text-fuchsia-300, .text-fuchsia-400 { color: #a21caf; }
+
+  /* PURPLE / VIOLET / INDIGO */
+  .text-purple-200, .text-purple-300, .text-purple-400 { color: #7e22ce; }
+  .text-purple-200\/80 { color: rgb(126 34 206 / 0.8); }
+  .text-violet-300, .text-violet-400 { color: #6d28d9; }
+  .text-indigo-300, .text-indigo-400 { color: #4338ca; }
+
+  /* NEUTROS (slate/zinc/gray/neutral/stone) */
+  .text-slate-300, .text-slate-400 { color: #475569; }
+  .text-slate-200, .text-slate-100 { color: #334155; }
+  .text-zinc-300, .text-zinc-400 { color: #52525b; }
+  .text-gray-300, .text-gray-400 { color: #4b5563; }
+  .text-neutral-300, .text-neutral-400 { color: #525252; }
+  .text-stone-300, .text-stone-400 { color: #57534e; }
+
+  /* HOVER variants comunes */
+  .hover\:text-amber-300:hover, .hover\:text-amber-400:hover { color: #b45309; }
+  .hover\:text-red-300:hover, .hover\:text-red-400:hover { color: #b91c1c; }
+  .hover\:text-emerald-300:hover, .hover\:text-emerald-400:hover { color: #047857; }
+  .hover\:text-cyan-300:hover, .hover\:text-cyan-400:hover { color: #0e7490; }
+  .hover\:text-pink-300:hover, .hover\:text-pink-400:hover { color: #be185d; }
+  .hover\:text-purple-300:hover, .hover\:text-purple-400:hover { color: #7e22ce; }
+  .hover\:text-blue-300:hover, .hover\:text-blue-400:hover { color: #1d4ed8; }
+
+  /* ---- excepción: si el padre tiene fondo del mismo color saturado,
+     el texto claro se conserva (es texto sobre badge/botón sólido) ---- */
+  .bg-amber-500 .text-amber-100,
+  .bg-amber-500 .text-amber-200,
+  .bg-amber-500 .text-amber-300,
+  .bg-amber-500 .text-amber-400,
+  .bg-amber-600 .text-amber-100,
+  .bg-amber-600 .text-amber-200,
+  .bg-amber-600 .text-amber-300,
+  .bg-amber-600 .text-amber-400 { color: #fef3c7; }
+
+  .bg-red-500 .text-red-100,
+  .bg-red-500 .text-red-200,
+  .bg-red-500 .text-red-300,
+  .bg-red-500 .text-red-400,
+  .bg-red-600 .text-red-100,
+  .bg-red-600 .text-red-200,
+  .bg-red-600 .text-red-300,
+  .bg-red-600 .text-red-400 { color: #fee2e2; }
+
+  .bg-emerald-500 .text-emerald-100,
+  .bg-emerald-500 .text-emerald-200,
+  .bg-emerald-500 .text-emerald-300,
+  .bg-emerald-500 .text-emerald-400,
+  .bg-emerald-600 .text-emerald-100,
+  .bg-emerald-600 .text-emerald-200,
+  .bg-emerald-600 .text-emerald-300,
+  .bg-emerald-600 .text-emerald-400 { color: #d1fae5; }
+
+  .bg-cyan-500 .text-cyan-100,
+  .bg-cyan-500 .text-cyan-200,
+  .bg-cyan-500 .text-cyan-300,
+  .bg-cyan-500 .text-cyan-400,
+  .bg-cyan-600 .text-cyan-100,
+  .bg-cyan-600 .text-cyan-200,
+  .bg-cyan-600 .text-cyan-300,
+  .bg-cyan-600 .text-cyan-400 { color: #cffafe; }
+
+  .bg-pink-500 .text-pink-100,
+  .bg-pink-500 .text-pink-200,
+  .bg-pink-500 .text-pink-300,
+  .bg-pink-500 .text-pink-400,
+  .bg-pink-600 .text-pink-100,
+  .bg-pink-600 .text-pink-200,
+  .bg-pink-600 .text-pink-300,
+  .bg-pink-600 .text-pink-400 { color: #fce7f3; }
+
+  /* =============================================================
+     Plan cards y badges con gradiente translúcido — boost en light
+     Los gradientes from-X-500/20 to-Y-500/10 quedan casi blancos
+     sobre fondo claro. Boost:
+       - Aumento la opacidad de las paradas del gradiente
+       - Añado un color base sólido pálido (la familia X-50)
+       - Refuerzo el borde tinted
+       - Sombra de color sutil para profundidad
+     ============================================================= */
+
+  /* Saturación de paradas: from-X-500/N → más alpha */
+  .from-cyan-500\/20    { --tw-gradient-from: rgb(6 182 212 / 0.45); }
+  .from-cyan-500\/15    { --tw-gradient-from: rgb(6 182 212 / 0.35); }
+  .from-cyan-500\/10    { --tw-gradient-from: rgb(6 182 212 / 0.30); }
+  .from-cyan-500\/25    { --tw-gradient-from: rgb(6 182 212 / 0.50); }
+  .to-cyan-500\/10      { --tw-gradient-to:   rgb(6 182 212 / 0.30); }
+  .to-cyan-500\/20      { --tw-gradient-to:   rgb(6 182 212 / 0.45); }
+  .via-cyan-500\/10     { --tw-gradient-via:  rgb(6 182 212 / 0.30); }
+
+  .from-blue-500\/20    { --tw-gradient-from: rgb(59 130 246 / 0.40); }
+  .from-blue-500\/10    { --tw-gradient-from: rgb(59 130 246 / 0.25); }
+  .to-blue-500\/10      { --tw-gradient-to:   rgb(59 130 246 / 0.25); }
+  .to-blue-500\/20      { --tw-gradient-to:   rgb(59 130 246 / 0.40); }
+
+  .from-amber-500\/20   { --tw-gradient-from: rgb(245 158 11 / 0.45); }
+  .from-amber-500\/15   { --tw-gradient-from: rgb(245 158 11 / 0.35); }
+  .from-amber-500\/10   { --tw-gradient-from: rgb(245 158 11 / 0.30); }
+  .from-amber-500\/5    { --tw-gradient-from: rgb(245 158 11 / 0.18); }
+  .to-amber-500\/10     { --tw-gradient-to:   rgb(245 158 11 / 0.30); }
+  .to-amber-500\/5      { --tw-gradient-to:   rgb(245 158 11 / 0.18); }
+
+  .from-orange-500\/20  { --tw-gradient-from: rgb(249 115 22 / 0.40); }
+  .from-orange-500\/10  { --tw-gradient-from: rgb(249 115 22 / 0.28); }
+  .to-orange-500\/10    { --tw-gradient-to:   rgb(249 115 22 / 0.28); }
+  .to-orange-500\/5     { --tw-gradient-to:   rgb(249 115 22 / 0.18); }
+
+  .from-pink-500\/20    { --tw-gradient-from: rgb(236 72 153 / 0.40); }
+  .from-pink-500\/10    { --tw-gradient-from: rgb(236 72 153 / 0.28); }
+  .to-pink-500\/10      { --tw-gradient-to:   rgb(236 72 153 / 0.28); }
+  .to-pink-500\/20      { --tw-gradient-to:   rgb(236 72 153 / 0.40); }
+
+  .from-rose-500\/20    { --tw-gradient-from: rgb(244 63 94 / 0.40); }
+  .from-rose-500\/10    { --tw-gradient-from: rgb(244 63 94 / 0.28); }
+  .to-rose-500\/10      { --tw-gradient-to:   rgb(244 63 94 / 0.28); }
+
+  .from-purple-500\/20  { --tw-gradient-from: rgb(168 85 247 / 0.40); }
+  .from-purple-500\/10  { --tw-gradient-from: rgb(168 85 247 / 0.28); }
+  .to-purple-500\/10    { --tw-gradient-to:   rgb(168 85 247 / 0.28); }
+  .to-purple-500\/20    { --tw-gradient-to:   rgb(168 85 247 / 0.40); }
+
+  .from-emerald-500\/20 { --tw-gradient-from: rgb(16 185 129 / 0.40); }
+  .from-emerald-500\/10 { --tw-gradient-from: rgb(16 185 129 / 0.28); }
+  .from-emerald-500\/15 { --tw-gradient-from: rgb(16 185 129 / 0.32); }
+  .to-emerald-500\/10   { --tw-gradient-to:   rgb(16 185 129 / 0.28); }
+
+  .from-red-500\/20     { --tw-gradient-from: rgb(239 68 68 / 0.40); }
+  .from-red-500\/10     { --tw-gradient-from: rgb(239 68 68 / 0.28); }
+  .from-red-500\/5      { --tw-gradient-from: rgb(239 68 68 / 0.16); }
+  .to-red-500\/10       { --tw-gradient-to:   rgb(239 68 68 / 0.28); }
+
+  .from-violet-500\/20  { --tw-gradient-from: rgb(139 92 246 / 0.40); }
+  .from-indigo-500\/20  { --tw-gradient-from: rgb(99 102 241 / 0.40); }
+  .from-yellow-500\/20  { --tw-gradient-from: rgb(234 179 8 / 0.40); }
+  .from-sky-500\/20     { --tw-gradient-from: rgb(14 165 233 / 0.40); }
+  .from-teal-500\/20    { --tw-gradient-from: rgb(20 184 166 / 0.40); }
+
+  /* Cards de planes (bg-gradient-to-br + from-X-500/N) reciben base sólida
+     pálida del color correspondiente para tener "peso" visual. La sombra
+     coloreada da profundidad. */
+  .bg-gradient-to-br.from-cyan-500\/20,
+  .bg-gradient-to-br.from-cyan-500\/15,
+  .bg-gradient-to-br.from-cyan-500\/10 {
+    background-color: #ecfeff;
+    box-shadow: 0 1px 2px rgb(6 182 212 / 0.08), 0 8px 20px -10px rgb(6 182 212 / 0.25);
+  }
+  .bg-gradient-to-br.from-blue-500\/20,
+  .bg-gradient-to-br.from-blue-500\/10 {
+    background-color: #eff6ff;
+    box-shadow: 0 1px 2px rgb(59 130 246 / 0.08), 0 8px 20px -10px rgb(59 130 246 / 0.25);
+  }
+  .bg-gradient-to-br.from-amber-500\/20,
+  .bg-gradient-to-br.from-amber-500\/15,
+  .bg-gradient-to-br.from-amber-500\/10 {
+    background-color: #fffbeb;
+    box-shadow: 0 1px 2px rgb(245 158 11 / 0.10), 0 8px 20px -10px rgb(245 158 11 / 0.28);
+  }
+  .bg-gradient-to-br.from-orange-500\/20,
+  .bg-gradient-to-br.from-orange-500\/10 {
+    background-color: #fff7ed;
+    box-shadow: 0 1px 2px rgb(249 115 22 / 0.10), 0 8px 20px -10px rgb(249 115 22 / 0.25);
+  }
+  .bg-gradient-to-br.from-pink-500\/20,
+  .bg-gradient-to-br.from-pink-500\/10 {
+    background-color: #fdf2f8;
+    box-shadow: 0 1px 2px rgb(236 72 153 / 0.10), 0 8px 20px -10px rgb(236 72 153 / 0.28);
+  }
+  .bg-gradient-to-br.from-purple-500\/20,
+  .bg-gradient-to-br.from-purple-500\/10 {
+    background-color: #faf5ff;
+    box-shadow: 0 1px 2px rgb(168 85 247 / 0.10), 0 8px 20px -10px rgb(168 85 247 / 0.28);
+  }
+  .bg-gradient-to-br.from-emerald-500\/20,
+  .bg-gradient-to-br.from-emerald-500\/15,
+  .bg-gradient-to-br.from-emerald-500\/10 {
+    background-color: #ecfdf5;
+    box-shadow: 0 1px 2px rgb(16 185 129 / 0.10), 0 8px 20px -10px rgb(16 185 129 / 0.25);
+  }
+  .bg-gradient-to-br.from-red-500\/20,
+  .bg-gradient-to-br.from-red-500\/10 {
+    background-color: #fef2f2;
+    box-shadow: 0 1px 2px rgb(239 68 68 / 0.10), 0 8px 20px -10px rgb(239 68 68 / 0.25);
+  }
+
+  /* Bordes translúcidos brand → más visibles en light */
+  .border-cyan-500\/30    { border-color: rgb(6 182 212 / 0.55); }
+  .border-cyan-500\/40    { border-color: rgb(6 182 212 / 0.70); }
+  .border-cyan-500\/50    { border-color: rgb(6 182 212 / 0.80); }
+  .border-cyan-500\/20    { border-color: rgb(6 182 212 / 0.40); }
+  .border-blue-500\/30    { border-color: rgb(59 130 246 / 0.55); }
+  .border-amber-500\/30   { border-color: rgb(245 158 11 / 0.65); }
+  .border-amber-500\/20   { border-color: rgb(245 158 11 / 0.45); }
+  .border-orange-500\/50  { border-color: rgb(249 115 22 / 0.80); }
+  .border-pink-500\/30    { border-color: rgb(236 72 153 / 0.55); }
+  .border-pink-500\/50    { border-color: rgb(236 72 153 / 0.80); }
+  .border-purple-500\/30  { border-color: rgb(168 85 247 / 0.55); }
+  .border-purple-500\/50  { border-color: rgb(168 85 247 / 0.80); }
+  .border-emerald-500\/30 { border-color: rgb(16 185 129 / 0.55); }
+  .border-emerald-500\/20 { border-color: rgb(16 185 129 / 0.40); }
+  .border-red-500\/30     { border-color: rgb(239 68 68 / 0.55); }
+  .border-red-500\/50     { border-color: rgb(239 68 68 / 0.80); }
+
+  /* ---- text-white "huérfano" sobre superficies translúcidas ----
+     Si text-white está dentro de un from-X-500/N (translúcido,
+     no saturado), se remapea a un color brand oscuro coherente
+     con el tinte de la card. Eso hace que los headings de plan
+     cards (text-white) tomen un tono dark con la personalidad
+     del plan en lugar de fg neutral. */
+  [class*="from-cyan-500/"] .text-white    { color: #0e7490; }
+  [class*="from-blue-500/"] .text-white    { color: #1d4ed8; }
+  [class*="from-amber-500/"] .text-white   { color: #92400e; }
+  [class*="from-orange-500/"] .text-white  { color: #9a3412; }
+  [class*="from-pink-500/"] .text-white    { color: #9d174d; }
+  [class*="from-rose-500/"] .text-white    { color: #9f1239; }
+  [class*="from-purple-500/"] .text-white  { color: #6b21a8; }
+  [class*="from-violet-500/"] .text-white  { color: #5b21b6; }
+  [class*="from-emerald-500/"] .text-white { color: #065f46; }
+  [class*="from-red-500/"] .text-white     { color: #991b1b; }
+
+  /* En esos mismos contenedores, los `text-white/X` translúcidos
+     toman fg-muted/subtle como siempre — no necesitan tinte */
 }
