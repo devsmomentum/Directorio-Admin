@@ -218,7 +218,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
               </div>
               <div>
                 <h1 className="text-base font-black tracking-wider text-brand-cliente">MI COMERCIO</h1>
-                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Millennium Mall</p>
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Directorio digital</p>
               </div>
             </div>
           </div>
