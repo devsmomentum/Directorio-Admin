@@ -280,7 +280,9 @@ export default function LoginPage() {
                             { redirectTo: `${origin}/auth/callback?recover=1` },
                           );
                         if (resetErr) {
-                          setError(resetErr.message);
+                          // Evitamos exponer el mensaje crudo del proveedor de
+                          // auth (puede contener URLs internas / IDs).
+                          setError('No se pudo enviar el enlace de recuperación. Intenta más tarde.');
                         } else {
                           setError(null);
                           alert(

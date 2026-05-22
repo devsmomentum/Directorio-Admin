@@ -96,7 +96,9 @@ export default function BienvenidaPage() {
       data: metaPatch,
     });
     if (updateErr || !updateData.user) {
-      setError(updateErr?.message ?? 'No se pudo guardar la contraseña.');
+      // No exponemos updateErr.message porque puede incluir detalles internos
+      // del proveedor de auth (URLs, IDs de usuario, sub del JWT).
+      setError('No se pudo guardar la contraseña. Intenta nuevamente.');
       setSubmitting(false);
       return;
     }

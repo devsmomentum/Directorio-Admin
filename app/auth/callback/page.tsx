@@ -51,6 +51,27 @@ if (typeof window !== 'undefined') {
       searchParams.get('error') ??
       undefined,
   };
+
+  // Tokens/code se quedan en el historial del navegador (back button, capturas
+  // de pantalla, extensiones). Una vez capturados en memoria, reescribimos la
+  // URL para que no queden visibles ni indexables.
+  try {
+    const preserved = new URLSearchParams();
+    const recover = searchParams.get('recover');
+    if (recover) preserved.set('recover', recover);
+    const cleanUrl =
+      window.location.pathname + (preserved.toString() ? `?${preserved}` : '');
+    window.history.replaceState(null, '', cleanUrl);
+  } catch {
+    /* noop */
+  }
+}
+
+// Cualquier mensaje crudo del proveedor de auth puede contener referencias
+// internas (URLs de la BD, IDs, sub del JWT). Lo normalizamos a un texto
+// genérico antes de mostrarlo al usuario.
+function sanitizeAuthError(_raw: string | undefined): string {
+  return 'No pudimos validar el enlace. Pide uno nuevo al administrador.';
 }
 
 export default function AuthCallbackPage() {
@@ -68,7 +89,7 @@ export default function AuthCallbackPage() {
       if (captured.error) {
         if (!cancelled) {
           setStatus('error');
-          setErrorMsg(captured.error);
+          setErrorMsg(sanitizeAuthError(captured.error));
         }
         return;
       }
@@ -85,15 +106,19 @@ export default function AuthCallbackPage() {
               access_token: captured.access_token,
               refresh_token: captured.refresh_token,
             });
-            return error ? { ok: false as const, message: error.message } : { ok: true as const };
+            return error
+              ? { ok: false as const, message: sanitizeAuthError(error.message) }
+              : { ok: true as const };
           }
           if (captured.code) {
             const { error } = await supabase.auth.exchangeCodeForSession(captured.code);
-            return error ? { ok: false as const, message: error.message } : { ok: true as const };
+            return error
+              ? { ok: false as const, message: sanitizeAuthError(error.message) }
+              : { ok: true as const };
           }
           return {
             ok: false as const,
-            message: 'No recibimos un token válido. El enlace pudo haber expirado o ya fue usado.',
+            message: 'El enlace ya no es válido. Pide uno nuevo al administrador.',
           };
         })();
       }
