@@ -72,6 +72,7 @@ export default function ClientePromocionesPage() {
   const [aMediaType, setAMediaType] = useState<'image' | 'video'>('video');
   const [aStartDate, setAStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [aEndDate, setAEndDate] = useState('');
+  const [aIsActive, setAIsActive] = useState(true);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -79,6 +80,15 @@ export default function ClientePromocionesPage() {
   const [conflict, setConflict] = useState<{ active: any; step: 'choose' | 'queue-dates' } | null>(null);
   const [qStartDate, setQStartDate] = useState('');
   const [qEndDate, setQEndDate] = useState('');
+
+  // Modal de confirmación in-app (reemplaza window.confirm para acciones destructivas).
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    tone: 'danger' | 'warning';
+    onConfirm: () => void;
+  } | null>(null);
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -147,6 +157,7 @@ export default function ClientePromocionesPage() {
     setABrandName(''); setADescription('');
     setAMediaFile(null); setAMediaUrl(''); setAMediaType('video');
     setAStartDate(today); setAEndDate('');
+    setAIsActive(true);
   };
   const closeForm = () => {
     if (submitting) return;
@@ -187,6 +198,7 @@ export default function ClientePromocionesPage() {
     setAStartDate(c.start_date || today);
     setAEndDate(c.end_date || '');
     setAMediaFile(null);
+    setAIsActive(!!c.is_active);
     setForm('campaign');
   };
 
@@ -249,7 +261,7 @@ export default function ClientePromocionesPage() {
       const editingThis = cEditingId ? coupons.find(c => c.id === cEditingId) : null;
       const editingWasFlash = !!editingThis && FLASH_PLANS.has(editingThis.plan_type);
       if (isNewBrand && !editingWasFlash && flashBrandIds.size >= FLASH_GALLERY_MAX) {
-        setFeedback({ type: 'err', msg: `Galería Flash llena (${flashBrandIds.size}/${FLASH_GALLERY_MAX} campañas).` });
+        setFeedback({ type: 'err', msg: `Galería Flash llena (${flashBrandIds.size}/${FLASH_GALLERY_MAX} cupones).` });
         return;
       }
       const limit = FLASH_PERIOD_LIMITS[planType];
@@ -367,23 +379,59 @@ export default function ClientePromocionesPage() {
       }
 
       if (aEditingId) {
-        const { error } = await supabase.from('ad_campaigns')
+        // Incluimos is_active. El trigger guard_campaigns_owner_update
+        // valida que la transición sea legal (siempre TRUE->FALSE, y
+        // FALSE->TRUE sólo si plan vigente y sin otra activa).
+        const { data: updated, error } = await supabase.from('ad_campaigns')
           .update({
             brand_name: aBrandName, description: aDescription,
             media_url: finalMediaUrl, media_type: finalMediaType,
             duration_seconds: CAMPAIGN_DURATION_SECONDS,
             start_date: aStartDate, end_date: aEndDate || null,
+            is_active: aIsActive,
           })
-          .eq('id', aEditingId);
+          .eq('id', aEditingId)
+          .select('id, is_active')
+          .single();
         if (error) throw error;
-        setFeedback({ type: 'ok', msg: 'Campaña actualizada.' });
+        if (updated && updated.is_active !== aIsActive) {
+          throw new Error(
+            aIsActive
+              ? 'No se pudo activar la campaña: tu plan venció o ya tienes otra activa.'
+              : 'No se pudo desactivar la campaña. Revisa permisos.'
+          );
+        }
+        setFeedback({
+          type: 'ok',
+          msg: aIsActive ? 'Campaña actualizada.' : 'Campaña actualizada y pausada.',
+        });
       } else {
-        // Si reemplazamos: desactivar la actual primero.
-        if (mode === 'replace' && activeConflict) {
-          const { error: deactErr } = await supabase.from('ad_campaigns')
+        // Si reemplazamos: desactivar TODAS las activas de la tienda primero.
+        // Una tienda puede tener >1 activa (p.ej. creada desde admin), así que
+        // filtramos por store_id + is_active en lugar de un id puntual, y
+        // verificamos con .select() que la RLS no haya bloqueado el update.
+        if (mode === 'replace') {
+          // Pedimos is_active de vuelta: hay un trigger guard en la BD que puede
+          // revertir cambios prohibidos sin lanzar error. Si el row vuelve con
+          // is_active=true, el guard nos bloqueó (admin/sistema controla activación).
+          const { data: deactivated, error: deactErr } = await supabase
+            .from('ad_campaigns')
             .update({ is_active: false })
-            .eq('id', activeConflict.id);
+            .eq('store_id', store.id)
+            .eq('is_active', true)
+            .select('id, is_active');
           if (deactErr) throw deactErr;
+          if (!deactivated || deactivated.length === 0) {
+            throw new Error('No se pudo desactivar la campaña actual. Revisa permisos o intenta de nuevo.');
+          }
+          const stillActive = deactivated.filter(r => r.is_active);
+          if (stillActive.length > 0) {
+            throw new Error(
+              'La base de datos no permitió desactivar la campaña actual ' +
+              '(trigger de seguridad). Pide a un administrador que aplique ' +
+              'la migración actualizada de guard_campaigns_owner_update.'
+            );
+          }
         }
 
         // Si encolamos: la nueva usa el rango elegido por el usuario.
@@ -470,11 +518,17 @@ export default function ClientePromocionesPage() {
     ...campaigns.map(c => ({ kind: 'campaign' as const, data: c, created: c.created_at })),
   ].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
 
-  const visible = items.filter(it => {
-    if (filter === 'all') return true;
-    if (filter === 'coupons') return it.kind === 'coupon';
-    return it.kind === 'campaign';
-  });
+  const sortedCampaigns = [...campaigns].sort((a, b) =>
+    (b.created_at || '').localeCompare(a.created_at || '')
+  );
+  const sortedCoupons = [...coupons].sort((a, b) =>
+    (b.created_at || '').localeCompare(a.created_at || '')
+  );
+  const showCampaigns = filter === 'all' || filter === 'campaigns';
+  const showCoupons = filter === 'all' || filter === 'coupons';
+  const nothingVisible =
+    (showCampaigns ? sortedCampaigns.length : 0) +
+    (showCoupons ? sortedCoupons.length : 0) === 0;
 
   const flashCount = coupons.filter(c => FLASH_PLANS.has(c.plan_type)
     && c.amount_available > 0
@@ -522,9 +576,7 @@ export default function ClientePromocionesPage() {
               <p className="text-pink-200 text-sm font-semibold">
                 ⚡ Addon Flash Coupon activo · {PLAN_LABELS[store!.flash_coupon_plan!]}
               </p>
-              <p className="text-white/50 text-xs mt-1">
-                Galería global: <span className="font-mono text-pink-200">{flashBrandIds.size}/{FLASH_GALLERY_MAX}</span> campañas. Tu campaña {flashBrandIds.has(store!.id) ? 'ya ocupa un slot' : 'no ocupa slot todavía'}.
-              </p>
+              
               {store!.flash_coupon_expiry_date && (
                 <p className="text-white/50 text-xs mt-0.5">Vence {store!.flash_coupon_expiry_date}.</p>
               )}
@@ -708,13 +760,6 @@ export default function ClientePromocionesPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Categoría (opcional)</label>
-                <input type="text" value={cCategory} onChange={(e) => setCCategory(e.target.value)}
-                  placeholder="Ej: Café"
-                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio</label>
@@ -896,6 +941,73 @@ export default function ClientePromocionesPage() {
                   Tu plan vence el {store!.contract_expiry_date}. La campaña no puede pasar de esa fecha.
                 </p>
               )}
+
+              {aEditingId && (() => {
+                const hasOtherActive = campaigns.some(c =>
+                  c.id !== aEditingId && c.is_active
+                );
+                const canActivate = planActive && !hasOtherActive;
+                const currentlyActive = aIsActive;
+                const reasonCantActivate = !planActive
+                  ? 'Tu plan está vencido — renueva para volver a activar campañas.'
+                  : hasOtherActive
+                    ? 'Ya tienes otra campaña activa. Pausa la otra primero.'
+                    : null;
+                return (
+                  <div className={`rounded-lg border p-3 ${
+                    currentlyActive
+                      ? 'bg-emerald-500/[0.05] border-emerald-500/25'
+                      : 'bg-white/[0.03] border-white/10'
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-semibold ${
+                          currentlyActive ? 'text-emerald-200' : 'text-white/70'
+                        }`}>
+                          {currentlyActive ? 'Campaña activa en el loop' : 'Campaña pausada'}
+                        </p>
+                        <p className="text-[11px] text-white/50 mt-1 leading-snug">
+                          {currentlyActive
+                            ? 'Si la pausas se libera tu slot en el loop. Podrás reactivarla mientras tu plan siga vigente y no tengas otra activa.'
+                            : reasonCantActivate
+                              ?? 'Tu plan está activo y no tienes otra campaña ocupando el slot — puedes activarla ahora.'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={submitting || (!currentlyActive && !canActivate)}
+                        onClick={() => {
+                          if (currentlyActive) {
+                            setConfirmDialog({
+                              title: 'Pausar campaña',
+                              message:
+                                `¿Pausar "${aBrandName}"? Se liberará tu slot en el loop. ` +
+                                `Podrás reactivarla más tarde si tu plan sigue vigente y ` +
+                                `no tienes otra campaña activa.`,
+                              confirmLabel: 'Sí, pausar',
+                              tone: 'warning',
+                              onConfirm: () => {
+                                setAIsActive(false);
+                                setConfirmDialog(null);
+                              },
+                            });
+                          } else {
+                            setAIsActive(true);
+                          }
+                        }}
+                        className={`shrink-0 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                          currentlyActive
+                            ? 'bg-white/5 hover:bg-white/10 border-white/15 text-white/70'
+                            : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-200'
+                        }`}
+                      >
+                        {currentlyActive ? 'Pausar' : 'Activar'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={closeForm} disabled={submitting}
                   className="flex-1 px-4 py-2.5 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg">
@@ -983,7 +1095,22 @@ export default function ClientePromocionesPage() {
                     <button
                       type="button"
                       disabled={submitting}
-                      onClick={() => persistCampaign('replace', conflict.active)}
+                      onClick={() => {
+                        setConfirmDialog({
+                          title: 'Desactivar campaña actual',
+                          message:
+                            `¿Seguro que deseas desactivar "${conflict.active.brand_name}" ` +
+                            `y publicar la nueva ahora? La campaña actual saldrá del loop ` +
+                            `y la nueva entrará de inmediato. Podrás reactivar la anterior ` +
+                            `más tarde si tu plan sigue vigente y no hay otra activa.`,
+                          confirmLabel: 'Sí, desactivar y publicar',
+                          tone: 'danger',
+                          onConfirm: () => {
+                            setConfirmDialog(null);
+                            persistCampaign('replace', conflict.active);
+                          },
+                        });
+                      }}
                       className="w-full text-left bg-[#0A0A0A] border border-white/10 hover:border-red-500/40 hover:bg-red-500/[0.05] disabled:opacity-40 disabled:cursor-not-allowed rounded-lg p-3 transition-colors"
                     >
                       <p className="text-sm font-semibold text-red-200">
@@ -1118,19 +1245,126 @@ export default function ClientePromocionesPage() {
         </div>
       )}
 
-      {/* Mixed grid */}
-      {visible.length === 0 ? (
+      {/* Grids separados por tipo: cada uno conserva su aspect ratio sin que
+          CSS Grid estire filas mixtas (cupón 4:3 vs campaña 9:16). */}
+      {nothingVisible ? (
         <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
           <p className="text-white/30 text-sm">
             {items.length === 0 ? 'Aún no tienes promociones.' : 'No hay resultados para este filtro.'}
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {visible.map(it => it.kind === 'coupon'
-            ? <CouponCard key={`c-${it.data.id}`} c={it.data} onEdit={openEditCoupon} onDelete={deleteCoupon} today={today} />
-            : <CampaignCard key={`a-${it.data.id}`} c={it.data} onEdit={openEditCampaign} onDelete={deleteCampaign} today={today} />
+        <div className="space-y-8">
+          {showCampaigns && sortedCampaigns.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">📺</span>
+                  <h3 className="text-sm font-semibold text-white tracking-wide">
+                    Campañas
+                  </h3>
+                  <span className="text-[10px] text-white/40 font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                    {sortedCampaigns.length}
+                  </span>
+                </div>
+                <span className="text-[10px] text-white/30">Vertical · 9:16</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {sortedCampaigns.map(c => (
+                  <CampaignCard
+                    key={`a-${c.id}`}
+                    c={c}
+                    onEdit={openEditCampaign}
+                    onDelete={deleteCampaign}
+                    today={today}
+                  />
+                ))}
+              </div>
+            </section>
           )}
+
+          {showCampaigns && showCoupons && sortedCampaigns.length > 0 && sortedCoupons.length > 0 && (
+            <div className="border-t border-white/5" />
+          )}
+
+          {showCoupons && sortedCoupons.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🎟️</span>
+                  <h3 className="text-sm font-semibold text-white tracking-wide">
+                    Cupones
+                  </h3>
+                  <span className="text-[10px] text-white/40 font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                    {sortedCoupons.length}
+                  </span>
+                </div>
+                <span className="text-[10px] text-white/30">Horizontal · 4:3</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {sortedCoupons.map(c => (
+                  <CouponCard
+                    key={`c-${c.id}`}
+                    c={c}
+                    onEdit={openEditCoupon}
+                    onDelete={deleteCoupon}
+                    today={today}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      {/* Confirm dialog in-app (reemplaza window.confirm) */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            onClick={() => setConfirmDialog(null)}
+          />
+          <div className={`relative bg-[#0E0E0E] border rounded-2xl w-full max-w-md shadow-2xl ${
+            confirmDialog.tone === 'danger' ? 'border-red-500/40' : 'border-amber-500/40'
+          }`}>
+            <div className="px-6 py-4 border-b border-white/10 flex items-center gap-2">
+              <svg className={`w-5 h-5 shrink-0 ${
+                confirmDialog.tone === 'danger' ? 'text-red-300' : 'text-amber-300'
+              }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <h3 className={`text-sm font-semibold ${
+                confirmDialog.tone === 'danger' ? 'text-red-100' : 'text-amber-100'
+              }`}>
+                {confirmDialog.title}
+              </h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-white/70 leading-relaxed whitespace-pre-line">
+                {confirmDialog.message}
+              </p>
+            </div>
+            <div className="px-6 pb-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="flex-1 px-4 py-2.5 text-sm text-white/60 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDialog.onConfirm}
+                className={`flex-1 px-4 py-2.5 text-sm font-semibold rounded-lg border transition-colors ${
+                  confirmDialog.tone === 'danger'
+                    ? 'bg-red-500/20 hover:bg-red-500/30 border-red-500/40 text-red-100'
+                    : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/40 text-amber-100'
+                }`}
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

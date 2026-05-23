@@ -351,14 +351,43 @@ CREATE POLICY "ad_campaigns_anon_read" ON public.ad_campaigns
 
 CREATE OR REPLACE FUNCTION public.guard_campaigns_owner_update()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+  v_plan_active     BOOLEAN;
+  v_other_active    BOOLEAN;
 BEGIN
   IF public.is_admin() THEN RETURN NEW; END IF;
   NEW.payment_status := OLD.payment_status;
-  NEW.is_active      := OLD.is_active;
   NEW.suspended_at   := OLD.suspended_at;
   NEW.priority_level := OLD.priority_level;
   NEW.plan_type      := OLD.plan_type;
   NEW.store_id       := OLD.store_id;
+
+  -- Reglas para is_active cuando el dueño edita su propia campaña:
+  --  · DESACTIVAR (TRUE -> FALSE): siempre permitido (pausar / liberar slot).
+  --  · REACTIVAR  (FALSE -> TRUE): sólo si la tienda no tiene OTRA campaña
+  --    activa Y su plan sigue vigente. Cualquier otro cambio se revierte.
+  IF OLD.is_active = TRUE AND NEW.is_active = FALSE THEN
+    NULL; -- permitido
+  ELSIF OLD.is_active = FALSE AND NEW.is_active = TRUE THEN
+    SELECT (s.contract_expiry_date IS NULL OR s.contract_expiry_date >= CURRENT_DATE)
+      INTO v_plan_active
+      FROM public.stores s
+     WHERE s.id = OLD.store_id;
+
+    SELECT EXISTS (
+      SELECT 1 FROM public.ad_campaigns c
+       WHERE c.store_id = OLD.store_id
+         AND c.id <> OLD.id
+         AND c.is_active = TRUE
+    ) INTO v_other_active;
+
+    IF NOT COALESCE(v_plan_active, FALSE) OR v_other_active THEN
+      NEW.is_active := OLD.is_active; -- revertir
+    END IF;
+  ELSE
+    NEW.is_active := OLD.is_active;
+  END IF;
+
   RETURN NEW;
 END $$;
 

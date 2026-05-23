@@ -236,6 +236,28 @@ export default function CampaniasAdminPage() {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       const isVideo = file.type.startsWith('video/');
+      const isImage = file.type.startsWith('image/');
+
+      if (!isVideo && !isImage) {
+        alert('Formato no soportado. Sube una imagen (JPG/PNG/WEBP) o un video (MP4/WEBM).');
+        e.target.value = '';
+        return;
+      }
+
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const allowedImageExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+      const allowedVideoExt = ['mp4', 'webm', 'mov', 'm4v'];
+      if (isImage && !allowedImageExt.includes(ext)) {
+        alert(`Extensión "${ext}" no permitida para imagen. Usa: ${allowedImageExt.join(', ')}.`);
+        e.target.value = '';
+        return;
+      }
+      if (isVideo && !allowedVideoExt.includes(ext)) {
+        alert(`Extensión "${ext}" no permitida para video. Usa: ${allowedVideoExt.join(', ')}.`);
+        e.target.value = '';
+        return;
+      }
+
       const maxSize = isVideo ? 50 * 1024 * 1024 : 5 * 1024 * 1024;
       if (file.size > maxSize) {
         alert(`El archivo excede el límite (${isVideo ? '50MB para video' : '5MB para imagen'}).`);
@@ -617,8 +639,24 @@ export default function CampaniasAdminPage() {
                   <div key={c.id} className={cardClasses}>
                     <div className="h-40 bg-black relative">
                       {isVideo
-                        ? <video src={c.media_url} className="w-full h-full object-cover" muted autoPlay loop />
-                        : <img src={c.media_url} className="w-full h-full object-cover" />}
+                        ? <video
+                            src={c.media_url}
+                            className="w-full h-full object-cover"
+                            muted
+                            autoPlay
+                            loop
+                            playsInline
+                            onError={(e) => { (e.currentTarget as HTMLVideoElement).style.display = 'none'; }}
+                          />
+                        : <img
+                            src={c.media_url}
+                            className="w-full h-full object-cover"
+                            alt={c.brand_name}
+                            onError={(e) => {
+                              const t = e.currentTarget as HTMLImageElement;
+                              t.style.display = 'none';
+                            }}
+                          />}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
                       <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${PLAN_COLORS[c.plan_type] || 'text-white border-white'}`}>
@@ -781,14 +819,22 @@ export default function CampaniasAdminPage() {
               </div>
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                  Media (1920×1080 px) {editingId && <span className="normal-case tracking-normal">(dejar vacío para mantener)</span>}
+                  Media — Imagen o Video (1920×1080 px) {editingId && <span className="normal-case tracking-normal">(dejar vacío para mantener)</span>}
                 </label>
-                <input type="file" accept="image/*,video/*" onChange={handleFileChange} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white" />
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" onChange={handleFileChange} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white" />
+                <p className="text-[10px] text-white/30 mt-1">
+                  Formatos: JPG, PNG, WEBP, GIF (máx 5MB) · MP4, WEBM, MOV (máx 50MB).
+                  {mediaFile && (
+                    <span className={`ml-2 px-1.5 py-0.5 rounded ${mediaType === 'video' ? 'bg-purple-500/15 text-purple-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                      Detectado: {mediaType === 'video' ? 'Video' : 'Imagen'}
+                    </span>
+                  )}
+                </p>
                 {mediaPreview && (
                   <div className="mt-2 h-32 bg-black rounded-lg border border-white/5 overflow-hidden flex items-center justify-center">
                     {mediaType === 'video'
-                      ? <video src={mediaPreview} className="h-full object-contain" muted autoPlay loop />
-                      : <img src={mediaPreview} className="h-full object-contain" />}
+                      ? <video src={mediaPreview} className="h-full object-contain" muted autoPlay loop playsInline />
+                      : <img src={mediaPreview} className="h-full object-contain" alt="preview" />}
                   </div>
                 )}
               </div>
