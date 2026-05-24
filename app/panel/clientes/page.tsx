@@ -434,46 +434,73 @@ export default function ClientesPage() {
     }
   };
 
-  // Envío de magic link por WhatsApp desde la fila de cada cliente en la
-  // tabla. Reusa la edge function send-magic-link. Se confirma con el admin
-  // antes de invocarla para evitar disparos accidentales.
-  const [sendingWhatsappFor, setSendingWhatsappFor] = useState<string | null>(null);
+  // Envío de magic link desde la fila de cada cliente en la tabla. Reusa la
+  // edge function send-magic-link. Se confirma con el admin antes de invocarla
+  // para evitar disparos accidentales. Las confirmaciones y el resultado se
+  // muestran en un modal de la app (no se usa confirm/alert del navegador).
+  const [sendingLinkFor, setSendingLinkFor] = useState<{ id: string; channel: 'whatsapp' | 'email' } | null>(null);
 
-  const sendWhatsappForClient = async (c: ClientRow) => {
-    if (!c.telefono_personal) {
-      alert('Este cliente no tiene teléfono registrado. Edítalo y agrega un número antes de enviar el enlace.');
+  type LinkDialog =
+    | { kind: 'confirm'; channel: 'whatsapp' | 'email'; client: ClientRow }
+    | { kind: 'result'; tone: 'success' | 'error'; title: string; message: string };
+  const [linkDialog, setLinkDialog] = useState<LinkDialog | null>(null);
+
+  const openSendDialog = (channel: 'whatsapp' | 'email', c: ClientRow) => {
+    if (channel === 'whatsapp' && !c.telefono_personal) {
+      setLinkDialog({
+        kind: 'result',
+        tone: 'error',
+        title: 'Sin teléfono registrado',
+        message: 'Este cliente no tiene teléfono. Edítalo y agrega un número antes de enviar el enlace por WhatsApp.',
+      });
       return;
     }
-    const tel = c.telefono_personal;
-    const ok = confirm(
-      `¿Enviar el enlace de acceso vía WhatsApp a ${c.full_name || c.email}?\n\nNúmero: ${tel}`
-    );
-    if (!ok) return;
+    setLinkDialog({ kind: 'confirm', channel, client: c });
+  };
 
-    setSendingWhatsappFor(c.id);
+  const confirmSendLink = async () => {
+    if (!linkDialog || linkDialog.kind !== 'confirm') return;
+    const { channel, client: c } = linkDialog;
+    const tel = c.telefono_personal ?? '';
+
+    setSendingLinkFor({ id: c.id, channel });
+    setLinkDialog(null);
+
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const { data, error } = await supabase.functions.invoke('send-magic-link', {
       body: {
         email: c.email,
-        phone: tel,
-        channel: 'whatsapp',
+        phone: channel === 'whatsapp' ? tel : undefined,
+        channel,
         redirectTo: `${origin}/auth/callback`,
         profile: {
           full_name: c.full_name || null,
           cedula_numero: c.cedula_numero || null,
-          telefono_personal: tel,
+          telefono_personal: tel || null,
         },
       },
     });
-    setSendingWhatsappFor(null);
+    setSendingLinkFor(null);
 
     if (error || (data as any)?.error) {
-      // No mostramos data.error / error.message: pueden contener referencias
+      // No exponemos data.error / error.message: pueden contener referencias
       // internas (URL de la edge function, IDs, etc.).
-      alert('No se pudo enviar el enlace por WhatsApp. Intenta nuevamente.');
+      setLinkDialog({
+        kind: 'result',
+        tone: 'error',
+        title: channel === 'whatsapp' ? 'No se pudo enviar por WhatsApp' : 'No se pudo enviar por correo',
+        message: 'Intenta nuevamente en unos minutos. Si persiste, contacta al equipo técnico.',
+      });
       return;
     }
-    alert(`Enlace enviado por WhatsApp a ${tel}.`);
+    setLinkDialog({
+      kind: 'result',
+      tone: 'success',
+      title: 'Enlace enviado',
+      message: channel === 'whatsapp'
+        ? `Se envió el enlace por WhatsApp a ${tel}.`
+        : `Se envió el enlace de acceso al correo ${c.email}.`,
+    });
   };
 
   // ────────────────────────────────────────────────────────────────────────
@@ -620,15 +647,27 @@ export default function ClientesPage() {
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button
-                        onClick={() => sendWhatsappForClient(c)}
-                        disabled={sendingWhatsappFor === c.id || !c.telefono_personal}
+                        onClick={() => openSendDialog('whatsapp', c)}
+                        disabled={!!sendingLinkFor || !c.telefono_personal}
                         title={c.telefono_personal ? 'Enviar enlace por WhatsApp' : 'Sin teléfono registrado'}
                         className="p-1.5 rounded-md text-white/30 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/30"
                       >
-                        {sendingWhatsappFor === c.id ? (
+                        {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'whatsapp' ? (
                           <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                         ) : (
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 21l1.65-3.8a9 9 0 113.4 3.39L3 21M9 10a.5.5 0 11.998-.001A.5.5 0 019 10m3 0a.5.5 0 11.998-.001A.5.5 0 0112 10m3 0a.5.5 0 11.998-.001A.5.5 0 0115 10" /></svg>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => openSendDialog('email', c)}
+                        disabled={!!sendingLinkFor}
+                        title="Enviar enlace por correo"
+                        className="p-1.5 rounded-md text-white/30 hover:text-sky-400 hover:bg-sky-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/30"
+                      >
+                        {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'email' ? (
+                          <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
                         )}
                       </button>
                       <button
@@ -898,6 +937,91 @@ export default function ClientesPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {linkDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setLinkDialog(null)}
+          />
+          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-sm shadow-2xl">
+            {linkDialog.kind === 'confirm' ? (
+              <>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                    linkDialog.channel === 'whatsapp'
+                      ? 'bg-emerald-500/15 text-emerald-400'
+                      : 'bg-sky-500/15 text-sky-400'
+                  }`}>
+                    {linkDialog.channel === 'whatsapp' ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 21l1.65-3.8a9 9 0 113.4 3.39L3 21M9 10a.5.5 0 11.998-.001A.5.5 0 019 10m3 0a.5.5 0 11.998-.001A.5.5 0 0112 10m3 0a.5.5 0 11.998-.001A.5.5 0 0115 10" /></svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                    )}
+                  </div>
+                  <h3 className="text-sm font-semibold text-white">
+                    {linkDialog.channel === 'whatsapp' ? 'Enviar enlace por WhatsApp' : 'Enviar enlace por correo'}
+                  </h3>
+                </div>
+                <p className="text-xs text-white/60 leading-relaxed mb-1">
+                  ¿Enviar el enlace de acceso a{' '}
+                  <span className="text-white/90 font-medium">{linkDialog.client.full_name || linkDialog.client.email}</span>?
+                </p>
+                <p className="text-[11px] text-white/40 font-mono mb-5">
+                  {linkDialog.channel === 'whatsapp'
+                    ? linkDialog.client.telefono_personal
+                    : linkDialog.client.email}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLinkDialog(null)}
+                    className="flex-1 px-4 py-2 text-sm text-white/50 hover:text-white/80 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmSendLink}
+                    className={`flex-1 px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                      linkDialog.channel === 'whatsapp'
+                        ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border-emerald-500/30'
+                        : 'bg-sky-500/15 text-sky-400 hover:bg-sky-500/25 border-sky-500/30'
+                    }`}
+                  >
+                    Enviar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                    linkDialog.tone === 'success'
+                      ? 'bg-emerald-500/15 text-emerald-400'
+                      : 'bg-red-500/15 text-red-400'
+                  }`}>
+                    {linkDialog.tone === 'success' ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                    )}
+                  </div>
+                  <h3 className="text-sm font-semibold text-white">{linkDialog.title}</h3>
+                </div>
+                <p className="text-xs text-white/60 leading-relaxed mb-5">{linkDialog.message}</p>
+                <button
+                  type="button"
+                  onClick={() => setLinkDialog(null)}
+                  className="w-full px-4 py-2 text-sm font-medium bg-white/5 hover:bg-white/10 text-white/80 rounded-lg transition-colors"
+                >
+                  Entendido
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

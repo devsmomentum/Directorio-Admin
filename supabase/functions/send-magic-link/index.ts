@@ -55,20 +55,38 @@ const CORS_HEADERS = {
 }
 
 Deno.serve(async (req: Request) => {
+  try {
+    return await handle(req)
+  } catch (err) {
+    console.error('[send-magic-link] UNCAUGHT', err instanceof Error ? err.stack : String(err))
+    return respond({ error: `Uncaught: ${err instanceof Error ? err.message : String(err)}` }, 500)
+  }
+})
+
+async function handle(req: Request): Promise<Response> {
+  console.log('[send-magic-link] enter', req.method, 'origin=', req.headers.get('origin') ?? '-')
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS })
   if (req.method !== 'POST')    return respond({ error: 'Method not allowed' }, 405)
 
   const authHeader = req.headers.get('Authorization') ?? ''
+  console.log('[send-magic-link] auth header present?', authHeader.startsWith('Bearer '))
   if (!authHeader.startsWith('Bearer ')) {
     return respond({ error: 'Missing bearer token' }, 401)
   }
 
   // 1. Validar que el caller es admin
+  console.log('[send-magic-link] step1: validating caller')
+  console.log('[send-magic-link] env check', {
+    has_url: !!SUPABASE_URL,
+    has_anon: !!SUPABASE_ANON_KEY,
+    has_service: !!SUPABASE_SERVICE_ROLE_KEY,
+  })
   const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: authHeader } },
     auth: { persistSession: false },
   })
   const { data: userRes, error: userErr } = await userClient.auth.getUser()
+  console.log('[send-magic-link] getUser ->', { id: userRes?.user?.id, err: userErr?.message })
   if (userErr || !userRes?.user) {
     return respond({ error: 'Invalid session' }, 401)
   }
@@ -82,6 +100,7 @@ Deno.serve(async (req: Request) => {
     .select('role')
     .eq('id', userRes.user.id)
     .maybeSingle()
+  console.log('[send-magic-link] role lookup ->', { role: callerRow?.role, err: callerErr?.message })
 
   if (callerErr || callerRow?.role !== 'admin') {
     return respond({ error: 'Solo admin puede enviar magic links' }, 403)
@@ -166,17 +185,48 @@ Deno.serve(async (req: Request) => {
     return respond({ ok: true, channel: 'none', email, user_created: userCreated })
   }
 
-  // 4. Generar magic link (autentica una vez).
+  // 4. Despachar por canal elegido.
+  //
+  // Para 'email' usamos signInWithOtp en lugar de generateLink: generateLink
+  // sólo PRODUCE el link (se usa cuando vamos a despacharlo nosotros, p.ej.
+  // por WhatsApp) — NO dispara el mailer integrado de Supabase. signInWithOtp
+  // sí encola y envía el correo a través del SMTP configurado en el proyecto.
+
+  if (channel === 'email') {
+    console.log('[send-magic-link] step4 (email): signInWithOtp', { email, redirectTo })
+    const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+    })
+    const { error: otpErr } = await anon.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: redirectTo,
+        // shouldCreateUser=false: el usuario ya existe en auth (lo creamos en
+        // el paso 3 si hacía falta). Esto evita que Supabase intente recrearlo
+        // y nos garantiza que se envía el flujo de "magic link" y no de signup.
+        shouldCreateUser: false,
+      },
+    })
+    console.log('[send-magic-link] signInWithOtp ->', { err: otpErr?.message })
+    if (otpErr) {
+      return respond({ error: `signInWithOtp: ${otpErr.message}` }, 500)
+    }
+    return respond({ ok: true, channel: 'email', email })
+  }
+
+  // channel === 'whatsapp' → generamos el link para inyectarlo en el mensaje.
   // NOTA: usamos type:'magiclink' (no 'invite') porque magiclink admite
   // re-invocación para un usuario ya existente — necesario si el admin re-
   // envía el link a un cliente que aún no completó onboarding. El callback
   // /auth/callback decide si lleva a /bienvenida (cuando user_metadata.
   // password_set ≠ true) o directo al panel según el rol.
+  console.log('[send-magic-link] step4 (whatsapp): generateLink', { email, redirectTo })
   const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
     type: 'magiclink',
     email,
     options: { redirectTo },
   })
+  console.log('[send-magic-link] generateLink ->', { has_link: !!linkData?.properties?.action_link, err: linkErr?.message })
 
   if (linkErr || !linkData?.properties?.action_link) {
     return respond({ error: `generateLink: ${linkErr?.message ?? 'sin action_link'}` }, 500)
@@ -184,8 +234,12 @@ Deno.serve(async (req: Request) => {
 
   const actionLink = linkData.properties.action_link
 
-  // 5. Despachar por canal elegido
-  if (channel === 'whatsapp') {
+  // 5. Enviar por WhatsApp (SuperAPI).
+    console.log('[send-magic-link] step5: whatsapp branch', {
+      has_token: !!SUPERAPI_TOKEN,
+      has_client: !!SUPERAPI_CLIENT,
+      url: SUPERAPI_URL,
+    })
     if (!SUPERAPI_TOKEN) {
       return respond({
         error: 'SuperAPI no configurado (falta SUPERAPI_TOKEN)',
@@ -217,6 +271,7 @@ Deno.serve(async (req: Request) => {
     const payload: Record<string, unknown> = { chatId, message }
     if (SUPERAPI_CLIENT) payload.client = SUPERAPI_CLIENT
 
+    console.log('[send-magic-link] step6: POST to SuperAPI', { chatId, url: `${SUPERAPI_URL}/api/v1/send-message` })
     const waRes = await fetch(`${SUPERAPI_URL.replace(/\/$/, '')}/api/v1/send-message`, {
       method: 'POST',
       headers: {
@@ -227,6 +282,7 @@ Deno.serve(async (req: Request) => {
     })
 
     const waJson: any = await waRes.json().catch(() => ({}))
+    console.log('[send-magic-link] SuperAPI ->', { status: waRes.status, ok: waRes.ok, body: waJson })
     if (!waRes.ok || waJson?.error === true) {
       return respond({
         error: `SuperAPI ${waRes.status}: ${waJson?.message ?? 'envío fallido'}`,
@@ -234,13 +290,8 @@ Deno.serve(async (req: Request) => {
       }, 502)
     }
 
-    return respond({ ok: true, channel: 'whatsapp', chatId, email })
-  }
-
-  // channel === 'email' → Supabase ya intentó enviar el correo si hay mailer
-  // configurado. Devolvemos el action_link como fallback útil para el admin.
-  return respond({ ok: true, channel: 'email', email, action_link: actionLink })
-})
+  return respond({ ok: true, channel: 'whatsapp', chatId, email })
+}
 
 function respond(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
