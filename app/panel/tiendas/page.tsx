@@ -1223,7 +1223,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         const [campRes, couponsRes, linkRes] = await Promise.all([
           supabase
             .from('ad_campaigns')
-            .select('id, brand_name, plan_type, start_date, end_date, is_active, payment_status, suspended_at, created_at')
+            .select('id, brand_name, plan_type, start_date, end_date, is_active, created_at')
             .eq('store_id', store.id)
             .order('created_at', { ascending: false }),
           supabase
@@ -1308,15 +1308,15 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   }, [store.id, store.name, range, rangeStart]);
 
   // ── Métricas derivadas ────────────────────────────────────────────────────
+  const planVigente = !store.contract_expiry_date || store.contract_expiry_date >= today;
   const activeCampaign = useMemo(() => {
+    if (!planVigente) return null;
     return campaigns.find(c =>
       c.is_active &&
       (!c.end_date || c.end_date >= today) &&
-      (!c.start_date || c.start_date <= today) &&
-      (c.payment_status ?? 'pending') !== 'overdue' &&
-      !c.suspended_at
+      (!c.start_date || c.start_date <= today)
     ) || null;
-  }, [campaigns, today]);
+  }, [campaigns, today, planVigente]);
 
   const activeCoupons = useMemo(() => coupons.filter(c =>
     (!c.end_date || c.end_date.split('T')[0] >= today) &&
@@ -1690,11 +1690,8 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                           <td className="px-3 py-2 text-white/40 font-mono">{c.start_date || '—'} → {c.end_date || '∞'}</td>
                           <td className="px-3 py-2">
                             <span className={`text-[10px] font-medium ${live ? 'text-emerald-400' : 'text-white/30'}`}>
-                              {c.suspended_at ? 'Suspendida' : live ? 'Activa' : 'Inactiva'}
+                              {live ? 'Activa' : 'Inactiva'}
                             </span>
-                            {c.payment_status && c.payment_status !== 'paid' && (
-                              <span className="ml-1.5 text-[9px] text-amber-400">· {c.payment_status}</span>
-                            )}
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-white/70">{imp.toLocaleString('es-VE')}</td>
                         </tr>

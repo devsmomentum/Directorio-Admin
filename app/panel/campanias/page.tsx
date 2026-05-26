@@ -57,8 +57,6 @@ const PLAN_LABELS: Record<string, string> = {
   PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
 };
 
-type PaymentStatus = 'pending' | 'paid' | 'overdue';
-
 interface Store { id: string; name: string; }
 
 interface Campaign {
@@ -76,9 +74,7 @@ interface Campaign {
   slot_limit_group: string | null;
   target_frequency_seconds: number | null;
   store_id: string | null;
-  stores?: { name: string };
-  payment_status: PaymentStatus | null;
-  suspended_at: string | null;
+  stores?: { name: string; contract_expiry_date: string | null };
 }
 
 type Tab = 'campaigns' | 'kioscos';
@@ -99,7 +95,6 @@ export default function CampaniasAdminPage() {
   // Kill-switch state
   const [killSwitchCandidates, setKillSwitchCandidates] = useState<Campaign[]>([]);
   const [applyingKillSwitch, setApplyingKillSwitch] = useState(false);
-  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
 
   // Form Fields
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -123,19 +118,20 @@ export default function CampaniasAdminPage() {
   const fetchData = async () => {
     setRefreshing(true);
     const [campRes, storesRes] = await Promise.all([
-      supabase.from('ad_campaigns').select('*, stores(name)').order('created_at', { ascending: false }).limit(200),
+      supabase.from('ad_campaigns').select('*, stores(name, contract_expiry_date)').order('created_at', { ascending: false }).limit(200),
       supabase.from('stores').select('id, name').order('name').limit(500)
     ]);
     if (campRes.data) {
       const data = campRes.data as Campaign[];
       setCampaigns(data);
-      // Detect overdue: end_date passed + no payment + still active
+      // Campañas activas que deberían estar apagadas: vencidas o con plan-tienda vencido
       const today = new Date().toISOString().split('T')[0];
-      const overdue = data.filter(c =>
-        c.end_date && c.end_date < today &&
-        (c.payment_status ?? 'pending') !== 'paid' &&
-        c.is_active
-      );
+      const overdue = data.filter(c => {
+        if (!c.is_active) return false;
+        const expiredEnd = c.end_date && c.end_date < today;
+        const expiredPlan = c.stores?.contract_expiry_date && c.stores.contract_expiry_date < today;
+        return expiredEnd || expiredPlan;
+      });
       setKillSwitchCandidates(overdue);
     }
     if (storesRes.data) setStores(storesRes.data);
@@ -150,8 +146,8 @@ export default function CampaniasAdminPage() {
     const live = campaigns.filter(c =>
       c.is_active &&
       loopPlans.has(c.plan_type) &&
-      (c.payment_status ?? 'pending') !== 'overdue' &&
-      (!c.end_date || c.end_date >= today)
+      (!c.end_date || c.end_date >= today) &&
+      (!c.stores?.contract_expiry_date || c.stores.contract_expiry_date >= today)
     );
     const byPlan = live.reduce<Record<string, number>>((acc, c) => {
       acc[c.plan_type] = (acc[c.plan_type] || 0) + 1;
@@ -165,19 +161,6 @@ export default function CampaniasAdminPage() {
       overTarget: slots > LOOP_TARGET_SLOTS,
       overExtended: slots > LOOP_EXTENDED_SLOTS,
     };
-  }, [campaigns]);
-
-  // Campaigns expiring in ≤3 days with unpaid status (cobranzas warning)
-  const cobrosWarning = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const in3days = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    return campaigns.filter(c =>
-      c.end_date &&
-      c.end_date >= today &&
-      c.end_date <= in3days &&
-      (c.payment_status ?? 'pending') !== 'paid' &&
-      c.is_active
-    );
   }, [campaigns]);
 
   const resetForm = () => {
@@ -282,8 +265,8 @@ export default function CampaniasAdminPage() {
         c.id !== editingId &&
         c.plan_type === planType &&
         c.is_active &&
-        (c.payment_status ?? 'pending') !== 'overdue' &&
-        (!c.end_date || c.end_date >= today)
+        (!c.end_date || c.end_date >= today) &&
+        (!c.stores?.contract_expiry_date || c.stores.contract_expiry_date >= today)
       ).length;
       if (currentActive >= cap) {
         alert(
@@ -323,11 +306,6 @@ export default function CampaniasAdminPage() {
         target_frequency_seconds: PLAN_FREQUENCY_SECONDS[planType] || null,
         store_id: storeId || null,
       };
-
-      // Only set payment_status on creation; edits don't reset it
-      if (!editingId) {
-        payload.payment_status = 'pending';
-      }
 
       if (editingId) {
         const { error } = await supabase.from('ad_campaigns').update(payload).eq('id', editingId);
@@ -372,38 +350,17 @@ export default function CampaniasAdminPage() {
     }
   };
 
-  const handleMarkPaid = async (id: string) => {
-    setMarkingPaidId(id);
-    try {
-      const { error } = await supabase
-        .from('ad_campaigns')
-        .update({ payment_status: 'paid', suspended_at: null })
-        .eq('id', id);
-      if (error) throw error;
-      setCampaigns(prev => prev.map(c => c.id === id ? { ...c, payment_status: 'paid', suspended_at: null } : c));
-      setKillSwitchCandidates(prev => prev.filter(c => c.id !== id));
-    } catch (err: any) {
-      alert('Error: ' + err.message);
-    } finally {
-      setMarkingPaidId(null);
-    }
-  };
-
   const handleApplyKillSwitch = async () => {
     if (!killSwitchCandidates.length) return;
     const names = killSwitchCandidates.map(c => `• ${c.brand_name}`).join('\n');
-    if (!confirm(`Aplicar Smart Kill-Switch a ${killSwitchCandidates.length} campaña(s):\n\n${names}\n\nSe desactivarán del loop de pantallas.`)) return;
+    if (!confirm(`Desactivar ${killSwitchCandidates.length} campaña(s) vencida(s):\n\n${names}\n\nSe quitarán del loop de pantallas.`)) return;
 
     setApplyingKillSwitch(true);
     try {
       const ids = killSwitchCandidates.map(c => c.id);
       const { error } = await supabase
         .from('ad_campaigns')
-        .update({
-          is_active: false,
-          payment_status: 'overdue',
-          suspended_at: new Date().toISOString(),
-        })
+        .update({ is_active: false })
         .in('id', ids);
       if (error) throw error;
       setKillSwitchCandidates([]);
@@ -521,34 +478,25 @@ export default function CampaniasAdminPage() {
             </div>
           </div>
 
-          {/* ── Smart Kill-Switch Alert ── */}
+          {/* ── Kill-Switch Alert ── */}
           {killSwitchCandidates.length > 0 && (
             <div className="bg-red-950/30 border border-red-500/30 rounded-xl p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5">
                     <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                    <p className="text-red-400 font-semibold text-sm">Smart Kill-Switch — {killSwitchCandidates.length} campaña{killSwitchCandidates.length > 1 ? 's' : ''} vencida{killSwitchCandidates.length > 1 ? 's' : ''} sin pago</p>
+                    <p className="text-red-400 font-semibold text-sm">{killSwitchCandidates.length} campaña{killSwitchCandidates.length > 1 ? 's' : ''} vencida{killSwitchCandidates.length > 1 ? 's' : ''} activa{killSwitchCandidates.length > 1 ? 's' : ''}</p>
                   </div>
-                  <p className="text-red-300/50 text-xs mb-3">Estas campañas superaron su fecha de corte sin registro de pago. Confirma o marca cada una como pagada.</p>
+                  <p className="text-red-300/50 text-xs mb-3">Estas campañas pasaron su fecha de fin pero siguen activas. El cron las desactivará en la próxima corrida, o puedes hacerlo manualmente ahora.</p>
                   <div className="space-y-1.5">
                     {killSwitchCandidates.map(c => (
-                      <div key={c.id} className="flex items-center justify-between bg-red-500/5 rounded-lg px-3 py-1.5">
-                        <div>
-                          <span className="text-white/70 text-xs font-medium">{c.brand_name}</span>
-                          {c.end_date && (
-                            <span className="text-red-300/50 text-[10px] ml-2">
-                              Venció: {new Date(c.end_date).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleMarkPaid(c.id)}
-                          disabled={markingPaidId === c.id}
-                          className="text-[10px] text-green-400 hover:text-green-300 bg-green-500/10 hover:bg-green-500/20 px-2 py-1 rounded-md transition-colors disabled:opacity-50"
-                        >
-                          {markingPaidId === c.id ? '...' : 'Marcar pagado'}
-                        </button>
+                      <div key={c.id} className="flex items-center bg-red-500/5 rounded-lg px-3 py-1.5">
+                        <span className="text-white/70 text-xs font-medium">{c.brand_name}</span>
+                        {c.end_date && (
+                          <span className="text-red-300/50 text-[10px] ml-2">
+                            Venció: {new Date(c.end_date).toLocaleDateString()}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -558,21 +506,8 @@ export default function CampaniasAdminPage() {
                   disabled={applyingKillSwitch}
                   className="shrink-0 px-4 py-2 text-sm font-semibold bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 transition-colors disabled:opacity-50 whitespace-nowrap"
                 >
-                  {applyingKillSwitch ? 'Aplicando...' : 'Aplicar Kill-Switch'}
+                  {applyingKillSwitch ? 'Desactivando...' : 'Desactivar ahora'}
                 </button>
-              </div>
-            </div>
-          )}
-
-          {/* ── Cobranzas 3-day warning ── */}
-          {cobrosWarning.length > 0 && (
-            <div className="flex items-start gap-3 bg-amber-950/20 border border-amber-500/20 rounded-xl px-4 py-3">
-              <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <div>
-                <p className="text-amber-400 text-sm font-medium">Alerta Cobranzas — {cobrosWarning.length} campaña{cobrosWarning.length > 1 ? 's' : ''} por vencer en 3 días</p>
-                <p className="text-amber-300/50 text-xs mt-0.5">
-                  {cobrosWarning.map(c => c.brand_name).join(', ')} — sin pago registrado
-                </p>
               </div>
             </div>
           )}
@@ -605,14 +540,19 @@ export default function CampaniasAdminPage() {
               {pg.paginated.map((c) => {
                 const isVideo = c.media_type === 'video';
                 const isExpired = !!c.end_date && new Date(c.end_date) < new Date();
-                const isActiveState = c.is_active && !isExpired;
-                const payStatus: PaymentStatus = c.payment_status ?? 'pending';
+                const planExpired = !!c.stores?.contract_expiry_date && new Date(c.stores.contract_expiry_date) < new Date();
+                const isInactive = isExpired || planExpired;
+                const isActiveState = c.is_active && !isInactive;
 
-                const statusLabel = isExpired ? 'Vencida' : (c.is_active ? 'Activo' : 'Pausado');
-                const statusClasses = isExpired
+                const statusLabel = planExpired
+                  ? 'Plan vencido'
+                  : isExpired
+                  ? 'Vencida'
+                  : (c.is_active ? 'Activo' : 'Pausado');
+                const statusClasses = isInactive
                   ? 'bg-white/5 text-white/30'
                   : (c.is_active ? 'bg-orange-500/10 text-orange-400' : 'bg-white/5 text-white/30');
-                const dotClasses = isExpired
+                const dotClasses = isInactive
                   ? 'bg-white/20'
                   : (c.is_active ? 'bg-orange-400' : 'bg-white/20');
 
@@ -620,20 +560,11 @@ export default function CampaniasAdminPage() {
                 const daysLeft = getDaysUntilExpiry(c.end_date);
 
                 let cardClasses = `bg-[#111] border rounded-xl overflow-hidden group transition-all ${isActiveState ? 'border-white/10' : 'border-white/5 opacity-70'}`;
-                if (payStatus === 'overdue') {
-                  cardClasses = 'bg-red-950/20 border border-red-500/30 rounded-xl overflow-hidden group transition-all opacity-80';
-                } else if (highlightExpiring && urgency === 'critical') {
+                if (highlightExpiring && urgency === 'critical') {
                   cardClasses = 'bg-red-950/25 border border-red-500/50 ring-1 ring-red-500/20 rounded-xl overflow-hidden group transition-all';
                 } else if (highlightExpiring && urgency === 'warning') {
                   cardClasses = 'bg-amber-950/20 border border-amber-400/40 ring-1 ring-amber-400/10 rounded-xl overflow-hidden group transition-all';
                 }
-
-                const payBadge =
-                  payStatus === 'paid'
-                    ? { label: 'Pagado', cls: 'text-green-400 bg-green-500/10' }
-                    : payStatus === 'overdue'
-                    ? { label: 'Impago', cls: 'text-red-400 bg-red-500/10' }
-                    : { label: 'Pendiente', cls: 'text-amber-400 bg-amber-500/10' };
 
                 return (
                   <div key={c.id} className={cardClasses}>
@@ -667,11 +598,6 @@ export default function CampaniasAdminPage() {
                             {daysLeft === 0 ? 'Vence hoy' : `${daysLeft}d`}
                           </span>
                         )}
-                        {payStatus === 'overdue' && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold border text-red-400 bg-red-500/20 border-red-500/40">
-                            SUSPENDIDO
-                          </span>
-                        )}
                       </div>
                       <div className="absolute bottom-3 left-3">
                         <h3 className="text-white font-semibold">{c.brand_name}</h3>
@@ -691,14 +617,6 @@ export default function CampaniasAdminPage() {
                         </span>
                       </div>
 
-                      {/* Payment status */}
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-white/40">Pago</span>
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${payBadge.cls}`}>
-                          {payBadge.label}
-                        </span>
-                      </div>
-
                       <div className="pt-3 border-t border-white/5 flex items-center justify-between">
                         <button
                           onClick={() => handleToggleActive(c.id, c.is_active)}
@@ -709,21 +627,6 @@ export default function CampaniasAdminPage() {
                         </button>
 
                         <div className="flex gap-1">
-                          {/* Mark as paid button (only if not paid) */}
-                          {payStatus !== 'paid' && (
-                            <button
-                              onClick={() => handleMarkPaid(c.id)}
-                              disabled={markingPaidId === c.id}
-                              title="Marcar como pagado"
-                              className="p-1.5 rounded-md text-green-400/60 hover:text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-40"
-                            >
-                              {markingPaidId === c.id ? (
-                                <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                              ) : (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                              )}
-                            </button>
-                          )}
                           <button onClick={() => handleEdit(c)} className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                           </button>

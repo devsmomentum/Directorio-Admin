@@ -69,11 +69,10 @@ BEGIN
 END $$;
 
 -- ── 3. RPC unificada para insertar una impresión ─────────────────────
--- Política: el K2 (kiosko) es la fuente de verdad. Si reportó que reprodujo
--- el video, lo registramos siempre. El filtro de qué reproducir (campañas
--- pausadas / vencidas / impagas) lo aplica el cliente al armar el loop.
--- La RPC solo valida que el campaign_id exista (FK ya lo garantiza)
--- y que el kiosk_id no esté vacío.
+-- Política: el K2 (kiosko) es la fuente de verdad para QUE se reprodujo,
+-- pero el backend filtra por horario operativo del CC (10:00-21:00 hora
+-- America/Caracas) como segunda barrera contra eventos offline acumulados
+-- fuera de horario que se flushean tarde.
 CREATE OR REPLACE FUNCTION public.record_ad_impression(
   p_campaign_id   UUID,
   p_kiosk_id      TEXT,
@@ -86,10 +85,17 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_id  BIGINT;
-  v_day DATE := p_occurred_at::date;
+  v_id        BIGINT;
+  v_local_ts  TIMESTAMP := (p_occurred_at AT TIME ZONE 'America/Caracas');
+  v_local_hr  INT       := EXTRACT(HOUR FROM v_local_ts)::INT;
+  v_day       DATE      := v_local_ts::date;
 BEGIN
   IF p_campaign_id IS NULL OR p_kiosk_id IS NULL OR p_kiosk_id = '' THEN
+    RETURN NULL;
+  END IF;
+
+  -- Ventana operativa del CC: 10:00-20:59 (cierre 21:00 exclusivo).
+  IF v_local_hr < 10 OR v_local_hr >= 21 THEN
     RETURN NULL;
   END IF;
 
@@ -219,9 +225,17 @@ BEGIN
   RAISE NOTICE 'ad_impressions backfill: % filas migradas', v_migrated;
 END $$;
 
--- Reconstruir agregado diario desde la tabla bruta (idempotente)
+-- Reconstruir agregado diario desde la tabla bruta (idempotente).
+-- El "día" se calcula en hora local del CC (America/Caracas) para que coincida
+-- con el RPC y con cómo el dashboard interpreta "hoy / últimos 7 días".
+-- Eventos fuera de horario operativo (10:00-20:59 local) se excluyen.
 TRUNCATE public.ad_impressions_daily;
 INSERT INTO public.ad_impressions_daily (campaign_id, kiosk_id, day, count)
-SELECT campaign_id, kiosk_id, occurred_at::date, COUNT(*)
+SELECT
+  campaign_id,
+  kiosk_id,
+  (occurred_at AT TIME ZONE 'America/Caracas')::date AS day,
+  COUNT(*)
 FROM public.ad_impressions
-GROUP BY campaign_id, kiosk_id, occurred_at::date;
+WHERE EXTRACT(HOUR FROM (occurred_at AT TIME ZONE 'America/Caracas')) BETWEEN 10 AND 20
+GROUP BY campaign_id, kiosk_id, (occurred_at AT TIME ZONE 'America/Caracas')::date;

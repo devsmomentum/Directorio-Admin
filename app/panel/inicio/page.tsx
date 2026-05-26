@@ -9,7 +9,6 @@ export default function DashboardPage() {
   const [stores, setStores] = useState<number>(0);
   const [campaigns, setCampaigns] = useState<number>(0);
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [cobrosAlert, setCobrosAlert] = useState<any[]>([]);
   const [contractsAlert, setContractsAlert] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -21,21 +20,13 @@ export default function DashboardPage() {
   const fetchData = async () => {
     setRefreshing(true);
     const today = new Date().toISOString().split('T')[0];
-    const in3days = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const in30days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    const [kiosksRes, storesRes, campaignsRes, notifRes, cobrosRes, contractsRes] = await Promise.all([
+    const [kiosksRes, storesRes, campaignsRes, notifRes, contractsRes] = await Promise.all([
       supabase.from('kiosks').select('*').order('created_at', { ascending: false }),
       supabase.from('stores').select('id', { count: 'exact', head: true }),
       supabase.from('ad_campaigns').select('id', { count: 'exact', head: true }),
       supabase.from('admin_notifications').select('*').is('read_at', null).order('created_at', { ascending: false }).limit(5),
-      supabase.from('ad_campaigns')
-        .select('id, brand_name, end_date, payment_status')
-        .gte('end_date', today)
-        .lte('end_date', in3days)
-        .eq('is_active', true)
-        .neq('payment_status', 'paid')
-        .limit(10),
       supabase.from('stores')
         .select('id, name, contract_expiry_date')
         .not('contract_expiry_date', 'is', null)
@@ -49,7 +40,6 @@ export default function DashboardPage() {
     if (storesRes.count != null) setStores(storesRes.count);
     if (campaignsRes.count != null) setCampaigns(campaignsRes.count);
     if (notifRes.data) setNotifications(notifRes.data);
-    if (cobrosRes.data) setCobrosAlert(cobrosRes.data);
     if (contractsRes.data) setContractsAlert(contractsRes.data);
     setLoading(false);
     setRefreshing(false);
@@ -136,26 +126,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Alerts bar */}
-      {(offline > 0 || notifications.length > 0 || cobrosAlert.length > 0 || contractsAlert.length > 0) && (
+      {(offline > 0 || notifications.length > 0 || contractsAlert.length > 0) && (
         <div className="flex flex-col gap-3">
-          {/* Cobros alert — highest priority */}
-          {cobrosAlert.length > 0 && (
-            <Link
-              href="/panel/campanias"
-              className="flex items-start gap-3 bg-red-950/20 hover:bg-red-950/30 border border-red-500/25 hover:border-red-500/40 rounded-lg px-4 py-3 transition-colors group"
-            >
-              <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-              <div className="flex-1 min-w-0">
-                <p className="text-red-400 text-sm font-semibold flex items-center gap-1.5">
-                  Alerta Cobranzas — {cobrosAlert.length} campaña{cobrosAlert.length > 1 ? 's' : ''} por vencer sin pago
-                  <svg className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" /></svg>
-                </p>
-                <p className="text-red-300/50 text-xs mt-0.5 truncate">
-                  {cobrosAlert.map((c: any) => c.brand_name).join(', ')} — vencen en ≤3 días
-                </p>
-              </div>
-            </Link>
-          )}
           {/* Contratos por vencer ≤30 días */}
           {contractsAlert.length > 0 && (
             <Link

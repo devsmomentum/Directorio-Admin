@@ -66,7 +66,7 @@ export default function ClienteDashboardPage() {
 
         const [campRes, couponsRes, reqRes] = await Promise.all([
           supabase.from('ad_campaigns')
-            .select('id, brand_name, plan_type, start_date, end_date, is_active, payment_status, suspended_at, created_at, media_url, media_type, duration_seconds')
+            .select('id, brand_name, plan_type, start_date, end_date, is_active, created_at, media_url, media_type, duration_seconds')
             .eq('store_id', store.id).order('created_at', { ascending: false }),
           supabase.from('coupons')
             .select('id, title, plan_type, code, amount_available, price_usd, category, start_date, end_date, campaign_id, created_at')
@@ -149,13 +149,13 @@ export default function ClienteDashboardPage() {
     return set.size;
   }, [impressions, events]);
 
-  const activeCampaign = useMemo(() =>
-    campaigns.find(c => c.is_active &&
+  const planVigente = !store?.contract_expiry_date || store.contract_expiry_date >= today;
+  const activeCampaign = useMemo(() => {
+    if (!planVigente) return null;
+    return campaigns.find(c => c.is_active &&
       (!c.end_date || c.end_date >= today) &&
-      (!c.start_date || c.start_date <= today) &&
-      (c.payment_status ?? 'pending') !== 'overdue' &&
-      !c.suspended_at) || null,
-    [campaigns, today]);
+      (!c.start_date || c.start_date <= today)) || null;
+  }, [campaigns, today, planVigente]);
 
   const pendingRequests = useMemo(
     () => requests.filter(r => r.status === 'pending').length,
@@ -554,11 +554,8 @@ export default function ClienteDashboardPage() {
                       <td className="px-3 py-2 text-white/40 font-mono">{c.start_date || '—'} → {c.end_date || '∞'}</td>
                       <td className="px-3 py-2">
                         <span className={`text-[10px] font-medium ${live ? 'text-emerald-400' : 'text-white/30'}`}>
-                          {c.suspended_at ? 'Suspendida' : live ? 'Activa' : 'Inactiva'}
+                          {live ? 'Activa' : 'Inactiva'}
                         </span>
-                        {c.payment_status && c.payment_status !== 'paid' && (
-                          <span className="ml-1.5 text-[9px] text-amber-400">· {c.payment_status}</span>
-                        )}
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-white/70">{imp.toLocaleString('es-VE')}</td>
                     </tr>

@@ -34,6 +34,9 @@ END$$;
 
 -- Vista helper: qué campañas ve cada kiosco (para el firmware del kiosco)
 -- Un kiosco sin asignaciones ve TODAS; uno con asignaciones ve solo las suyas.
+-- Además del end_date de la campaña, se valida que el plan de la tienda
+-- siga vigente (stores.contract_expiry_date): si el plan venció, la
+-- publicidad de esa tienda deja de mostrarse aunque c.is_active sea true.
 CREATE OR REPLACE VIEW public.kiosk_active_campaigns AS
 SELECT
   k.id   AS kiosk_id,
@@ -49,9 +52,13 @@ SELECT
   c.slot_limit_group
 FROM kiosks k
 CROSS JOIN ad_campaigns c
+LEFT JOIN stores s ON s.id = c.store_id
 WHERE c.is_active = true
   AND (c.start_date IS NULL OR c.start_date <= CURRENT_DATE)
   AND (c.end_date   IS NULL OR c.end_date   >= CURRENT_DATE)
+  AND (s.id IS NULL
+       OR s.contract_expiry_date IS NULL
+       OR s.contract_expiry_date >= CURRENT_DATE)
   -- Modo global: kiosco sin asignaciones específicas
   AND NOT EXISTS (
     SELECT 1 FROM kiosk_campaigns kc WHERE kc.kiosk_id = k.id
@@ -74,6 +81,10 @@ SELECT
 FROM kiosks k
 JOIN kiosk_campaigns kc ON kc.kiosk_id = k.id
 JOIN ad_campaigns    c  ON c.id = kc.campaign_id
+LEFT JOIN stores     s  ON s.id = c.store_id
 WHERE c.is_active = true
   AND (c.start_date IS NULL OR c.start_date <= CURRENT_DATE)
-  AND (c.end_date   IS NULL OR c.end_date   >= CURRENT_DATE);
+  AND (c.end_date   IS NULL OR c.end_date   >= CURRENT_DATE)
+  AND (s.id IS NULL
+       OR s.contract_expiry_date IS NULL
+       OR s.contract_expiry_date >= CURRENT_DATE);

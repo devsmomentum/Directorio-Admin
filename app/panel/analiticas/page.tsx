@@ -36,7 +36,6 @@ type CampaignImpressionTotals = {
   start_date: string | null;
   end_date: string | null;
   is_active: boolean | null;
-  payment_status: string | null;
   today: number;
   last_7d: number;
   last_30d: number;
@@ -94,7 +93,7 @@ export default function AnalyticsDashboard() {
           .limit(500),
         supabase
           .from('v_campaign_impressions')
-          .select('campaign_id, brand_name, start_date, end_date, is_active, payment_status, today, last_7d, last_30d, total'),
+          .select('campaign_id, brand_name, start_date, end_date, is_active, today, last_7d, last_30d, total'),
         supabase
           .from('ad_impressions_daily')
           .select('campaign_id, kiosk_id, day, count')
