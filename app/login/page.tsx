@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { MallHubBrand } from '../components/MallHubMark';
 
-// Login del directorio digital. El destino post-login depende del rol que
+// Login de Mall Hub. El destino post-login depende del rol que
 // devuelve public.users, pero la UI nunca lo menciona.
 //   - password_set != true → /bienvenida.
 //   - role admin           → /panel.
@@ -72,7 +73,12 @@ export default function LoginPage() {
 
       {/* Header — minimal, brand a la izquierda, toggle a la derecha */}
       <header className="absolute inset-x-0 top-0 z-30 flex items-center justify-between px-5 py-4 sm:px-8 lg:px-10">
-        <BrandMark />
+        <MallHubBrand
+          variant="mix"
+          wordSize="md"
+          tileSize={36}
+          tagline="Portal · Multi-mall · v2.4"
+        />
         <ThemeToggle />
       </header>
 
@@ -96,25 +102,29 @@ export default function LoginPage() {
             <div className="inline-flex items-center gap-2.5 rounded-md border border-line bg-surface/70 px-3 py-1.5 backdrop-blur">
               <span className="tech-dot" />
               <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-fg-muted">
-                Portal multi-mall · Operativo
+                Mall · Hub · Operativo
               </span>
             </div>
           </div>
 
-          {/* Mensaje principal */}
+          {/* Mensaje principal — el wordmark juega con las letras: Mall · Hub */}
           <div className="relative max-w-xl">
-            
             <h1 className="text-[42px] font-black leading-[1.04] tracking-tight text-fg xl:text-[52px]">
-              El directorio
-              <br />
-              <span className="text-brand-mix">digital</span> de tus
-              <br />
-              comercios.
+              <span className="block">Donde cada</span>
+              <span className="block">
+                <span className="text-brand-mix">Mall</span>
+                <span
+                  aria-hidden
+                  className="brand-mix mx-3 inline-block h-3 w-3 translate-y-[-6px] rounded-full xl:h-4 xl:w-4"
+                />
+                <span className="text-brand-mix">Hub</span>
+              </span>
+              <span className="block">a sus comercios.</span>
             </h1>
             <p className="mt-6 max-w-md text-[15px] leading-relaxed text-fg-muted xl:text-base">
-              Gestiona tu tienda en cada mall: promociones que llegan a los
-              visitantes, analíticas en vivo y renovaciones sin papeleo —
-              desde un mismo lugar.
+              Mall Hub conecta cada mall con sus tiendas: promociones que llegan
+              a los visitantes, analíticas en vivo y renovaciones sin papeleo —
+              todo desde un mismo lugar.
             </p>
           </div>
 
@@ -313,37 +323,6 @@ export default function LoginPage() {
 }
 
 /* ====================== helpers de UI ====================== */
-
-function BrandMark() {
-  return (
-    <div className="flex items-center gap-2.5">
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl brand-mix shadow-[0_6px_18px_-6px_rgba(0,0,0,0.35)]">
-        <svg
-          className="h-4 w-4 text-white"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <rect x="3" y="3" width="7.5" height="7.5" rx="1" />
-          <rect x="13.5" y="3" width="7.5" height="7.5" rx="1" />
-          <rect x="3" y="13.5" width="7.5" height="7.5" rx="1" />
-          <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1" />
-        </svg>
-      </span>
-      <div className="flex flex-col leading-tight">
-        <span className="text-sm font-bold tracking-tight text-fg">
-          Directorio Digital
-        </span>
-        <span className="font-mono text-[9px] uppercase tracking-[0.28em] text-fg-subtle">
-          Multi-mall · v2.4
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function Field({
   label,

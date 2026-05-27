@@ -118,7 +118,7 @@ export default function BienvenidaPage() {
     );
   }
 
-  const titleText = isRecover ? 'NUEVA CONTRASEÑA' : 'BIENVENIDO A MILLENNIUM';
+  const titleText = isRecover ? 'NUEVA CONTRASEÑA' : 'BIENVENIDO A MALL HUB';
   const subtitleText = isRecover
     ? 'Define la nueva contraseña para entrar a tu cuenta.'
     : 'Define una contraseña para entrar a tu cuenta.';

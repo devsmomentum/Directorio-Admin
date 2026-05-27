@@ -9,8 +9,8 @@ const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
   ORO: 'Oro',
   IA_PERFORMANCE: 'IA Performance',
-  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
-  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
+  FLASH_COUPON_DIARIO: 'Cupones Flash · Diario',
+  FLASH_COUPON_SEMANAL: 'Cupones Flash · Semanal',
   PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
   PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
 };
@@ -25,7 +25,6 @@ const PLAN_COLORS: Record<string, string> = {
   PUBLI_PROMO_SEMANAL: 'text-blue-300 bg-blue-500/10',
 };
 
-const BASE_COUPON_PLANS = new Set(['DIAMANTE', 'ORO', 'IA_PERFORMANCE']);
 const FLASH_PLANS = new Set(['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL']);
 const CAMPAIGN_CAPABLE = new Set(['DIAMANTE', 'ORO', 'PUBLI_PROMO_DIARIO', 'PUBLI_PROMO_SEMANAL']);
 
@@ -51,10 +50,9 @@ export default function ClientePromocionesPage() {
 
   const [form, setForm] = useState<FormKind>(null);
 
-  // Coupon form state
+  // Coupon form state — todo cupón es Flash (sólo tiendas con addon activo pueden crear).
   const [cEditingId, setCEditingId] = useState<string | null>(null);
   const [cTitle, setCTitle] = useState('');
-  const [cIsFlash, setCIsFlash] = useState(false);
   const [cCategory, setCCategory] = useState('');
   const [cDiscount, setCDiscount] = useState<string>('');
   const [cStock, setCStock] = useState<string>('');
@@ -97,15 +95,11 @@ export default function ClientePromocionesPage() {
   const flashActive = !!store?.flash_coupon_plan
     && (!store.flash_coupon_expiry_date || store.flash_coupon_expiry_date >= today);
 
-  const canBaseCoupon = planActive && !!store?.plan_type && BASE_COUPON_PLANS.has(store.plan_type);
   const canFlashCoupon = flashActive;
   const canCampaign = planActive && !!store?.plan_type && CAMPAIGN_CAPABLE.has(store.plan_type);
-  const canCreateCoupon = canBaseCoupon || canFlashCoupon;
+  const canCreateCoupon = canFlashCoupon;
 
-  const couponPlanType = useMemo(() => {
-    if (cIsFlash) return store?.flash_coupon_plan || '';
-    return store?.plan_type || '';
-  }, [cIsFlash, store]);
+  const couponPlanType = useMemo(() => store?.flash_coupon_plan || '', [store]);
 
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
@@ -150,7 +144,6 @@ export default function ClientePromocionesPage() {
     setCDiscount(''); setCStock('');
     setCImageFile(null); setCImageUrl('');
     setCStartDate(today); setCEndDate('');
-    setCIsFlash(false);
   };
   const resetCampaignForm = () => {
     setAEditingId(null);
@@ -167,8 +160,11 @@ export default function ClientePromocionesPage() {
   };
 
   const openCreateCoupon = () => {
+    if (!canFlashCoupon) {
+      setFeedback({ type: 'err', msg: 'Necesitas el plan Cupones Flash activo para crear cupones.' });
+      return;
+    }
     resetCouponForm();
-    setCIsFlash(canFlashCoupon && !canBaseCoupon);
     setForm('coupon');
   };
   const openCreateCampaign = () => {
@@ -179,7 +175,6 @@ export default function ClientePromocionesPage() {
   const openEditCoupon = (c: any) => {
     setCEditingId(c.id);
     setCTitle(c.title || '');
-    setCIsFlash(FLASH_PLANS.has(c.plan_type));
     setCCategory(c.category || '');
     setCDiscount(c.price_usd != null ? String(c.price_usd) : '');
     setCStock(c.amount_available != null ? String(c.amount_available) : '');
@@ -221,27 +216,21 @@ export default function ClientePromocionesPage() {
   const submitCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!store) return;
+    if (!canFlashCoupon) {
+      setFeedback({ type: 'err', msg: 'Necesitas el plan Cupones Flash activo para publicar cupones.' });
+      return;
+    }
     const planType = couponPlanType;
     if (!planType) {
-      setFeedback({ type: 'err', msg: cIsFlash ? 'No tienes el addon Flash Coupon activo.' : 'Tu plan no permite cupones.' });
-      return;
-    }
-    if (cIsFlash && !canFlashCoupon) {
-      setFeedback({ type: 'err', msg: 'El addon Flash Coupon no está activo.' });
-      return;
-    }
-    if (!cIsFlash && !canBaseCoupon) {
-      setFeedback({ type: 'err', msg: 'Tu plan base no permite cupones normales.' });
+      setFeedback({ type: 'err', msg: 'No se detecta tu addon Flash. Recarga la página.' });
       return;
     }
     if (!cEndDate) { setFeedback({ type: 'err', msg: 'Indica la fecha de vencimiento.' }); return; }
-    const planExpiry = cIsFlash ? store.flash_coupon_expiry_date : store.contract_expiry_date;
+    const planExpiry = store.flash_coupon_expiry_date;
     if (planExpiry && cEndDate > planExpiry) {
       setFeedback({
         type: 'err',
-        msg: cIsFlash
-          ? `El cupón flash no puede vencer después de tu addon (${planExpiry}).`
-          : `El cupón no puede vencer después de tu plan (${planExpiry}).`,
+        msg: `El cupón no puede vencer después de tu plan Cupones Flash (${planExpiry}).`,
       });
       return;
     }
@@ -256,21 +245,17 @@ export default function ClientePromocionesPage() {
       return;
     }
 
-    if (cIsFlash) {
-      const isNewBrand = !flashBrandIds.has(store.id);
-      const editingThis = cEditingId ? coupons.find(c => c.id === cEditingId) : null;
-      const editingWasFlash = !!editingThis && FLASH_PLANS.has(editingThis.plan_type);
-      if (isNewBrand && !editingWasFlash && flashBrandIds.size >= FLASH_GALLERY_MAX) {
-        setFeedback({ type: 'err', msg: `Galería Flash llena (${flashBrandIds.size}/${FLASH_GALLERY_MAX} cupones).` });
+    const isNewBrand = !flashBrandIds.has(store.id);
+    if (isNewBrand && !cEditingId && flashBrandIds.size >= FLASH_GALLERY_MAX) {
+      setFeedback({ type: 'err', msg: `Galería Flash llena (${flashBrandIds.size}/${FLASH_GALLERY_MAX} cupones).` });
+      return;
+    }
+    const limit = FLASH_PERIOD_LIMITS[planType];
+    if (limit) {
+      const issued = flashIssuedInWindow(planType);
+      if (issued >= limit.max) {
+        setFeedback({ type: 'err', msg: `Ya lanzaste ${issued}/${limit.max} cupones en este ${limit.label}.` });
         return;
-      }
-      const limit = FLASH_PERIOD_LIMITS[planType];
-      if (limit) {
-        const issued = flashIssuedInWindow(planType);
-        if (issued >= limit.max) {
-          setFeedback({ type: 'err', msg: `Ya lanzaste ${issued}/${limit.max} cupones flash en este ${limit.label}.` });
-          return;
-        }
       }
     }
 
@@ -561,7 +546,7 @@ export default function ClientePromocionesPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <div className="text-xs text-amber-200/90 leading-relaxed flex-1">
-            <p>Tu tienda no tiene un plan activo que permita cupones ni campañas.</p>
+            <p>Tu tienda no tiene un plan activo que permita cupones ni campañas. Los cupones requieren el plan Cupones Flash.</p>
             <Link href="/cliente/planes" className="inline-block mt-1 text-amber-300 underline">
               Ver catálogo de planes →
             </Link>
@@ -574,15 +559,14 @@ export default function ClientePromocionesPage() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <p className="text-pink-200 text-sm font-semibold">
-                ⚡ Addon Flash Coupon activo · {PLAN_LABELS[store!.flash_coupon_plan!]}
+                ⚡ Plan Cupones Flash activo · {PLAN_LABELS[store!.flash_coupon_plan!]}
               </p>
-              
               {store!.flash_coupon_expiry_date && (
                 <p className="text-white/50 text-xs mt-0.5">Vence {store!.flash_coupon_expiry_date}.</p>
               )}
             </div>
             <div className="text-right">
-              <p className="text-[10px] text-white/40 uppercase">Tus flash activos</p>
+              <p className="text-[10px] text-white/40 uppercase">Tus cupones activos</p>
               <p className="text-pink-300 font-mono text-xl font-bold">{flashCount}</p>
               {FLASH_PERIOD_LIMITS[store!.flash_coupon_plan!] && (() => {
                 const lim = FLASH_PERIOD_LIMITS[store!.flash_coupon_plan!];
@@ -641,9 +625,11 @@ export default function ClientePromocionesPage() {
                 className="text-left bg-[#0A0A0A] border border-white/10 hover:border-cyan-500/40 hover:bg-cyan-500/[0.04] disabled:opacity-40 disabled:cursor-not-allowed rounded-xl p-4 transition-colors"
               >
                 <div className="text-2xl mb-2">🎟️</div>
-                <p className="text-sm font-semibold text-white">Cupón</p>
+                <p className="text-sm font-semibold text-white">Cupón Flash</p>
                 <p className="text-[11px] text-white/50 mt-1 leading-snug">
-                  Descuento con código que el cliente puede canjear. Soporta Flash si tienes el addon.
+                  {canCreateCoupon
+                    ? 'Descuento con código que rota en la galería pública (1 cupón por tienda).'
+                    : 'Requiere el plan Cupones Flash activo. Contrátalo en la sección Planes.'}
                 </p>
               </button>
               <button
@@ -677,58 +663,9 @@ export default function ClientePromocionesPage() {
               </button>
             </div>
             <form onSubmit={submitCoupon} className="px-6 py-5 space-y-4">
-              {/* Tipo de cupón: segmented control */}
-              <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tipo de cupón</label>
-                <div className="grid grid-cols-2 gap-2 bg-[#0A0A0A] border border-white/10 rounded-lg p-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!canBaseCoupon) {
-                        setFeedback({ type: 'err', msg: 'Tu plan base no permite cupones normales.' });
-                        return;
-                      }
-                      setCIsFlash(false);
-                    }}
-                    disabled={!canBaseCoupon}
-                    aria-pressed={!cIsFlash}
-                    className={`px-3 py-2 rounded-md text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${!cIsFlash
-                      ? 'bg-cyan-500/20 border border-cyan-500/50 text-cyan-100'
-                      : 'border border-transparent text-white/60 hover:bg-white/[0.04]'
-                      }`}
-                  >
-                    Normal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!canFlashCoupon) {
-                        setFeedback({ type: 'err', msg: 'No tienes el addon Flash Coupon activo.' });
-                        return;
-                      }
-                      setCIsFlash(true);
-                    }}
-                    disabled={!canFlashCoupon}
-                    aria-pressed={cIsFlash}
-                    className={`px-3 py-2 rounded-md text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${cIsFlash
-                      ? 'bg-pink-500/20 border border-pink-500/50 text-pink-100'
-                      : 'border border-transparent text-white/60 hover:bg-white/[0.04]'
-                      }`}
-                  >
-                    ⚡ Flash
-                  </button>
-                </div>
-                <p className="text-[11px] text-white/50 leading-snug mt-2">
-                  {cIsFlash
-                    ? `Aparece en la galería pública con captura de datos. Plan: ${PLAN_LABELS[couponPlanType] || couponPlanType || '—'}.`
-                    : `Cupón normal asociado a tu plan ${PLAN_LABELS[store!.plan_type!] || store!.plan_type || '—'}. No entra en la galería pública.`}
-                </p>
-                {cIsFlash && !canFlashCoupon && (
-                  <p className="text-[11px] text-amber-300 mt-1">Necesitas el addon Flash Coupon activo.</p>
-                )}
-                {!cIsFlash && !canBaseCoupon && (
-                  <p className="text-[11px] text-amber-300 mt-1">Tu plan base no permite cupones normales.</p>
-                )}
+              <div className="bg-pink-500/[0.06] border border-pink-500/25 rounded-lg p-3 text-[11px] text-pink-100/90 leading-snug">
+                ⚡ Cupón Flash · Plan {PLAN_LABELS[couponPlanType] || couponPlanType || '—'}.
+                Aparece en la galería pública con rotación 1 cupón por tienda.
               </div>
 
               <div>
@@ -764,21 +701,21 @@ export default function ClientePromocionesPage() {
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio</label>
                   <input type="date" required value={cStartDate} min={today}
-                    max={cIsFlash ? (store!.flash_coupon_expiry_date || undefined) : (store!.contract_expiry_date || undefined)}
+                    max={store!.flash_coupon_expiry_date || undefined}
                     onChange={(e) => setCStartDate(e.target.value)}
                     className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
                 </div>
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Vence</label>
                   <input type="date" required value={cEndDate} min={cStartDate || today}
-                    max={cIsFlash ? (store!.flash_coupon_expiry_date || undefined) : (store!.contract_expiry_date || undefined)}
+                    max={store!.flash_coupon_expiry_date || undefined}
                     onChange={(e) => setCEndDate(e.target.value)}
                     className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
                 </div>
               </div>
-              {(cIsFlash ? store!.flash_coupon_expiry_date : store!.contract_expiry_date) && (
+              {store!.flash_coupon_expiry_date && (
                 <p className="text-[10px] text-white/40 -mt-2">
-                  {cIsFlash ? 'Tu addon Flash' : 'Tu plan'} vence el {cIsFlash ? store!.flash_coupon_expiry_date : store!.contract_expiry_date}. El cupón no puede pasar de esa fecha.
+                  Tu plan Cupones Flash vence el {store!.flash_coupon_expiry_date}. El cupón no puede pasar de esa fecha.
                 </p>
               )}
 

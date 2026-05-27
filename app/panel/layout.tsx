@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { MallHubTile, MallHubWordmark } from '../components/MallHubMark';
 
 // Shell del panel admin. Guard + sidebar fijo + área de contenido scrollable.
 // Guard:
@@ -160,12 +161,10 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
         <div className="relative border-b border-line p-6">
           <div className="absolute inset-x-0 top-0 h-px brand-admin opacity-70" />
           <div className="flex items-center gap-3">
-            <div className="brand-admin glow-admin flex h-10 w-10 items-center justify-center rounded-xl">
-              <span className="font-mono text-sm font-black text-fg-on-brand">M</span>
-            </div>
+            <MallHubTile variant="admin" size={40} />
             <div>
-              <h1 className="text-base font-black tracking-wider text-brand-admin">MILLENNIUM</h1>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Panel admin</p>
+              <MallHubWordmark variant="admin" size="md" className="tracking-wider" />
+              <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Panel admin</p>
             </div>
           </div>
         </div>
@@ -236,7 +235,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <h1 className="text-sm font-bold tracking-wider text-brand-admin">MILLENNIUM</h1>
+          <MallHubWordmark variant="admin" size="sm" className="tracking-wider" />
           <ThemeToggle />
         </header>
 

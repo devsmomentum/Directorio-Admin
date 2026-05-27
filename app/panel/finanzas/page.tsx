@@ -27,24 +27,15 @@ type Expense = {
   expense_date: string;
 };
 
-type DistConfig = { millenniumPct: number; mornaPct: number; sunmiPct: number; opsPct: number };
-
 // ── Constants ────────────────────────────────────────────────────────────────
 const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PROMO_FLASH'];
 const PAYMENT_METHODS = ['Bancamiga Bs', 'Bancamiga USD', 'Efectivo', 'Binance', 'Otro'];
 const EXPENSE_CATEGORIES = ['Abogada', 'Alcaldía', 'Seguro', 'Mantenimiento', 'Marketing', 'Personal', 'Otro'];
-const CONFIG_KEY = 'finanzas_dist_config';
 
-const defaultConfig: DistConfig = { millenniumPct: 11.8, mornaPct: 10, sunmiPct: 5, opsPct: 10 };
-
-function loadConfig(): DistConfig {
-  if (typeof window === 'undefined') return defaultConfig;
-  try { const r = localStorage.getItem(CONFIG_KEY); if (r) return JSON.parse(r); } catch {}
-  return defaultConfig;
-}
-function saveConfig(c: DistConfig) {
-  if (typeof window !== 'undefined') localStorage.setItem(CONFIG_KEY, JSON.stringify(c));
-}
+const MORNA_PCT = 36;
+const SUNMI_PCT = 36;
+const ANAVI_PCT = 16;
+const MILLENNIUM_PCT = 12;
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 const iso = (d: Date) => d.toISOString().split('T')[0];
@@ -73,10 +64,6 @@ export default function FinanzasPage() {
   const [dateStart, setDateStart] = useState(firstOfMonth());
   const [dateEnd, setDateEnd] = useState(todayStr());
 
-  const [config, setConfig] = useState<DistConfig>(defaultConfig);
-  const [editingConfig, setEditingConfig] = useState(false);
-  const [draftConfig, setDraftConfig] = useState<DistConfig>(defaultConfig);
-
   // Payment modal
   const [payModal, setPayModal] = useState(false);
   const [editingPay, setEditingPay] = useState<PlanPayment | null>(null);
@@ -94,7 +81,7 @@ export default function FinanzasPage() {
   const [expError, setExpError] = useState('');
   const [deletingExpId, setDeletingExpId] = useState<string | null>(null);
 
-  useEffect(() => { setConfig(loadConfig()); fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -136,16 +123,14 @@ export default function FinanzasPage() {
     const pending = periodPayments
       .filter(p => p.status !== 'completed')
       .reduce((s, p) => s + Number(p.amount_usd), 0);
-    const opsFixed = gross * (config.opsPct / 100);
-    const netBase = gross - opsFixed;
-    const millennium = netBase * (config.millenniumPct / 100);
-    const morna = netBase * (config.mornaPct / 100);
-    const sunmi = netBase * (config.sunmiPct / 100);
-    const profit = netBase - millennium - morna - sunmi;
     const totalExpenses = periodExpenses.reduce((s, e) => s + Number(e.amount_usd), 0);
-    const realProfit = profit - totalExpenses;
-    return { gross, pending, opsFixed, netBase, millennium, morna, sunmi, profit, totalExpenses, realProfit };
-  }, [periodPayments, periodExpenses, config]);
+    const distributable = gross - totalExpenses;
+    const morna = distributable * (MORNA_PCT / 100);
+    const sunmi = distributable * (SUNMI_PCT / 100);
+    const anavi = distributable * (ANAVI_PCT / 100);
+    const millennium = distributable * (MILLENNIUM_PCT / 100);
+    return { gross, pending, totalExpenses, distributable, morna, sunmi, anavi, millennium };
+  }, [periodPayments, periodExpenses]);
 
   // ── Store helpers ──────────────────────────────────────────────────────────
   const storeById = useMemo(() => new Map(stores.map(s => [s.id, s])), [stores]);
@@ -242,9 +227,6 @@ export default function FinanzasPage() {
     fetchData();
   };
 
-  // ── Config ─────────────────────────────────────────────────────────────────
-  const handleSaveConfig = () => { setConfig(draftConfig); saveConfig(draftConfig); setEditingConfig(false); };
-
   // ── CSV export ─────────────────────────────────────────────────────────────
   const exportCSV = (headers: string[], rows: string[][], filename: string) => {
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -258,14 +240,12 @@ export default function FinanzasPage() {
     const rows: string[][] = [
       ['Ingresos cobrados (pagos completados)', '', fmt(dist.gross)],
       ['Pagos pendientes (no incluidos)', '', fmt(dist.pending)],
-      [`− ${config.opsPct}% Impuestos y Ops fijos`, fmt(dist.opsFixed), ''],
-      ['Base neta', '', fmt(dist.netBase)],
-      [`− ${config.millenniumPct}% C.C. Millennium`, fmt(dist.millennium), ''],
-      [`− ${config.mornaPct}% Morna Tech fee`, fmt(dist.morna), ''],
-      [`− ${config.sunmiPct}% Sunmi Latam`, fmt(dist.sunmi), ''],
-      ['Ganancia Morna (antes gastos)', '', fmt(dist.profit)],
       ['− Gastos operativos registrados', fmt(dist.totalExpenses), ''],
-      ['Ganancia neta real', '', fmt(dist.realProfit)],
+      ['Ganancia distribuible', '', fmt(dist.distributable)],
+      [`− ${MORNA_PCT}% Morna`, fmt(dist.morna), ''],
+      [`− ${SUNMI_PCT}% Sunmi`, fmt(dist.sunmi), ''],
+      [`− ${ANAVI_PCT}% Anavi (gestión)`, fmt(dist.anavi), ''],
+      [`− ${MILLENNIUM_PCT}% Millennium`, fmt(dist.millennium), ''],
       ['', '', ''],
       ['INGRESOS DETALLADOS', '', '', '', ''],
       ['Tienda', 'Plan', 'Período', 'Monto', 'Método', 'Fecha', 'Estado', 'Notas'],
@@ -346,38 +326,19 @@ export default function FinanzasPage() {
       {/* ===== DISTRIBUCIÓN ===== */}
       {activeTab === 'distribucion' && (
         <div className="space-y-4">
-          {/* Config */}
+          {/* Porcentajes (fijos) */}
           <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium">Porcentajes de distribución</h3>
-              {editingConfig ? (
-                <div className="flex gap-2">
-                  <button onClick={handleSaveConfig} className="text-xs px-3 py-1.5 rounded-lg bg-pink-500/20 text-pink-300 hover:bg-pink-500/30 transition-colors">Guardar</button>
-                  <button onClick={() => { setDraftConfig(config); setEditingConfig(false); }} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 text-white/40 hover:bg-white/10 transition-colors">Cancelar</button>
-                </div>
-              ) : (
-                <button onClick={() => { setDraftConfig(config); setEditingConfig(true); }} className="text-xs px-3 py-1.5 rounded-lg bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/50 transition-colors">Editar %</button>
-              )}
-            </div>
+            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Porcentajes de distribución (sobre ganancia neta)</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { key: 'opsPct' as const, label: 'Impuestos / Ops', color: 'text-orange-400' },
-                { key: 'millenniumPct' as const, label: 'C.C. Millennium', color: 'text-yellow-400' },
-                { key: 'mornaPct' as const, label: 'Morna Tech (fee)', color: 'text-pink-400' },
-                { key: 'sunmiPct' as const, label: 'Sunmi Latam', color: 'text-cyan-400' },
-              ].map(({ key, label, color }) => (
-                <div key={key} className="bg-white/5 rounded-lg p-3">
+                { label: 'Morna', pct: MORNA_PCT, color: 'text-pink-400' },
+                { label: 'Sunmi', pct: SUNMI_PCT, color: 'text-cyan-400' },
+                { label: 'Anavi (gestión)', pct: ANAVI_PCT, color: 'text-purple-400' },
+                { label: 'Millennium', pct: MILLENNIUM_PCT, color: 'text-yellow-400' },
+              ].map(({ label, pct, color }) => (
+                <div key={label} className="bg-white/5 rounded-lg p-3">
                   <p className="text-[10px] text-white/30 mb-1.5">{label}</p>
-                  {editingConfig ? (
-                    <div className="flex items-center gap-1">
-                      <input type="number" min="0" max="100" step="0.1" value={draftConfig[key]}
-                        onChange={e => setDraftConfig(d => ({ ...d, [key]: parseFloat(e.target.value) || 0 }))}
-                        className="w-16 text-sm bg-black/30 border border-white/20 text-white rounded px-2 py-1 focus:outline-none focus:border-pink-500" />
-                      <span className="text-white/30 text-xs">%</span>
-                    </div>
-                  ) : (
-                    <p className={`text-lg font-bold ${color}`}>{config[key]}%</p>
-                  )}
+                  <p className={`text-lg font-bold ${color}`}>{pct}%</p>
                 </div>
               ))}
             </div>
@@ -389,24 +350,22 @@ export default function FinanzasPage() {
             <div className="space-y-0.5">
               <WRow label="Ingresos cobrados" sub={`${periodPayments.filter(p => p.status === 'completed').length} pagos completados`} amount={dist.gross} color="text-white" isTotal />
               {dist.pending > 0 && <WRow label="Pagos pendientes (excluidos)" amount={dist.pending} color="text-white/20" indent />}
-              <WRow label={`− ${config.opsPct}% Impuestos y Ops fijos`} amount={-dist.opsFixed} color="text-orange-400" indent />
-              <WRow label="Base neta" amount={dist.netBase} color="text-white/60" isTotal borderTop />
-              <WRow label={`− ${config.millenniumPct}% C.C. Millennium`} amount={-dist.millennium} color="text-yellow-400" indent />
-              <WRow label={`− ${config.mornaPct}% Morna Tech fee`} amount={-dist.morna} color="text-pink-400" indent />
-              <WRow label={`− ${config.sunmiPct}% Sunmi Latam`} amount={-dist.sunmi} color="text-cyan-400" indent />
-              <WRow label="Ganancia Morna (antes de gastos)" amount={dist.profit} color="text-emerald-400" isTotal borderTop />
               <WRow label={`− Gastos operativos (${periodExpenses.length} registros)`} amount={-dist.totalExpenses} color="text-red-400" indent />
-              <WRow label="Ganancia neta real" amount={dist.realProfit} color={dist.realProfit >= 0 ? 'text-emerald-300' : 'text-red-300'} isTotal borderTop large />
+              <WRow label="Ganancia distribuible" amount={dist.distributable} color={dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400'} isTotal borderTop />
+              <WRow label={`− ${MORNA_PCT}% Morna`} amount={-dist.morna} color="text-pink-400" indent />
+              <WRow label={`− ${SUNMI_PCT}% Sunmi`} amount={-dist.sunmi} color="text-cyan-400" indent />
+              <WRow label={`− ${ANAVI_PCT}% Anavi (gestión)`} amount={-dist.anavi} color="text-purple-400" indent />
+              <WRow label={`− ${MILLENNIUM_PCT}% Millennium`} amount={-dist.millennium} color="text-yellow-400" indent />
             </div>
           </div>
 
           {/* Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'Ingresos cobrados', value: fmt(dist.gross), color: 'text-white' },
-              { label: 'Pendiente de cobro', value: fmt(dist.pending), color: 'text-yellow-400' },
-              { label: 'Para Millennium', value: fmt(dist.millennium), color: 'text-yellow-400' },
-              { label: 'Ganancia neta', value: fmt(dist.realProfit), color: dist.realProfit >= 0 ? 'text-emerald-400' : 'text-red-400' },
+              { label: 'Para Morna (36%)', value: fmt(dist.morna), color: 'text-pink-400' },
+              { label: 'Para Sunmi (36%)', value: fmt(dist.sunmi), color: 'text-cyan-400' },
+              { label: 'Para Anavi (16%)', value: fmt(dist.anavi), color: 'text-purple-400' },
+              { label: 'Para Millennium (12%)', value: fmt(dist.millennium), color: 'text-yellow-400' },
             ].map(s => (
               <div key={s.label} className="bg-[#111] border border-white/5 rounded-xl p-4">
                 <p className="text-[10px] text-white/25 uppercase tracking-wider mb-1">{s.label}</p>
@@ -572,14 +531,12 @@ export default function FinanzasPage() {
                 {[
                   { label: 'Ingresos cobrados', value: dist.gross, color: 'text-white', bold: false },
                   { label: 'Pagos pendientes (excluidos del cálculo)', value: dist.pending, color: 'text-yellow-400', bold: false },
-                  { label: `− ${config.opsPct}% Impuestos y Ops fijos`, value: -dist.opsFixed, color: 'text-orange-400', bold: false },
-                  { label: 'Base neta', value: dist.netBase, color: 'text-white/60', bold: true },
-                  { label: `− ${config.millenniumPct}% C.C. Millennium`, value: -dist.millennium, color: 'text-yellow-400', bold: false },
-                  { label: `− ${config.mornaPct}% Morna Tech fee`, value: -dist.morna, color: 'text-pink-400', bold: false },
-                  { label: `− ${config.sunmiPct}% Sunmi Latam`, value: -dist.sunmi, color: 'text-cyan-400', bold: false },
-                  { label: 'Ganancia Morna (antes de gastos)', value: dist.profit, color: 'text-emerald-400', bold: true },
                   { label: '− Gastos operativos registrados', value: -dist.totalExpenses, color: 'text-red-400', bold: false },
-                  { label: 'Ganancia neta real', value: dist.realProfit, color: dist.realProfit >= 0 ? 'text-emerald-300' : 'text-red-300', bold: true },
+                  { label: 'Ganancia distribuible', value: dist.distributable, color: dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400', bold: true },
+                  { label: `− ${MORNA_PCT}% Morna`, value: -dist.morna, color: 'text-pink-400', bold: false },
+                  { label: `− ${SUNMI_PCT}% Sunmi`, value: -dist.sunmi, color: 'text-cyan-400', bold: false },
+                  { label: `− ${ANAVI_PCT}% Anavi (gestión)`, value: -dist.anavi, color: 'text-purple-400', bold: false },
+                  { label: `− ${MILLENNIUM_PCT}% Millennium`, value: -dist.millennium, color: 'text-yellow-400', bold: false },
                 ].map((row, i) => (
                   <tr key={i} className={row.bold ? 'bg-white/3' : ''}>
                     <td className={`py-2.5 pr-6 text-xs ${row.bold ? 'font-semibold text-white/60' : 'text-white/40'}`}>{row.label}</td>

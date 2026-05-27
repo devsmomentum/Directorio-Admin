@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Directorio Digital",
-  description: "Plataforma multi-mall para comercios: promociones, analíticas y gestión.",
+  title: "Mall Hub",
+  description: "Mall Hub — el portal multi-mall para comercios: promociones, analíticas y gestión.",
 };
 
 export default function RootLayout({

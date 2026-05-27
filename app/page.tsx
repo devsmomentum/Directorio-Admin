@@ -55,27 +55,38 @@ export default function Home() {
       />
 
       <div className="relative z-10 flex flex-col items-center text-center px-6 max-w-xl">
+        {/* Monograma MH gigante — letras desplazadas con anillo orbital */}
         <div className="mb-8 relative">
-          <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[#FF007A] to-[#FF5900] flex items-center justify-center shadow-[0_0_40px_rgba(255,0,122,0.3)]">
-            <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-[#FF007A] to-[#FF5900] flex items-center justify-center shadow-[0_0_40px_rgba(255,0,122,0.3)] relative overflow-hidden">
+            <svg viewBox="0 0 80 80" className="absolute inset-0 w-full h-full text-white">
+              <text x="10" y="36" fontFamily="ui-sans-serif, system-ui, sans-serif" fontWeight={900} fontSize={32} fill="currentColor" letterSpacing="-1">M</text>
+              <text x="44" y="70" fontFamily="ui-sans-serif, system-ui, sans-serif" fontWeight={900} fontSize={32} fill="currentColor" letterSpacing="-1">H</text>
+              <circle cx="40" cy="40" r="14" stroke="currentColor" strokeWidth={1.4} fill="none" opacity={0.55} />
+              <circle cx="54" cy="40" r="2.4" fill="currentColor" />
             </svg>
           </div>
         </div>
 
-        <h1 className="text-5xl sm:text-6xl font-black text-white tracking-tight mb-4">
-          MILLENNIUM
+        {/* Wordmark: las letras juegan, el punto entre Mall y Hub es el "hub" */}
+        <h1 className="font-black text-white tracking-tight mb-4 flex items-baseline gap-3 sm:gap-4">
+          <span className="text-5xl sm:text-6xl">Mall</span>
+          <span
+            aria-hidden
+            className="inline-block h-3.5 w-3.5 sm:h-4 sm:w-4 rounded-full bg-gradient-to-br from-[#FF007A] to-[#FF5900] shadow-[0_0_18px_rgba(255,0,122,0.6)]"
+          />
+          <span className="text-5xl sm:text-6xl">Hub</span>
         </h1>
+
         <div className="flex items-center gap-3 mb-6">
           <div className="h-px w-12 bg-gradient-to-r from-transparent to-pink-500/50" />
-          <span className="text-sm font-bold tracking-[0.3em] text-pink-500 uppercase">
-            Mall
+          <span className="text-[11px] font-bold tracking-[0.4em] text-pink-500 uppercase">
+            Portal · Multi-mall · Stores
           </span>
           <div className="h-px w-12 bg-gradient-to-l from-transparent to-pink-500/50" />
         </div>
 
         <p className="text-white/40 text-lg leading-relaxed mb-12 max-w-md">
-          Bienvenido. Inicia sesión para continuar.
+          El hub de tus comercios. Inicia sesión para continuar.
         </p>
 
         <button

@@ -11,8 +11,8 @@ const PLAN_LABELS: Record<string, string> = {
   IA_PERFORMANCE: 'IA Performance',
   PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
   PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
-  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
-  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
+  FLASH_COUPON_DIARIO: 'Cupones Flash · Diario',
+  FLASH_COUPON_SEMANAL: 'Cupones Flash · Semanal',
   PROMO_FLASH: 'Promo Flash',
 };
 

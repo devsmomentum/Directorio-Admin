@@ -294,7 +294,7 @@ export default function ClientePlanesPage() {
           )}
           {store.flash_coupon_plan && (
             <p className="text-pink-300 text-sm font-semibold">
-              Addon Flash Coupon: <span className="font-bold">{store.flash_coupon_plan}</span>
+              Plan Cupones Flash: <span className="font-bold">{store.flash_coupon_plan}</span>
               {store.flash_coupon_expiry_date && (
                 <span className="text-white/50 text-xs font-normal"> · vence {store.flash_coupon_expiry_date}</span>
               )}
@@ -425,10 +425,12 @@ export default function ClientePlanesPage() {
             const today = new Date().toISOString().split('T')[0];
             const isCurrent = currentKey === p.plan_key && (!currentExp || currentExp >= today);
             const isChange  = !!currentKey && !isCurrent;
-            const noExpiry  = isChange && !currentExp;
+            const noExpiry  = (isChange || isCurrent) && !currentExp;
             const pendingThisTrack = hasPendingFor(p.plan_key);
             const avail = planAvailability(p);
-            const disabled = isCurrent || pendingThisTrack || avail.full || noExpiry;
+            // El cliente ya tiene un slot en este plan, así que la disponibilidad
+            // global no debe bloquear su renovación.
+            const disabled = pendingThisTrack || (!isCurrent && avail.full) || noExpiry;
             const effDate = effectiveDateFor(p.plan_key);
             return (
               <div key={p.id} className={`bg-gradient-to-br ${colors} border rounded-2xl p-5 flex flex-col`}>
@@ -513,34 +515,35 @@ export default function ClientePlanesPage() {
                   onClick={() => openWidget(p)}
                   disabled={disabled}
                   className={`w-full text-sm font-semibold rounded-lg px-4 py-2.5 transition-colors ${
-                    isCurrent
-                      ? 'bg-emerald-500/10 text-emerald-400 cursor-default'
-                      : pendingThisTrack
+                    pendingThisTrack
                       ? 'bg-amber-500/10 text-amber-400 cursor-default'
-                      : avail.full
-                      ? 'bg-red-500/10 text-red-400 cursor-not-allowed'
                       : noExpiry
                       ? 'bg-white/5 text-white/40 cursor-not-allowed'
+                      : isCurrent
+                      ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 border border-emerald-500/30'
+                      : avail.full
+                      ? 'bg-red-500/10 text-red-400 cursor-not-allowed'
                       : isChange
                       ? 'bg-blue-500/15 text-blue-200 hover:bg-blue-500/25 border border-blue-500/30'
                       : 'bg-white/10 text-white hover:bg-white/20'
                   } disabled:opacity-60`}
                 >
-                  {isCurrent
-                    ? (flash ? 'Addon activo' : 'Plan actual')
-                    : pendingThisTrack
+                  {pendingThisTrack
                     ? 'Solicitud pendiente'
-                    : avail.full
-                    ? 'Sin cupo'
                     : noExpiry
                     ? 'Sin fecha de venc.'
+                    : isCurrent
+                    ? (flash ? 'Renovar addon' : 'Renovar plan')
+                    : avail.full
+                    ? 'Sin cupo'
                     : isChange
                     ? (flash ? 'Cambiar addon' : 'Solicitar cambio')
                     : (flash ? 'Adquirir addon' : 'Solicitar plan')}
                 </button>
-                {isChange && !disabled && effDate && (
+                {(isChange || isCurrent) && !disabled && effDate && (
                   <p className="text-[10px] text-white/40 mt-1.5 text-center">
-                    Activo el <span className="text-blue-300 font-mono">{effDate}</span>
+                    {isCurrent ? 'Renovación activa el ' : 'Activo el '}
+                    <span className={`font-mono ${isCurrent ? 'text-emerald-300' : 'text-blue-300'}`}>{effDate}</span>
                   </p>
                 )}
                 {noExpiry && (
@@ -567,11 +570,14 @@ export default function ClientePlanesPage() {
                   const currentKey = flashW ? store.flash_coupon_plan : store.plan_type;
                   const currentExp = flashW ? store.flash_coupon_expiry_date : store.contract_expiry_date;
                   const effW = effectiveDateFor(widgetPlan.plan_key);
+                  const isRenewal = currentKey === widgetPlan.plan_key;
                   return (
                 <div>
                   <p className="text-[11px] text-white/60 uppercase tracking-widest mb-1">
-                    {flashW
-                      ? (currentKey ? `Renovar / cambiar addon (${currentKey})` : 'Adquirir addon Flash Coupon')
+                    {isRenewal
+                      ? (flashW ? 'Renovar addon' : 'Renovar plan')
+                      : flashW
+                      ? (currentKey ? `Cambiar addon (${currentKey} → nuevo)` : 'Adquirir addon Flash Coupon')
                       : (currentKey ? `Cambiar de ${currentKey} a` : 'Solicitar plan')}
                   </p>
                   <h3 className="text-2xl font-bold text-white">{widgetPlan.name}</h3>
@@ -580,7 +586,7 @@ export default function ClientePlanesPage() {
                     <p className="text-[11px] text-white/70 mt-2">
                       Tu {flashW ? 'addon' : 'plan'} actual vence el{' '}
                       <span className="font-mono text-amber-200">{currentExp || '—'}</span>.
-                      El cambio se activará el{' '}
+                      {isRenewal ? ' La renovación se activará el ' : ' El cambio se activará el '}
                       <span className="font-mono text-cyan-200">{effW}</span>.
                     </p>
                   )}

@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../../lib/supabase';
 
 export type PaymentMethod = 'transfer_bs' | 'transfer_usd' | 'cash_usd' | 'cash_bs';
 
@@ -69,24 +70,26 @@ export function buildPaymentPayload(s: PaymentState, expectedUsd?: number): {
   let bcvRateNum: number | null = null;
 
   if (needsBs) {
-    amountBsNum = parseFloat(s.amountBs);
-    if (!Number.isFinite(amountBsNum) || amountBsNum <= 0) {
-      return { error: 'Indica el monto pagado en Bs.' };
+    // En pagos en Bs el usuario sólo tipea USD; la tasa BCV viene del DB
+    // (s.bcvRate la sincroniza el componente). El Bs es derivado.
+    amountUsdNum = parseFloat(s.amountUsd);
+    if (!Number.isFinite(amountUsdNum) || amountUsdNum <= 0) {
+      return { error: 'Indica el monto pagado en USD.' };
     }
     bcvRateNum = parseFloat(s.bcvRate);
     if (!Number.isFinite(bcvRateNum) || bcvRateNum <= 0) {
-      return { error: 'Indica la tasa BCV del día.' };
+      return { error: 'Aún no se ha cargado la tasa BCV oficial. Espera unos segundos o recarga la página.' };
     }
-  }
-  if (needsUsd) {
+    amountBsNum = Math.round(amountUsdNum * bcvRateNum * 100) / 100;
+  } else if (needsUsd) {
     amountUsdNum = parseFloat(s.amountUsd);
     if (!Number.isFinite(amountUsdNum) || amountUsdNum <= 0) {
       return { error: 'Indica el monto pagado en USD.' };
     }
   }
 
-  // Si solo se pagó en Bs y conocemos el USD esperado, lo guardamos para
-  // que la administración pueda cotejar contra precios del catálogo.
+  // Si nada se pudo capturar y conocemos el USD esperado, lo guardamos como
+  // referencia para la administración. El backend re-valida igualmente.
   if (amountUsdNum == null && expectedUsd != null) amountUsdNum = expectedUsd;
 
   return {
@@ -128,16 +131,62 @@ export function PaymentFields({
 
   const banks = s.method === 'transfer_usd' ? BANK_USD_OPTIONS : BANK_BS_OPTIONS;
 
-  const suggestedBs = useMemo(() => {
-    const rate = parseFloat(s.bcvRate);
-    const usd = expectedUsd ?? parseFloat(s.amountUsd);
-    if (!rate || !usd) return null;
-    return rate * usd;
-  }, [s.bcvRate, s.amountUsd, expectedUsd]);
-
   const needsTransfer = s.method === 'transfer_bs' || s.method === 'transfer_usd';
   const needsBs = s.method === 'transfer_bs' || s.method === 'cash_bs';
   const needsUsd = s.method === 'transfer_usd' || s.method === 'cash_usd';
+
+  // Tasa BCV oficial: vive en app_config, refrescada por la edge update-rate.
+  // El usuario NO la edita; el backend la re-lee al validar para que sea
+  // imposible burlar el cálculo desde el front.
+  const [bcvRate, setBcvRate] = useState<number | null>(null);
+  const [bcvUpdatedAt, setBcvUpdatedAt] = useState<string | null>(null);
+  const [bcvLoading, setBcvLoading] = useState<boolean>(true);
+  const [bcvError, setBcvError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setBcvLoading(true);
+      setBcvError(null);
+      const { data, error } = await supabase
+        .from('app_config')
+        .select('value, updated_at')
+        .eq('key', 'bcv_exchange_rate')
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        setBcvError('No se pudo obtener la tasa BCV.');
+        setBcvRate(null);
+      } else {
+        const rate = data?.value ? parseFloat(data.value) : NaN;
+        if (Number.isFinite(rate) && rate > 0) {
+          setBcvRate(rate);
+          setBcvUpdatedAt(data?.updated_at ?? null);
+        } else {
+          setBcvError('La tasa BCV aún no está cargada en el sistema.');
+          setBcvRate(null);
+        }
+      }
+      setBcvLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Mantenemos s.bcvRate sincronizado con la tasa oficial para que el payload
+  // hacia la RPC ya lleve el valor correcto (el backend igualmente la re-lee).
+  useEffect(() => {
+    const target = bcvRate != null ? String(bcvRate) : '';
+    if (s.bcvRate !== target) onChange({ ...s, bcvRate: target });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bcvRate]);
+
+  // Bs derivado: el usuario tipea USD; la tasa viene del DB.
+  const computedBs = useMemo(() => {
+    if (!needsBs || bcvRate == null) return null;
+    const usd = parseFloat(s.amountUsd);
+    if (!Number.isFinite(usd) || usd <= 0) return null;
+    return Math.round(bcvRate * usd * 100) / 100;
+  }, [needsBs, bcvRate, s.amountUsd]);
 
   return (
     <div className="space-y-4">
@@ -172,8 +221,9 @@ export function PaymentFields({
             💱 Tasa BCV del día
           </p>
           <p className="text-white/70 text-[11px] leading-relaxed">
-            El pago en bolívares debe realizarse a la tasa <strong className="text-amber-200">oficial del
-              BCV</strong> del día. Indica esa tasa para que la administración pueda validar el equivalente.
+            La tasa <strong className="text-amber-200">oficial del BCV</strong> la fija el sistema
+            automáticamente. Solo indica cuántos USD estás pagando y verás el monto exacto a
+            transferir en Bs.
           </p>
         </div>
       )}
@@ -205,53 +255,84 @@ export function PaymentFields({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        {needsBs && (
-          <div>
-            <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-              Tasa BCV
-            </label>
-            <input
-              type="number" step="0.0001" min="0"
-              value={s.bcvRate} onChange={(e) => set({ bcvRate: e.target.value })}
-              className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-              placeholder="36.50"
-            />
+      {needsBs && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+                Monto pagado (USD)
+              </label>
+              <input
+                type="number" step="0.01" min="0"
+                value={s.amountUsd} onChange={(e) => set({ amountUsd: e.target.value })}
+                className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
+                placeholder={expectedUsd != null ? expectedUsd.toFixed(2) : '120.00'}
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+                Tasa BCV oficial
+              </label>
+              <div
+                className="w-full bg-white/[0.03] border border-white/10 rounded-lg px-3 py-2.5 text-sm font-mono flex items-center justify-between gap-2"
+                aria-readonly="true"
+                title="Tasa fijada por el sistema. No editable."
+              >
+                <span className={bcvRate != null ? 'text-white' : 'text-white/40'}>
+                  {bcvLoading
+                    ? 'Cargando…'
+                    : bcvRate != null
+                    ? bcvRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+                    : '—'}
+                </span>
+                <span className="text-[10px] text-white/30 normal-case font-sans">🔒 BCV</span>
+              </div>
+            </div>
           </div>
-        )}
-        {needsBs && (
-          <div>
-            <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-              Monto pagado en Bs
-            </label>
-            <input
-              type="number" step="0.01" min="0"
-              value={s.amountBs} onChange={(e) => set({ amountBs: e.target.value })}
-              className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-              placeholder="23725.00"
-            />
-          </div>
-        )}
-        {needsUsd && (
-          <div className={needsBs ? '' : 'col-span-2'}>
-            <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-              Monto pagado en USD
-            </label>
-            <input
-              type="number" step="0.01" min="0"
-              value={s.amountUsd} onChange={(e) => set({ amountUsd: e.target.value })}
-              className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
-              placeholder={expectedUsd != null ? expectedUsd.toFixed(2) : '120.00'}
-            />
-          </div>
-        )}
-      </div>
 
-      {needsBs && suggestedBs != null && (
-        <p className="text-[10px] text-white/40 -mt-2">
-          Equivalente {expectedUsd != null ? '(precio plan × BCV)' : '(USD × BCV)'}: Bs{' '}
-          {suggestedBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </p>
+          {bcvError && (
+            <p className="text-[11px] text-red-300 bg-red-500/5 border border-red-500/20 rounded-md px-2.5 py-1.5">
+              {bcvError} Contacta a la administración para refrescarla.
+            </p>
+          )}
+          {!bcvError && bcvUpdatedAt && (
+            <p className="text-[10px] text-white/30">
+              Tasa actualizada el{' '}
+              <span className="font-mono text-white/50">
+                {new Date(bcvUpdatedAt).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' })}
+              </span>
+              . El backend la re-valida al procesar el pago.
+            </p>
+          )}
+
+          <div className="bg-cyan-500/[0.06] border border-cyan-500/20 rounded-lg px-3 py-2.5 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] text-cyan-200/70 uppercase tracking-wider font-semibold">
+                Monto a transferir en Bs
+              </p>
+              <p className="text-[10px] text-white/40 mt-0.5">USD × tasa BCV · calculado por el sistema</p>
+            </div>
+            <p className="text-white font-mono text-base font-bold whitespace-nowrap">
+              {computedBs != null
+                ? `Bs ${computedBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : '—'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {needsUsd && (
+        <div>
+          <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+            Monto pagado en USD
+          </label>
+          <input
+            type="number" step="0.01" min="0"
+            value={s.amountUsd} onChange={(e) => set({ amountUsd: e.target.value })}
+            className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50"
+            placeholder={expectedUsd != null ? expectedUsd.toFixed(2) : '120.00'}
+          />
+        </div>
       )}
     </div>
   );

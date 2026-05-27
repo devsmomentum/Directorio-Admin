@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { ClienteStore, ClienteStoreContext } from './store-context';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { MallHubWordmark } from '../components/MallHubMark';
 
 type ClienteProfile = {
   id: string;
@@ -216,9 +217,12 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                 </svg>
               </div>
-              <div>
+              <div className="leading-tight">
                 <h1 className="text-base font-black tracking-wider text-brand-cliente">MI COMERCIO</h1>
-                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Directorio digital</p>
+                <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">
+                  <span>powered by</span>
+                  <MallHubWordmark variant="cliente" size="sm" className="text-[10px] tracking-tight" />
+                </p>
               </div>
             </div>
           </div>

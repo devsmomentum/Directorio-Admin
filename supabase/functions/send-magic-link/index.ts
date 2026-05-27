@@ -46,7 +46,10 @@ const SUPABASE_ANON_KEY         = Deno.env.get('SUPABASE_ANON_KEY')!
 //   supabase secrets set SUPERAPI_URL=...      (opcional override)
 const SUPERAPI_URL    = Deno.env.get('SUPERAPI_URL')    ?? 'https://v4.iasuperapi.com'
 const SUPERAPI_TOKEN  = Deno.env.get('SUPERAPI_TOKEN')  ?? ''
-const SUPERAPI_CLIENT = Deno.env.get('SUPERAPI_CLIENT') ?? ''
+const SUPERAPI_CLIENT = Deno.env.get('SUPERAPI_CLIENT_ID') ?? ''
+
+
+const PUBLIC_APP_URL  = "https://mallhub.morna.tech".replace(/\/$/, '')
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -128,7 +131,17 @@ async function handle(req: Request): Promise<Response> {
   const email      = (body.email ?? '').trim().toLowerCase()
   const phoneRaw   = (body.phone ?? '').trim()
   const channel    = (body.channel ?? 'email').toLowerCase()
-  const redirectTo = body.redirectTo ?? `${getOrigin(req)}/auth/callback`
+  // Origen autoritativo: PUBLIC_APP_URL (secret) > redirectTo del body > Origin
+  // de la request. Sólo se usa el del body/Origin como último recurso para
+  // entornos locales sin secret configurado.
+  const fallbackOrigin = (() => {
+    if (body.redirectTo) {
+      try { return new URL(body.redirectTo).origin } catch { /* ignore */ }
+    }
+    return getOrigin(req)
+  })()
+  const appOrigin  = PUBLIC_APP_URL || fallbackOrigin
+  const redirectTo = appOrigin ? `${appOrigin}/auth/callback` : (body.redirectTo ?? '')
   const profile    = body.profile ?? {}
 
   if (!email) return respond({ error: 'email es requerido' }, 400)
@@ -253,10 +266,6 @@ async function handle(req: Request): Promise<Response> {
     // página propia (/abrir) que requiere JavaScript + click humano para
     // seguir al action_link real. Los bots de preview no ejecutan JS, así
     // que no tocan el endpoint de Supabase.
-    // Derivamos el origin del redirectTo (más confiable que getOrigin(req),
-    // que depende del header Origin/Referer del SDK).
-    let appOrigin = ''
-    try { appOrigin = new URL(redirectTo).origin } catch { appOrigin = getOrigin(req) }
     const safeLink = appOrigin
       ? `${appOrigin}/abrir?next=${encodeURIComponent(actionLink)}`
       : actionLink
