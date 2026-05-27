@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -74,7 +74,7 @@ function sanitizeAuthError(_raw: string | undefined): string {
   return 'No pudimos validar el enlace. Pide uno nuevo al administrador.';
 }
 
-export default function AuthCallbackPage() {
+function AuthCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'verifying' | 'error'>('verifying');
@@ -215,5 +215,24 @@ export default function AuthCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-[#111111] border border-white/10 rounded-2xl p-8 text-center">
+            <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-white/70 text-sm font-mono tracking-widest uppercase">
+              Verificando enlace...
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <AuthCallbackInner />
+    </Suspense>
   );
 }

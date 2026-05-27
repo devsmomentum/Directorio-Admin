@@ -24,7 +24,8 @@
       "Bash(grep -rE \"text-white\\(\\\\s|\\\\\"|$|'\\)\" app --include=\"*.tsx\")",
       "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; grep -oE \"data-theme=.light.\\\\]|bg-mesh|--bg-base|text-white\\\\\\\\\\\\\\\\/40\" {} | sort -u')",
       "Bash(grep -oE '\\\\[data-theme=light\\\\] \\\\.text-white[^,{]*[,{]' .next/static/chunks/0akl8h_kz3ga0.css)",
-      "Bash(flutter analyze *)"
+      "Bash(flutter analyze *)",
+      "Bash(npm run *)"
     ]
   }
 }

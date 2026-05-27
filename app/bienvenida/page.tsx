@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
@@ -19,7 +19,7 @@ import { supabase } from '@/lib/supabase';
 //   - Limpiamos la sesión temporal del magic-link/recovery del navegador.
 //
 // Requiere sesión activa (la pone /auth/callback antes de redirigir aquí).
-export default function BienvenidaPage() {
+function BienvenidaInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isRecover = searchParams?.get('recover') === '1';
@@ -223,5 +223,19 @@ export default function BienvenidaPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function BienvenidaPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+          <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <BienvenidaInner />
+    </Suspense>
   );
 }

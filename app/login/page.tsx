@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -11,7 +11,7 @@ import { MallHubBrand } from '../components/MallHubMark';
 //   - password_set != true → /bienvenida.
 //   - role admin           → /panel.
 //   - role cliente         → /cliente/dashboard.
-export default function LoginPage() {
+function LoginInner() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -319,6 +319,20 @@ export default function LoginPage() {
         </section>
       </main>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-dvh bg-mesh flex items-center justify-center">
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-cyan-500/20 border-t-cyan-500" />
+        </div>
+      }
+    >
+      <LoginInner />
+    </Suspense>
   );
 }
 

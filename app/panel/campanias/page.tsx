@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Suspense, useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
@@ -79,7 +79,7 @@ interface Campaign {
 
 type Tab = 'campaigns' | 'kioscos';
 
-export default function CampaniasAdminPage() {
+function CampaniasAdminInner() {
   const searchParams = useSearchParams();
   const highlightExpiring = searchParams.get('highlight') === 'expiring';
 
@@ -752,5 +752,19 @@ export default function CampaniasAdminPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CampaniasAdminPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-orange-500/20 border-t-orange-500" />
+        </div>
+      }
+    >
+      <CampaniasAdminInner />
+    </Suspense>
   );
 }
