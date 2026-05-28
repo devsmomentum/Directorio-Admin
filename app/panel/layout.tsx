@@ -19,6 +19,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const [authorized, setAuthorized] = useState<boolean | null>(null);
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     if (authorized !== true) return;
     let cancelled = false;
     const load = async () => {
-      const [reqRes, txRes] = await Promise.all([
+      const [reqRes, txRes, campRes, coupRes, notifRes] = await Promise.all([
         supabase.from('plan_requests')
           .select('id', { count: 'exact', head: true })
           .eq('status', 'pending'),
@@ -70,9 +71,21 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           .select('id', { count: 'exact', head: true })
           .eq('transaction_type', 'plan_payment')
           .eq('status', 'pending'),
+        supabase.from('ad_campaigns')
+          .select('id', { count: 'exact', head: true })
+          .eq('approval_status', 'pending'),
+        supabase.from('coupons')
+          .select('id', { count: 'exact', head: true })
+          .eq('approval_status', 'pending'),
+        supabase.from('admin_notifications')
+          .select('id', { count: 'exact', head: true })
+          .is('read_at', null),
       ]);
       if (cancelled) return;
-      setPendingCount((reqRes.count ?? 0) + (txRes.count ?? 0));
+      setPendingCount(
+        (reqRes.count ?? 0) + (txRes.count ?? 0) + (campRes.count ?? 0) + (coupRes.count ?? 0)
+      );
+      setUnreadNotifications(notifRes.count ?? 0);
     };
     load();
     const id = setInterval(load, 30_000);
@@ -124,6 +137,9 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     { name: 'Finanzas', path: '/panel/finanzas', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
     )},
+    { name: 'Notificaciones', path: '/panel/notificaciones', icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+    )},
   ];
 
   if (authorized === null) {
@@ -173,7 +189,12 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {menuItems.map((item) => {
             const isActive = pathname === item.path;
-            const showBadge = item.path === '/panel/solicitudes' && pendingCount > 0;
+            const badgeCount = item.path === '/panel/solicitudes'
+              ? pendingCount
+              : item.path === '/panel/notificaciones'
+              ? unreadNotifications
+              : 0;
+            const showBadge = badgeCount > 0;
             return (
               <Link key={item.path} href={item.path} className="block">
                 <span
@@ -195,7 +216,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
                   <span className="flex-1">{item.name}</span>
                   {showBadge && (
                     <span className="ml-auto inline-flex min-w-[20px] items-center justify-center rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                      {pendingCount > 99 ? '99+' : pendingCount}
+                      {badgeCount > 99 ? '99+' : badgeCount}
                     </span>
                   )}
                 </span>

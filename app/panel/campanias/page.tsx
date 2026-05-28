@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
+import { removePublicidadFile } from '../../../lib/storage';
 import Pagination, { usePagination } from '../../components/Pagination';
 import KioskAssignment from './KioskAssignment';
 
@@ -280,6 +281,10 @@ function CampaniasAdminInner() {
     setIsSaving(true);
 
     try {
+      const previousMediaUrl = editingId
+        ? campaigns.find(c => c.id === editingId)?.media_url ?? null
+        : null;
+
       let finalUrl = mediaPreview;
       if (mediaFile) {
         const ext = mediaFile.name.split('.').pop();
@@ -310,6 +315,9 @@ function CampaniasAdminInner() {
       if (editingId) {
         const { error } = await supabase.from('ad_campaigns').update(payload).eq('id', editingId);
         if (error) throw error;
+        if (mediaFile && previousMediaUrl && previousMediaUrl !== finalUrl) {
+          await removePublicidadFile(previousMediaUrl);
+        }
       } else {
         const { error } = await supabase.from('ad_campaigns').insert([payload]);
         if (error) throw error;
@@ -327,12 +335,9 @@ function CampaniasAdminInner() {
   const handleDelete = async (id: string, url: string) => {
     if (!confirm('Eliminar campaña permanentemente?')) return;
     try {
-      const match = url.match(/campaigns\/(.+)$/);
-      if (match?.[1]) {
-        await supabase.storage.from('publicidad').remove([`campaigns/${match[1]}`]);
-      }
       const { error } = await supabase.from('ad_campaigns').delete().eq('id', id);
       if (error) throw error;
+      await removePublicidadFile(url);
       fetchData();
     } catch (err: any) {
       alert('Error: ' + err.message);

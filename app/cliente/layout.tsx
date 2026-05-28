@@ -25,6 +25,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
 
   // Ya no hay rutas hijas que el layout deba dejar pasar sin guard: el login y
   // el callback unificado viven fuera de /cliente/* (en /login y /auth/callback).
@@ -125,6 +126,31 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   // Cierra drawer móvil al cambiar de ruta
   useEffect(() => { setSidebarOpen(false); }, [pathname]);
 
+  // Notificaciones sin leer de la tienda seleccionada — refresca en cada
+  // navegación, focus de ventana y cada 30s para mantener el badge fresco.
+  useEffect(() => {
+    if (!isAuthorized || !selectedId) { setUnreadNotifications(0); return; }
+    let cancelled = false;
+    const load = async () => {
+      const { count } = await supabase
+        .from('client_notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('store_id', selectedId)
+        .is('read_at', null);
+      if (cancelled) return;
+      setUnreadNotifications(count ?? 0);
+    };
+    load();
+    const id = setInterval(load, 30_000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [isAuthorized, selectedId, pathname]);
+
   const handleLogout = async () => {
     if (typeof window !== 'undefined') localStorage.removeItem(STORE_LS_KEY);
     await supabase.auth.signOut({ scope: 'local' });
@@ -179,6 +205,9 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     )},
     { name: 'Pagos', path: '/cliente/pagos', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+    )},
+    { name: 'Notificaciones', path: '/cliente/notificaciones', icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
     )},
     { name: 'Tutorial', path: '/cliente/tutorial', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
@@ -281,6 +310,8 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
           <nav className="flex-1 space-y-1 overflow-y-auto p-3">
             {menuItems.map((item) => {
               const isActive = pathname === item.path;
+              const badgeCount = item.path === '/cliente/notificaciones' ? unreadNotifications : 0;
+              const showBadge = badgeCount > 0;
               return (
                 <Link key={item.path} href={item.path} className="block">
                   <span
@@ -293,10 +324,18 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
                     {isActive && (
                       <span className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-r-full brand-cliente" />
                     )}
-                    <span className={`shrink-0 transition-colors ${isActive ? 'text-brand-cliente' : ''}`}>
+                    <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-cliente' : ''}`}>
                       {item.icon}
+                      {showBadge && (
+                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-2 ring-surface animate-pulse" />
+                      )}
                     </span>
                     <span className="flex-1">{item.name}</span>
+                    {showBadge && (
+                      <span className="ml-auto inline-flex min-w-[20px] items-center justify-center rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                        {badgeCount > 99 ? '99+' : badgeCount}
+                      </span>
+                    )}
                   </span>
                 </Link>
               );

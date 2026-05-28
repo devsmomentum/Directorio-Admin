@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { removePublicidadFile } from '../../../lib/storage';
 import Pagination, { usePagination } from '../../components/Pagination';
 
 // Solo se emiten cupones bajo el plan Cupones Flash (diario o semanal).
@@ -268,6 +269,10 @@ export default function CuponsAdminPage() {
     setIsSaving(true);
 
     try {
+      const previousImageUrl = editingCouponId
+        ? coupons.find(c => c.id === editingCouponId)?.image_url ?? null
+        : null;
+
       let publicUrl = imagePreview || null;
       if (imageFile) {
         const fileExt = imageFile.name.split('.').pop();
@@ -295,6 +300,9 @@ export default function CuponsAdminPage() {
       if (editingCouponId) {
         const { error } = await supabase.from('coupons').update(couponData).eq('id', editingCouponId);
         if (error) throw error;
+        if (imageFile && previousImageUrl && previousImageUrl !== publicUrl) {
+          await removePublicidadFile(previousImageUrl);
+        }
       } else {
         const storeName = stores.find(s => s.id === selectedStoreId)?.name || 'GENERICO';
         couponData.code = `CUPON-${storeName.substring(0, 3).toUpperCase()}-${Date.now().toString().substring(7)}`;
@@ -313,9 +321,11 @@ export default function CuponsAdminPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Eliminar este cupón permanentemente?')) return;
+    const coupon = coupons.find(c => c.id === id);
     const { error } = await supabase.from('coupons').delete().eq('id', id);
-    if (error) alert(error.message);
-    else fetchData();
+    if (error) { alert(error.message); return; }
+    await removePublicidadFile(coupon?.image_url);
+    fetchData();
   };
 
   const handleToggleActive = async (coupon: Coupon) => {

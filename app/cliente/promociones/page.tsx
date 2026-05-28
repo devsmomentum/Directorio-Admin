@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, ChangeEvent } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
+import { removePublicidadFile } from '../../../lib/storage';
 import { useClienteStore } from '../store-context';
 
 const PLAN_LABELS: Record<string, string> = {
@@ -26,6 +27,12 @@ const PLAN_COLORS: Record<string, string> = {
 };
 
 const FLASH_PLANS = new Set(['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL']);
+
+const APPROVAL_CHIP: Record<string, { label: string; cls: string }> = {
+  pending:  { label: 'EN REVISIÓN', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/30' },
+  approved: { label: 'APROBADA',    cls: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30' },
+  rejected: { label: 'RECHAZADA',   cls: 'text-red-300 bg-red-500/15 border-red-500/30' },
+};
 const CAMPAIGN_CAPABLE = new Set(['DIAMANTE', 'ORO', 'PUBLI_PROMO_DIARIO', 'PUBLI_PROMO_SEMANAL']);
 
 const FLASH_GALLERY_MAX = 20;
@@ -261,6 +268,10 @@ export default function ClientePromocionesPage() {
 
     setSubmitting(true); setFeedback(null);
     try {
+      const previousImageUrl = cEditingId
+        ? coupons.find(c => c.id === cEditingId)?.image_url ?? null
+        : null;
+
       let finalImageUrl = cImageUrl;
       if (cImageFile) {
         const ext = cImageFile.name.split('.').pop();
@@ -282,9 +293,16 @@ export default function ClientePromocionesPage() {
           })
           .eq('id', cEditingId);
         if (error) throw error;
-        setFeedback({ type: 'ok', msg: 'Cupón actualizado.' });
+        if (cImageFile && previousImageUrl && previousImageUrl !== finalImageUrl) {
+          await removePublicidadFile(previousImageUrl);
+        }
+        setFeedback({ type: 'ok', msg: 'Cupón actualizado. Quedó en revisión por el administrador antes de volver a aparecer en el K2.' });
       } else {
         const code = `CUPON-${(store.name || 'STORE').substring(0, 3).toUpperCase()}-${Date.now().toString().slice(7)}`;
+        // Declaración explícita: este flujo siempre va a revisión. El trigger
+        // también lo fuerza para dueños reales (defense-in-depth); aquí lo
+        // declaramos para cubrir el caso del admin que sube desde el portal
+        // cliente sin estar vinculado a user_stores.
         const { error } = await supabase.from('coupons').insert([{
           store_id: store.id,
           title: cTitle, plan_type: planType, category: cCategory,
@@ -293,9 +311,11 @@ export default function ClientePromocionesPage() {
           start_date: new Date(cStartDate).toISOString(),
           end_date: new Date(cEndDate).toISOString(),
           code,
+          approval_status: 'pending',
+          is_active: false,
         }]);
         if (error) throw error;
-        setFeedback({ type: 'ok', msg: 'Cupón publicado.' });
+        setFeedback({ type: 'ok', msg: 'Cupón enviado a revisión. Aparecerá en el K2 cuando el administrador lo apruebe.' });
       }
       closeForm();
       fetchData();
@@ -350,6 +370,10 @@ export default function ClientePromocionesPage() {
     if (!store) return;
     setSubmitting(true); setFeedback(null);
     try {
+      const previousMediaUrl = aEditingId
+        ? campaigns.find(c => c.id === aEditingId)?.media_url ?? null
+        : null;
+
       let finalMediaUrl = aMediaUrl;
       let finalMediaType = aMediaType;
       if (aMediaFile) {
@@ -386,9 +410,12 @@ export default function ClientePromocionesPage() {
               : 'No se pudo desactivar la campaña. Revisa permisos.'
           );
         }
+        if (aMediaFile && previousMediaUrl && previousMediaUrl !== finalMediaUrl) {
+          await removePublicidadFile(previousMediaUrl);
+        }
         setFeedback({
           type: 'ok',
-          msg: aIsActive ? 'Campaña actualizada.' : 'Campaña actualizada y pausada.',
+          msg: 'Campaña actualizada. Quedó en revisión por el administrador antes de volver al loop.',
         });
       } else {
         // Si reemplazamos: desactivar TODAS las activas de la tienda primero.
@@ -420,17 +447,18 @@ export default function ClientePromocionesPage() {
         }
 
         // Si encolamos: la nueva usa el rango elegido por el usuario.
-        // Queda inactiva como borrador: el día que toque se activa manualmente
-        // desde el listado. Así garantizamos que solo haya una activa a la vez.
+        // En todos los modos, la nueva campaña entra a revisión: aunque la
+        // anterior se haya desactivado o no exista, la nueva no se publica
+        // hasta que el admin la apruebe.
         let startDate = aStartDate;
         let endDate: string | null = aEndDate || null;
-        let isActiveFlag = true;
         if (mode === 'queue') {
           startDate = qStartDate;
           endDate = qEndDate || null;
-          isActiveFlag = false;
         }
 
+        // Declaración explícita del flujo: pending + inactivo. Cubre el caso
+        // del admin que sube desde el portal cliente sin estar en user_stores.
         const { error } = await supabase.from('ad_campaigns').insert([{
           brand_name: aBrandName,
           description: aDescription,
@@ -441,19 +469,20 @@ export default function ClientePromocionesPage() {
           end_date: endDate,
           plan_type: store.plan_type,
           store_id: store.id,
-          is_active: isActiveFlag,
+          is_active: false,
+          approval_status: 'pending',
         }]);
         if (error) throw error;
 
         if (mode === 'replace') {
-          setFeedback({ type: 'ok', msg: 'Campaña anterior desactivada. Tu nueva campaña ya está en el loop.' });
+          setFeedback({ type: 'ok', msg: 'Campaña anterior desactivada. La nueva queda en revisión por el administrador y entrará al loop al aprobarse.' });
         } else if (mode === 'queue') {
           setFeedback({
             type: 'ok',
-            msg: `Campaña programada del ${qStartDate} al ${qEndDate || '—'}. Quedó como borrador; actívala desde el listado el ${qStartDate}.`,
+            msg: `Campaña programada del ${qStartDate} al ${qEndDate || '—'}. Queda en revisión por el administrador.`,
           });
         } else {
-          setFeedback({ type: 'ok', msg: 'Campaña creada y publicada en el loop.' });
+          setFeedback({ type: 'ok', msg: 'Campaña enviada a revisión. Entrará al loop cuando el administrador la apruebe.' });
         }
       }
       setConflict(null);
@@ -470,6 +499,7 @@ export default function ClientePromocionesPage() {
     if (!confirm(`Eliminar el cupón "${c.title}"?`)) return;
     const { error } = await supabase.from('coupons').delete().eq('id', c.id);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await removePublicidadFile(c.image_url);
     setFeedback({ type: 'ok', msg: 'Cupón eliminado.' });
     fetchData();
   };
@@ -477,6 +507,7 @@ export default function ClientePromocionesPage() {
     if (!confirm(`Eliminar la campaña "${c.brand_name}"?`)) return;
     const { error } = await supabase.from('ad_campaigns').delete().eq('id', c.id);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await removePublicidadFile(c.media_url);
     setFeedback({ type: 'ok', msg: 'Campaña eliminada.' });
     fetchData();
   };
@@ -1311,6 +1342,7 @@ export default function ClientePromocionesPage() {
 function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; today: string }) {
   const isFlash = FLASH_PLANS.has(c.plan_type);
   const active = c.amount_available > 0 && (!c.end_date || c.end_date >= new Date().toISOString());
+  const approval = APPROVAL_CHIP[c.approval_status || 'approved'] || APPROVAL_CHIP.approved;
   return (
     <div className="bg-[#0F0F0F] border border-white/5 rounded-xl overflow-hidden">
       <div className="aspect-[4/3] bg-black flex items-center justify-center relative">
@@ -1322,8 +1354,26 @@ function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) =
         <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-black/70 text-white border border-white/20 px-1.5 py-0.5 rounded">
           🎟️ CUPÓN
         </span>
+        <span className={`absolute top-2 right-2 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border ${approval.cls}`}>
+          {approval.label}
+        </span>
       </div>
       <div className="p-4 space-y-1.5">
+        {c.approval_status === 'rejected' && (
+          <div className="rounded-lg bg-red-500/15 border-2 border-red-500/50 px-3 py-2.5 shadow-[0_0_0_1px_rgba(248,113,113,0.15)]">
+            <div className="flex items-center gap-1.5 mb-1">
+              <svg className="w-3.5 h-3.5 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <p className="text-[11px] font-bold tracking-wider text-red-200 uppercase">Rechazado por el administrador</p>
+            </div>
+            {c.rejection_reason ? (
+              <p className="text-[12px] text-red-100 leading-snug">{c.rejection_reason}</p>
+            ) : (
+              <p className="text-[11px] text-red-300/70 italic">Sin motivo especificado.</p>
+            )}
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2">
           <h4 className="text-white text-sm font-bold truncate">{c.title}</h4>
           {isFlash && (
@@ -1359,6 +1409,7 @@ function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) =
 
 function CampaignCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; today: string }) {
   const active = c.is_active && (!c.end_date || c.end_date >= today);
+  const approval = APPROVAL_CHIP[c.approval_status || 'approved'] || APPROVAL_CHIP.approved;
   return (
     <div className="bg-[#0F0F0F] border border-white/5 rounded-xl overflow-hidden">
       <div className="aspect-[9/16] bg-black flex items-center justify-center relative">
@@ -1382,8 +1433,26 @@ function CampaignCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any)
         <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-black/70 text-white border border-white/20 px-1.5 py-0.5 rounded">
           📺 CAMPAÑA
         </span>
+        <span className={`absolute top-2 right-2 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border ${approval.cls}`}>
+          {approval.label}
+        </span>
       </div>
       <div className="p-4 space-y-1.5">
+        {c.approval_status === 'rejected' && (
+          <div className="rounded-lg bg-red-500/15 border-2 border-red-500/50 px-3 py-2.5 shadow-[0_0_0_1px_rgba(248,113,113,0.15)]">
+            <div className="flex items-center gap-1.5 mb-1">
+              <svg className="w-3.5 h-3.5 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <p className="text-[11px] font-bold tracking-wider text-red-200 uppercase">Rechazada por el administrador</p>
+            </div>
+            {c.rejection_reason ? (
+              <p className="text-[12px] text-red-100 leading-snug">{c.rejection_reason}</p>
+            ) : (
+              <p className="text-[11px] text-red-300/70 italic">Sin motivo especificado.</p>
+            )}
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2">
           <h4 className="text-white text-sm font-bold truncate">{c.brand_name}</h4>
           <span className={`text-[9px] font-semibold px-2 py-0.5 rounded ${active ? 'text-emerald-300 bg-emerald-500/15' : 'text-white/40 bg-white/5'}`}>
