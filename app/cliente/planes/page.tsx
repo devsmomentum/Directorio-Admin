@@ -43,20 +43,29 @@ export default function ClientePlanesPage() {
   const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
 
   const [pendingTxCount, setPendingTxCount] = useState(0);
-  const [nextFreeByPlan, setNextFreeByPlan] = useState<Record<string, string>>({});
+  // Intervalos anonimizados de ocupación, devueltos por plan_capacity_intervals().
+  // SECURITY DEFINER en backend → vemos info de TODAS las tiendas (no solo la nuestra),
+  // necesario para replicar el sweep-line del backend y evitar UI "disponible" cuando la BD rechaza.
+  type CapacityInterval = { plan_key: string; start_d: string; end_d: string; source: string };
+  const [capacityIntervals, setCapacityIntervals] = useState<CapacityInterval[]>([]);
+
+  const fetchCapacity = async () => {
+    const { data } = await supabase.rpc('plan_capacity_intervals');
+    setCapacityIntervals((data as CapacityInterval[]) || []);
+  };
 
   useEffect(() => {
     if (!store) { setLoading(false); return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [plansRes, reqRes, storesRes, txRes] = await Promise.all([
+      const [plansRes, reqRes, capRes, txRes] = await Promise.all([
         supabase.from('plans').select('*').eq('is_active', true).order('display_order', { ascending: true }),
         supabase.from('plan_requests')
           .select('id, plan_key, status, effective_date, total_amount_usd, paid_amount_usd, months_requested, created_at')
           .eq('store_id', store.id)
           .order('created_at', { ascending: false }),
-        supabase.from('stores').select('plan_type, contract_expiry_date'),
+        supabase.rpc('plan_capacity_intervals'),
         supabase.from('transactions')
           .select('id', { count: 'exact', head: true })
           .eq('store_id', store.id)
@@ -67,43 +76,28 @@ export default function ClientePlanesPage() {
       setPlans(plansRes.data || []);
       setRequests(reqRes.data || []);
       setPendingTxCount(txRes.count ?? 0);
+      setCapacityIntervals((capRes.data as CapacityInterval[]) || []);
 
+      // Conteo "actual" para mostrar "X / Y ocupados": cualquier intervalo cuyo
+      // start_d <= hoy y end_d >= hoy (stores activos + approved en vigor).
+      const today = new Date().toISOString().split('T')[0];
       const counts: Record<string, number> = {};
-      const nextFreeByPlan: Record<string, string> = {};
-      const todayIso = new Date().toISOString().split('T')[0];
-      for (const s of (storesRes.data || [])) {
-        if (!s.plan_type) continue;
-        counts[s.plan_type] = (counts[s.plan_type] || 0) + 1;
-        // Próximo vencimiento por plan (solo expiry futura)
-        if (s.contract_expiry_date && s.contract_expiry_date >= todayIso) {
-          const prev = nextFreeByPlan[s.plan_type];
-          if (!prev || s.contract_expiry_date < prev) {
-            nextFreeByPlan[s.plan_type] = s.contract_expiry_date;
-          }
+      for (const iv of ((capRes.data as CapacityInterval[]) || [])) {
+        if (iv.source === 'pending' || iv.source === 'partial') continue;
+        if (iv.start_d <= today && iv.end_d >= today) {
+          counts[iv.plan_key] = (counts[iv.plan_key] || 0) + 1;
         }
       }
       setStoreCounts(counts);
-      setNextFreeByPlan(nextFreeByPlan);
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [store]);
 
-  const [pendingByPlanGlobal, setPendingByPlanGlobal] = useState<Record<string, number>>({});
+  // Refrescar capacidad tras crear/aprobar solicitudes (cambia requests.length).
   useEffect(() => {
     if (!store) return;
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from('plan_requests')
-        .select('plan_key')
-        .in('status', ['pending','partial']);
-      if (cancelled) return;
-      const m: Record<string, number> = {};
-      for (const r of (data || [])) m[r.plan_key] = (m[r.plan_key] || 0) + 1;
-      setPendingByPlanGlobal(m);
-    })();
-    return () => { cancelled = true; };
+    fetchCapacity();
   }, [store, requests.length]);
 
   // Hay pendientes en este track (base/flash). El addon Flash Coupon vive en
@@ -142,9 +136,79 @@ export default function ClientePlanesPage() {
     return d.toISOString().split('T')[0];
   };
 
+  // Replica plan_max_overlap_in_window del backend usando los intervalos
+  // anonimizados que devuelve la RPC plan_capacity_intervals.
+  const computeMaxOverlapInWindow = (
+    planKey: string,
+    windowStart: string,
+    windowEnd: string,
+  ): number => {
+    const clipped: Array<[string, string]> = [];
+    for (const iv of capacityIntervals) {
+      if (iv.plan_key !== planKey) continue;
+      // Para 'store', el backend ancla el intervalo al inicio de la ventana
+      // (el start_d que viene de la RPC es CURRENT_DATE, así que normalizamos).
+      const rawStart = iv.source === 'store'
+        ? (windowStart > iv.start_d ? windowStart : iv.start_d)
+        : iv.start_d;
+      const s = rawStart > windowStart ? rawStart : windowStart;
+      const e = iv.end_d < windowEnd ? iv.end_d : windowEnd;
+      if (s <= windowEnd && e >= windowStart && s <= e) {
+        clipped.push([s, e]);
+      }
+    }
+    if (clipped.length === 0) return 0;
+
+    // Sweep-line: +1 al inicio, -1 al día siguiente del fin.
+    const evts: Array<[string, number]> = [];
+    for (const [s, e] of clipped) {
+      evts.push([s, 1]);
+      const nxt = new Date(e + 'T00:00:00');
+      nxt.setDate(nxt.getDate() + 1);
+      evts.push([nxt.toISOString().split('T')[0], -1]);
+    }
+    evts.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : b[1] - a[1]);
+    let count = 0, max = 0;
+    for (const [, delta] of evts) {
+      count += delta;
+      if (count > max) max = count;
+    }
+    return max;
+  };
+
+  // Primera fecha >= fromDate donde una ventana de `windowDays` días tiene cupo.
+  const nearestSlotAfter = (
+    planKey: string,
+    maxBrands: number,
+    fromDate: string,
+    windowDays: number,
+  ): string | null => {
+    const candidates = new Set<string>();
+    candidates.add(fromDate);
+    // Candidatos = días siguientes al fin de cada intervalo del plan
+    for (const iv of capacityIntervals) {
+      if (iv.plan_key !== planKey) continue;
+      if (iv.end_d < fromDate) continue;
+      const d = new Date(iv.end_d + 'T00:00:00'); d.setDate(d.getDate() + 1);
+      candidates.add(d.toISOString().split('T')[0]);
+    }
+    const sorted = [...candidates].sort();
+    for (const date of sorted) {
+      if (date < fromDate) continue;
+      const d = new Date(date + 'T00:00:00');
+      d.setDate(d.getDate() + windowDays - 1);
+      const winEnd = d.toISOString().split('T')[0];
+      if (computeMaxOverlapInWindow(planKey, date, winEnd) < maxBrands) return date;
+    }
+    return null;
+  };
+
   const planAvailability = (p: any): { used: number; total: number | null; full: boolean } => {
     if (p.max_brands == null) return { used: 0, total: null, full: false };
-    const used = (storeCounts[p.plan_key] || 0) + (pendingByPlanGlobal[p.plan_key] || 0);
+    const pendingCount = capacityIntervals.filter(
+      iv => iv.plan_key === p.plan_key && (iv.source === 'pending' || iv.source === 'partial')
+    ).length;
+    const used = (storeCounts[p.plan_key] || 0) + pendingCount;
     return { used, total: p.max_brands, full: used >= p.max_brands };
   };
 
@@ -349,10 +413,30 @@ export default function ClientePlanesPage() {
             const noExpiry  = (isChange || isCurrent) && !currentExp;
             const pendingThisTrack = hasPendingFor(p.plan_key);
             const avail = planAvailability(p);
+            const effDate = effectiveDateFor(p.plan_key);
+
+            // Ventana de activación: effDate … effDate + 1 ciclo - 1
+            const winEnd = (effDate && p.duration_days) ? (() => {
+              const d = new Date(effDate + 'T00:00:00');
+              d.setDate(d.getDate() + p.duration_days - 1);
+              return d.toISOString().split('T')[0];
+            })() : null;
+
+            // Ocupación máxima proyectada en la ventana de 1 ciclo, usando el mismo
+            // sweep-line que el backend (stores + approved future + pending).
+            const futureOccupancy = (isChange && effDate && winEnd && avail.total != null)
+              ? computeMaxOverlapInWindow(p.plan_key, effDate, winEnd)
+              : null;
+            const futureAvailFull = futureOccupancy != null
+              ? futureOccupancy >= (avail.total as number)
+              : avail.full;
+            const nearestSlot = (futureAvailFull && avail.total != null && effDate && p.duration_days)
+              ? nearestSlotAfter(p.plan_key, avail.total, effDate, p.duration_days)
+              : null;
+
             // El cliente ya tiene un slot en este plan, así que la disponibilidad
             // global no debe bloquear su renovación.
-            const disabled = pendingThisTrack || (!isCurrent && avail.full) || noExpiry;
-            const effDate = effectiveDateFor(p.plan_key);
+            const disabled = pendingThisTrack || (!isCurrent && futureAvailFull) || noExpiry;
             return (
               <div key={p.id} className={`bg-gradient-to-br ${colors} border rounded-2xl p-5 flex flex-col`}>
                 <div className="flex items-start justify-between mb-3">
@@ -397,27 +481,101 @@ export default function ClientePlanesPage() {
                   </p>
                   {avail.total != null && (
                     <p className={`text-[11px] font-medium ${avail.full ? 'text-red-300' : 'text-white/60'}`}>
-                      Disponibilidad: {avail.used} / {avail.total} ocupados
-                      {avail.full && ' · sin cupo'}
+                      Cupo actual: {avail.used} / {avail.total} ocupados
                     </p>
                   )}
-                  {avail.full && nextFreeByPlan[p.plan_key] && (() => {
-                    const exp = new Date(nextFreeByPlan[p.plan_key] + 'T00:00:00');
-                    exp.setDate(exp.getDate() + 1);
-                    const nextFree = exp.toISOString().split('T')[0];
-                    return (
-                      <div className="bg-amber-500/5 border border-amber-500/20 rounded-md p-2 mt-1">
-                        <p className="text-[10px] text-amber-200 leading-snug">
-                          <span className="font-semibold">Próximo slot estimado: </span>
-                          <span className="font-mono">{nextFree}</span>
-                        </p>
-                        <p className="text-[9px] text-white/40 mt-0.5 leading-snug">
-                          Aplica solo si la tienda que ocupa ese slot no renueva su contrato a tiempo.
-                        </p>
-                      </div>
-                    );
-                  })()}
                 </div>
+
+                {/* ── Bloque de activación + disponibilidad proyectada ── */}
+                {isChange && effDate && (
+                  <div className={`rounded-xl border p-3 mb-4 ${
+                    futureAvailFull
+                      ? 'bg-red-500/8 border-red-500/30'
+                      : avail.full
+                      ? 'bg-emerald-500/8 border-emerald-500/30'
+                      : 'bg-blue-500/8 border-blue-500/20'
+                  }`}>
+                    {/* Línea de tiempo: vence → se activa */}
+                    <div className="flex items-start gap-2 mb-2.5">
+                      <div className="flex flex-col items-center mt-1 shrink-0">
+                        <span className={`w-2 h-2 rounded-full ${futureAvailFull ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                        <span className="w-px flex-1 min-h-[16px] bg-white/10 mt-0.5" />
+                        <span className={`w-2 h-2 rounded-full ${futureAvailFull ? 'bg-red-400/40' : 'bg-blue-400'}`} />
+                      </div>
+                      <div className="space-y-1.5 min-w-0 flex-1">
+                        <div>
+                          <p className="text-[9px] text-white/30 uppercase tracking-widest">
+                            Tu {isFlashPlan(p.plan_key) ? 'addon' : 'plan'} actual vence
+                          </p>
+                          <p className="text-white/80 text-xs font-mono font-semibold">
+                            {(isFlashPlan(p.plan_key) ? store.flash_coupon_expiry_date : store.contract_expiry_date) || '—'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] text-white/30 uppercase tracking-widest">
+                            {p.name} se activaría
+                          </p>
+                          <p className={`text-sm font-bold font-mono ${futureAvailFull ? 'text-red-300' : 'text-blue-300'}`}>
+                            {effDate}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Badge de disponibilidad en la fecha de activación */}
+                    {avail.total != null && (
+                      futureAvailFull ? (
+                        <div className="bg-red-500/10 border border-red-500/25 rounded-lg p-2.5">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <svg className="w-3.5 h-3.5 text-red-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            <p className="text-red-300 text-[11px] font-bold">Sin cupo para tu fecha de activación</p>
+                          </div>
+                          <p className="text-white/50 text-[10px] leading-snug">
+                            En el período {effDate}–{winEnd}, el máximo simultáneo proyectado es {futureOccupancy}/{avail.total}.
+                          </p>
+                          {nearestSlot && (
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <svg className="w-3 h-3 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <p className="text-amber-300 text-[10px]">
+                                Próximo slot estimado:{' '}
+                                <span className="font-mono font-semibold">{nearestSlot}</span>
+                              </p>
+                            </div>
+                          )}
+                          {!nearestSlot && (
+                            <p className="text-white/30 text-[10px] mt-1">Sin slot estimado disponible.</p>
+                          )}
+                        </div>
+                      ) : avail.full ? (
+                        <div className="bg-emerald-500/10 border border-emerald-500/25 rounded-lg p-2.5">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <svg className="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <p className="text-emerald-300 text-[11px] font-bold">Cupo disponible para tu fecha</p>
+                          </div>
+                          <p className="text-white/50 text-[10px]">
+                            Aunque está lleno ahora, un slot se libera antes del {effDate}.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          <p className="text-emerald-300 text-[11px] font-medium">
+                            Cupo disponible el {effDate}
+                            <span className="text-white/40 font-normal"> (máx {futureOccupancy}/{avail.total} en el período)</span>
+                          </p>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
 
                 {p.features?.length > 0 && (
                   <ul className="space-y-1.5 mb-5 flex-1">
@@ -442,7 +600,7 @@ export default function ClientePlanesPage() {
                       ? 'bg-white/5 text-white/40 cursor-not-allowed'
                       : isCurrent
                       ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 border border-emerald-500/30'
-                      : avail.full
+                      : futureAvailFull
                       ? 'bg-red-500/10 text-red-400 cursor-not-allowed'
                       : isChange
                       ? 'bg-blue-500/15 text-blue-200 hover:bg-blue-500/25 border border-blue-500/30'
@@ -455,16 +613,16 @@ export default function ClientePlanesPage() {
                     ? 'Sin fecha de venc.'
                     : isCurrent
                     ? (flash ? 'Renovar addon' : 'Renovar plan')
-                    : avail.full
-                    ? 'Sin cupo'
+                    : futureAvailFull
+                    ? 'Sin cupo para tu fecha'
                     : isChange
                     ? (flash ? 'Cambiar addon' : 'Solicitar cambio')
                     : (flash ? 'Adquirir addon' : 'Solicitar plan')}
                 </button>
-                {(isChange || isCurrent) && !disabled && effDate && (
+                {isCurrent && !disabled && effDate && (
                   <p className="text-[10px] text-white/40 mt-1.5 text-center">
-                    {isCurrent ? 'Renovación activa el ' : 'Activo el '}
-                    <span className={`font-mono ${isCurrent ? 'text-emerald-300' : 'text-blue-300'}`}>{effDate}</span>
+                    Renovación activa el{' '}
+                    <span className="font-mono text-emerald-300">{effDate}</span>
                   </p>
                 )}
                 {noExpiry && (
@@ -485,44 +643,151 @@ export default function ClientePlanesPage() {
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeWidget} />
           <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className={`bg-gradient-to-br ${PLAN_COLORS[widgetPlan.plan_key] || 'from-white/5 to-white/0'} px-6 py-5 border-b border-white/10`}>
-              <div className="flex items-start justify-between">
-                {(() => {
-                  const flashW = isFlashPlan(widgetPlan.plan_key);
-                  const currentKey = flashW ? store.flash_coupon_plan : store.plan_type;
-                  const currentExp = flashW ? store.flash_coupon_expiry_date : store.contract_expiry_date;
-                  const effW = effectiveDateFor(widgetPlan.plan_key);
-                  const isRenewal = currentKey === widgetPlan.plan_key;
-                  return (
-                <div>
-                  <p className="text-[11px] text-white/60 uppercase tracking-widest mb-1">
-                    {isRenewal
-                      ? (flashW ? 'Renovar addon' : 'Renovar plan')
-                      : flashW
-                      ? (currentKey ? `Cambiar addon (${currentKey} → nuevo)` : 'Adquirir addon Flash Coupon')
-                      : (currentKey ? `Cambiar de ${currentKey} a` : 'Solicitar plan')}
-                  </p>
-                  <h3 className="text-2xl font-bold text-white">{widgetPlan.name}</h3>
-                  <p className="text-[11px] text-white/50 font-mono mt-1">{widgetPlan.plan_key}</p>
-                  {currentKey && effW && (
-                    <p className="text-[11px] text-white/70 mt-2">
-                      Tu {flashW ? 'addon' : 'plan'} actual vence el{' '}
-                      <span className="font-mono text-amber-200">{currentExp || '—'}</span>.
-                      {isRenewal ? ' La renovación se activará el ' : ' El cambio se activará el '}
-                      <span className="font-mono text-cyan-200">{effW}</span>.
-                    </p>
-                  )}
-                </div>
-                  );
-                })()}
-                <button
-                  onClick={closeWidget} disabled={submitting}
-                  className="text-white/40 hover:text-white/80 disabled:opacity-30"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+              {(() => {
+                const flashW = isFlashPlan(widgetPlan.plan_key);
+                const currentKey = flashW ? store.flash_coupon_plan : store.plan_type;
+                const currentExp = flashW ? store.flash_coupon_expiry_date : store.contract_expiry_date;
+                const effW = effectiveDateFor(widgetPlan.plan_key);
+                const isRenewal = currentKey === widgetPlan.plan_key;
+                const isChange = !!currentKey && !isRenewal;
+
+                const wAvail = planAvailability(widgetPlan);
+                // Ventana exacta del usuario: months ciclos
+                const wWinEnd = (effW && widgetPlan.duration_days) ? (() => {
+                  const d = new Date(effW + 'T00:00:00');
+                  d.setDate(d.getDate() + months * widgetPlan.duration_days - 1);
+                  return d.toISOString().split('T')[0];
+                })() : null;
+                const wFutureOcc = (isChange && effW && wWinEnd && wAvail.total != null)
+                  ? computeMaxOverlapInWindow(widgetPlan.plan_key, effW, wWinEnd)
+                  : null;
+                const wFutureFull = wFutureOcc != null
+                  ? wFutureOcc >= (wAvail.total as number)
+                  : wAvail.full;
+                const wNearestSlot = (wFutureFull && wAvail.total != null && effW && widgetPlan.duration_days)
+                  ? nearestSlotAfter(widgetPlan.plan_key, wAvail.total, effW, widgetPlan.duration_days)
+                  : null;
+
+                return (
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-white/60 uppercase tracking-widest mb-1">
+                        {isRenewal
+                          ? (flashW ? 'Renovar addon' : 'Renovar plan')
+                          : flashW
+                          ? (currentKey ? 'Cambiar addon' : 'Adquirir addon Flash Coupon')
+                          : (currentKey ? 'Cambiar de plan' : 'Solicitar plan')}
+                      </p>
+                      <h3 className="text-2xl font-bold text-white">{widgetPlan.name}</h3>
+                      <p className="text-[11px] text-white/50 font-mono mt-0.5">{widgetPlan.plan_key}</p>
+
+                      {/* Bloque de fechas prominente — solo cuando hay un plan activo */}
+                      {currentKey && effW && (
+                        <div className="mt-4 space-y-3">
+                          {/* Línea de tiempo */}
+                          <div className="flex items-stretch gap-3">
+                            <div className="flex flex-col items-center shrink-0 pt-1">
+                              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-amber-400/30" />
+                              <span className="w-px flex-1 min-h-[20px] bg-white/15 my-1" />
+                              <span className={`w-2.5 h-2.5 rounded-full ring-2 ${
+                                wFutureFull
+                                  ? 'bg-red-400 ring-red-400/30'
+                                  : 'bg-blue-400 ring-blue-400/30'
+                              }`} />
+                            </div>
+                            <div className="space-y-3 flex-1 min-w-0">
+                              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                                <p className="text-[9px] text-amber-300/70 uppercase tracking-widest mb-0.5">
+                                  Tu {flashW ? 'addon' : 'plan'} actual vence
+                                </p>
+                                <p className="text-amber-200 text-lg font-bold font-mono leading-none">
+                                  {currentExp || '—'}
+                                </p>
+                                <p className="text-white/40 text-[10px] mt-0.5">{currentKey}</p>
+                              </div>
+                              <div className={`border rounded-lg px-3 py-2 ${
+                                wFutureFull
+                                  ? 'bg-red-500/10 border-red-500/25'
+                                  : 'bg-blue-500/10 border-blue-500/20'
+                              }`}>
+                                <p className={`text-[9px] uppercase tracking-widest mb-0.5 ${
+                                  wFutureFull ? 'text-red-300/70' : 'text-blue-300/70'
+                                }`}>
+                                  {isRenewal ? 'Renovación activa el' : `${widgetPlan.name} se activa el`}
+                                </p>
+                                <p className={`text-lg font-bold font-mono leading-none ${
+                                  wFutureFull ? 'text-red-200' : 'text-blue-200'
+                                }`}>
+                                  {effW}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Badge de disponibilidad en la fecha de activación */}
+                          {wAvail.total != null && !isRenewal && (
+                            wFutureFull ? (
+                              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
+                                <div className="flex items-start gap-2">
+                                  <svg className="w-4 h-4 text-red-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                  </svg>
+                                  <div>
+                                    <p className="text-red-200 text-xs font-bold">Sin cupo disponible para esa fecha</p>
+                                    <p className="text-white/50 text-[10px] mt-0.5">
+                                      En el período {effW}–{wWinEnd}, el máximo simultáneo es {wFutureOcc}/{wAvail.total}.
+                                      Tu solicitud podría quedar en cola hasta que se libere cupo.
+                                    </p>
+                                    {wNearestSlot && (
+                                      <p className="text-amber-300 text-[10px] mt-1 font-medium">
+                                        Próximo slot estimado:{' '}
+                                        <span className="font-mono font-bold">{wNearestSlot}</span>
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : wAvail.full ? (
+                              <div className="bg-emerald-500/8 border border-emerald-500/25 rounded-xl p-3 flex items-start gap-2">
+                                <svg className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div>
+                                  <p className="text-emerald-300 text-xs font-bold">Cupo disponible para tu fecha de activación</p>
+                                  <p className="text-white/50 text-[10px] mt-0.5">
+                                    Aunque el plan está lleno ahora, un slot se liberará antes del {effW}.
+                                  </p>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-xl p-3 flex items-center gap-2">
+                                <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                <p className="text-emerald-300 text-xs font-semibold">
+                                  Cupo disponible el {effW}
+                                  <span className="text-white/40 font-normal ml-1">
+                                    ({wFutureOcc}/{wAvail.total} ocupados)
+                                  </span>
+                                </p>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={closeWidget} disabled={submitting}
+                      className="text-white/40 hover:text-white/80 disabled:opacity-30 shrink-0 mt-1"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="px-6 py-5 space-y-5">
