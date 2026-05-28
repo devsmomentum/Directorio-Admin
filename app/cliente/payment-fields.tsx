@@ -282,7 +282,7 @@ export function PaymentFields({
                   {bcvLoading
                     ? 'Cargando…'
                     : bcvRate != null
-                    ? bcvRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+                    ? bcvRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                     : '—'}
                 </span>
                 <span className="text-[10px] text-white/30 normal-case font-sans">🔒 BCV</span>
@@ -299,9 +299,9 @@ export function PaymentFields({
             <p className="text-[10px] text-white/30">
               Tasa actualizada el{' '}
               <span className="font-mono text-white/50">
-                {new Date(bcvUpdatedAt).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' })}
+                {new Date(bcvUpdatedAt).toLocaleDateString('es-VE')}
               </span>
-              . El backend la re-valida al procesar el pago.
+              
             </p>
           )}
 

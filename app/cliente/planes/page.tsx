@@ -9,6 +9,7 @@ import {
   emptyPaymentState,
   buildPaymentPayload,
 } from '../payment-fields';
+import { AbonoModal, AbonoRequest } from '../abono-modal';
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/30 text-cyan-300',
@@ -39,10 +40,7 @@ export default function ClientePlanesPage() {
   const [widgetErr, setWidgetErr] = useState<string | null>(null);
 
   // Widget de abono a una solicitud existente con saldo pendiente
-  const [abonoRequest, setAbonoRequest] = useState<any | null>(null);
-  const [abonoPayment, setAbonoPayment] = useState<PaymentState>(emptyPaymentState());
-  const [abonoSubmitting, setAbonoSubmitting] = useState(false);
-  const [abonoErr, setAbonoErr] = useState<string | null>(null);
+  const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
 
   const [pendingTxCount, setPendingTxCount] = useState(0);
   const [nextFreeByPlan, setNextFreeByPlan] = useState<Record<string, string>>({});
@@ -211,47 +209,6 @@ export default function ClientePlanesPage() {
     setWidgetPlan(null);
   };
 
-  const handleAbonoSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!abonoRequest) return;
-    setAbonoErr(null);
-    const built = buildPaymentPayload(abonoPayment);
-    if (built.error || !built.payload) {
-      setAbonoErr(built.error || 'Datos de pago incompletos.');
-      return;
-    }
-    const p = built.payload;
-    const outstanding = Math.max(
-      Number(abonoRequest.total_amount_usd ?? 0) - Number(abonoRequest.paid_amount_usd ?? 0),
-      0,
-    );
-    const reported = Number(p.amountUsd ?? 0);
-    if (reported <= 0) {
-      setAbonoErr('Indica el monto en USD.');
-      return;
-    }
-    if (reported > outstanding + 0.005) {
-      setAbonoErr(`El abono (${reported.toFixed(2)} USD) supera el saldo pendiente (${outstanding.toFixed(2)} USD).`);
-      return;
-    }
-    setAbonoSubmitting(true);
-    const { error } = await supabase.rpc('report_additional_payment_atomic', {
-      p_request_id:        abonoRequest.id,
-      p_payment_method:    p.method,
-      p_payment_reference: p.reference,
-      p_payment_bank:      p.bank,
-      p_amount_bs:         p.amountBs,
-      p_amount_usd:        p.amountUsd ?? 0,
-      p_bcv_rate:          p.bcvRate,
-      p_notes:             `Abono a solicitud ${abonoRequest.plan_key}`,
-    });
-    setAbonoSubmitting(false);
-    if (error) { setAbonoErr(error.message); return; }
-    setFeedback({ type: 'ok', msg: 'Abono reportado. Será verificado por la administración.' });
-    setAbonoRequest(null);
-    setAbonoPayment(emptyPaymentState());
-  };
-
   if (!store) {
     return (
       <div className="max-w-2xl mx-auto mt-20 bg-amber-500/5 border border-amber-500/20 rounded-2xl p-8 text-center text-amber-300">
@@ -333,7 +290,12 @@ export default function ClientePlanesPage() {
                   </div>
                   {outstanding > 0 && (
                     <button
-                      onClick={() => { setAbonoRequest(r); setAbonoPayment(emptyPaymentState()); setAbonoErr(null); }}
+                      onClick={() => setAbonoRequest({
+                        id: r.id,
+                        plan_key: r.plan_key,
+                        total_amount_usd: r.total_amount_usd,
+                        paid_amount_usd: r.paid_amount_usd,
+                      })}
                       className="shrink-0 text-sm font-semibold bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-100 rounded-lg px-4 py-2"
                     >
                       Reportar abono
@@ -346,60 +308,19 @@ export default function ClientePlanesPage() {
         </div>
       )}
 
-      {abonoRequest && (() => {
-        const total = Number(abonoRequest.total_amount_usd ?? 0);
-        const paid  = Number(abonoRequest.paid_amount_usd ?? 0);
-        const outstanding = Math.max(total - paid, 0);
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!abonoSubmitting) setAbonoRequest(null); }} />
-            <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[92vh] overflow-y-auto">
-              <div className="bg-gradient-to-br from-amber-500/15 to-orange-500/5 px-6 py-5 border-b border-white/10">
-                <p className="text-[11px] text-white/60 uppercase tracking-widest mb-1">
-                  Abono a solicitud
-                </p>
-                <h3 className="text-xl font-bold text-white">{abonoRequest.plan_key}</h3>
-                <div className="grid grid-cols-3 gap-3 mt-4 text-center">
-                  <div className="bg-white/[0.04] rounded-lg p-2">
-                    <p className="text-[9px] text-white/40 uppercase">Total</p>
-                    <p className="text-white font-mono text-sm font-bold">${total.toFixed(2)}</p>
-                  </div>
-                  <div className="bg-white/[0.04] rounded-lg p-2">
-                    <p className="text-[9px] text-white/40 uppercase">Pagado</p>
-                    <p className="text-emerald-300 font-mono text-sm font-bold">${paid.toFixed(2)}</p>
-                  </div>
-                  <div className="bg-amber-500/10 rounded-lg p-2">
-                    <p className="text-[9px] text-amber-300/70 uppercase">Saldo</p>
-                    <p className="text-amber-300 font-mono text-sm font-bold">${outstanding.toFixed(2)}</p>
-                  </div>
-                </div>
-              </div>
-              <form onSubmit={handleAbonoSubmit} className="px-6 py-5 space-y-4">
-                <PaymentFields value={abonoPayment} onChange={setAbonoPayment} />
-                {abonoErr && (
-                  <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-lg p-2.5 text-xs">
-                    {abonoErr}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <button
-                    type="button" onClick={() => setAbonoRequest(null)} disabled={abonoSubmitting}
-                    className="flex-1 px-4 py-2.5 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit" disabled={abonoSubmitting}
-                    className="flex-1 px-4 py-2.5 text-sm font-semibold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 rounded-lg disabled:opacity-50"
-                  >
-                    {abonoSubmitting ? 'Enviando…' : 'Reportar abono'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        );
-      })()}
+      <AbonoModal
+        request={abonoRequest}
+        onClose={() => setAbonoRequest(null)}
+        onSuccess={async (msg) => {
+          setFeedback({ type: 'ok', msg });
+          const { data } = await supabase.from('plan_requests')
+            .select('id, plan_key, status, effective_date, total_amount_usd, paid_amount_usd, months_requested, created_at')
+            .eq('store_id', store!.id)
+            .order('created_at', { ascending: false });
+          setRequests(data || []);
+        }}
+      />
+
 
       {feedback && (
         <div className={`rounded-lg p-3 text-sm border ${

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
+import { AbonoModal, AbonoRequest } from '../abono-modal';
 
 const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
@@ -53,6 +54,8 @@ export default function ClienteDashboardPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [range, setRange] = useState<Range>('30d');
   const [loading, setLoading] = useState(true);
+  const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
+  const [abonoFeedback, setAbonoFeedback] = useState<string | null>(null);
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -184,6 +187,16 @@ export default function ClienteDashboardPage() {
     return requests.find(r => r.status === 'pending' || r.status === 'partial') || null;
   }, [requests]);
 
+  // Solicitudes con saldo pendiente — habilitan el botón "Reportar abono".
+  const openRequests = useMemo(
+    () => requests.filter((r: any) => {
+      if (r.status !== 'pending' && r.status !== 'partial') return false;
+      const outstanding = Number(r.total_amount_usd ?? 0) - Number(r.paid_amount_usd ?? 0);
+      return outstanding > 0.005;
+    }),
+    [requests]
+  );
+
   const expiryDaysLeft = useMemo<number | null>(() => {
     if (!store?.contract_expiry_date) return null;
     const today = new Date(); today.setHours(0,0,0,0);
@@ -296,6 +309,65 @@ export default function ClienteDashboardPage() {
               Renovar ahora →
             </Link>
           </div>
+        </div>
+      )}
+
+      {abonoFeedback && (
+        <div className="rounded-lg p-3 text-sm border bg-emerald-500/10 border-emerald-500/30 text-emerald-300">
+          {abonoFeedback}
+        </div>
+      )}
+
+      {openRequests.length > 0 && (
+        <div className="space-y-2">
+          {openRequests.map((r: any) => {
+            const total = Number(r.total_amount_usd ?? 0);
+            const paid = Number(r.paid_amount_usd ?? 0);
+            const outstanding = Math.max(total - paid, 0);
+            const planLabel = PLAN_LABELS[r.plan_key] || r.plan_key;
+            return (
+              <div
+                key={r.id}
+                className="relative overflow-hidden bg-gradient-to-br from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/40 rounded-2xl p-5 shadow-[0_0_30px_-10px_rgba(245,158,11,0.4)]"
+              >
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="inline-flex w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                      <p className="text-amber-200 text-xs font-bold uppercase tracking-widest">
+                        Tienes un abono por reportar
+                      </p>
+                    </div>
+                    <p className="text-white text-base font-bold">
+                      Solicitud {planLabel}
+                      <span className="ml-2 text-[10px] font-mono uppercase bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">
+                        {r.status === 'partial' ? 'PARCIAL' : 'EN REVISIÓN'}
+                      </span>
+                    </p>
+                    <p className="text-white/70 text-sm mt-1.5">
+                      Pagado <span className="font-mono text-emerald-300">${paid.toFixed(2)}</span>{' '}
+                      de <span className="font-mono text-white">${total.toFixed(2)}</span> · saldo{' '}
+                      <span className="font-mono text-amber-300 font-bold">${outstanding.toFixed(2)}</span>
+                    </p>
+                    <p className="text-white/50 text-xs mt-1">
+                      Reporta tu abono aquí mismo. El plan se activa cuando el saldo llegue a $0.00.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAbonoRequest({
+                      id: r.id,
+                      plan_key: r.plan_key,
+                      total_amount_usd: r.total_amount_usd,
+                      paid_amount_usd: r.paid_amount_usd,
+                    })}
+                    className="shrink-0 text-sm font-bold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black rounded-lg px-5 py-2.5 shadow-lg transition-colors"
+                  >
+                    Reportar abono →
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -462,9 +534,31 @@ export default function ClienteDashboardPage() {
                       ? 'Solicitud en curso con saldo pendiente. Reporta el faltante para activar el plan.'
                       : 'La administración está verificando tu pago. Te notificaremos al aprobarse.'}
                   </p>
-                  <Link href="/cliente/planes" className="inline-block mt-3 text-[11px] text-amber-300 hover:text-amber-200 font-medium">
-                    {pendingChange.status === 'partial' ? 'Reportar abono →' : 'Ver solicitud →'}
-                  </Link>
+                  {(() => {
+                    const total = Number(pendingChange.total_amount_usd ?? 0);
+                    const paid = Number(pendingChange.paid_amount_usd ?? 0);
+                    const outstanding = Math.max(total - paid, 0);
+                    if (outstanding > 0.005) {
+                      return (
+                        <button
+                          onClick={() => setAbonoRequest({
+                            id: pendingChange.id,
+                            plan_key: pendingChange.plan_key,
+                            total_amount_usd: pendingChange.total_amount_usd,
+                            paid_amount_usd: pendingChange.paid_amount_usd,
+                          })}
+                          className="inline-block mt-3 text-[11px] font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 rounded-md px-3 py-1.5"
+                        >
+                          Reportar abono →
+                        </button>
+                      );
+                    }
+                    return (
+                      <Link href="/cliente/pagos" className="inline-block mt-3 text-[11px] text-amber-300 hover:text-amber-200 font-medium">
+                        Ver solicitud →
+                      </Link>
+                    );
+                  })()}
                 </>
               ) : (
                 <>
@@ -607,6 +701,22 @@ export default function ClienteDashboardPage() {
           </div>
         </div>
       )}
+
+      <AbonoModal
+        request={abonoRequest}
+        onClose={() => setAbonoRequest(null)}
+        onSuccess={async (msg) => {
+          setAbonoFeedback(msg);
+          if (store) {
+            const { data } = await supabase
+              .from('plan_requests')
+              .select('*')
+              .eq('store_id', store.id)
+              .order('created_at', { ascending: false });
+            setRequests(data || []);
+          }
+        }}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Link href="/cliente/planes" className="bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/20 hover:border-cyan-500/40 rounded-xl p-4 transition-colors">
