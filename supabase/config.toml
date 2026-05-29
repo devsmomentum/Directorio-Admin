@@ -34,3 +34,13 @@ verify_jwt = false
 # del caller y la function comprueba role='admin' adentro.
 [functions.send-magic-link]
 verify_jwt = true
+
+# send-contract-expiry-reminders: la llama pg_cron con x-cron-secret. Envía
+# recordatorios por correo a clientes cuyo plan vence en 5/3/1/0 días.
+[functions.send-contract-expiry-reminders]
+verify_jwt = false
+
+# send-whatsapp-expiry-reminders: la llama pg_cron con x-cron-secret. Envía
+# recordatorios por WhatsApp (SuperAPI) a clientes cuyo plan vence en 5/3/1/0 días.
+[functions.send-whatsapp-expiry-reminders]
+verify_jwt = false
