@@ -611,93 +611,184 @@ export default function ClientesPage() {
           <p className="text-white/15 text-xs mt-1">Crea el primero para enviarle un enlace de acceso</p>
         </div>
       ) : (
-        <div className="bg-[#111] border border-white/5 rounded-xl overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-white/5">
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Cliente</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Correo (login)</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Documento</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Teléfono</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tiendas</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(c => (
-                <tr key={c.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] group">
-                  <td className="px-5 py-3.5 text-white/85">
-                    {c.full_name || <span className="text-white/30 italic">Sin nombre</span>}
-                  </td>
-                  <td className="px-5 py-3.5 text-white/60 text-xs font-mono">{c.email}</td>
-                  <td className="px-5 py-3.5 text-white/50 text-xs font-mono">{c.cedula_numero ? `${c.doc_tipo || 'V'}-${c.cedula_numero}` : '—'}</td>
-                  <td className="px-5 py-3.5 text-white/50 text-xs">{phoneForDisplay(c.telefono_personal)}</td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex gap-1 flex-wrap max-w-[280px]">
-                      {(storesByClient[c.id] ?? []).map(s => (
-                        <span key={s.id} className="text-[10px] bg-cyan-500/10 text-cyan-300 px-2 py-0.5 rounded">
-                          {s.name}
-                        </span>
-                      ))}
-                      {(storesByClient[c.id] ?? []).length === 0 && (
-                        <span className="text-[10px] text-white/30 italic">sin tiendas</span>
+        <>
+          {/* Tabla — visible en pantallas medianas y grandes */}
+          <div className="hidden md:block bg-[#111] border border-white/5 rounded-xl overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-white/5">
+                  <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Cliente</th>
+                  <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Correo (login)</th>
+                  <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Documento</th>
+                  <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Teléfono</th>
+                  <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tiendas</th>
+                  <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(c => (
+                  <tr key={c.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] group">
+                    <td className="px-5 py-3.5 text-white/85">
+                      {c.full_name || <span className="text-white/30 italic">Sin nombre</span>}
+                    </td>
+                    <td className="px-5 py-3.5 text-white/60 text-xs font-mono">{c.email}</td>
+                    <td className="px-5 py-3.5 text-white/50 text-xs font-mono">{c.cedula_numero ? `${c.doc_tipo || 'V'}-${c.cedula_numero}` : '—'}</td>
+                    <td className="px-5 py-3.5 text-white/50 text-xs">{phoneForDisplay(c.telefono_personal)}</td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex gap-1 flex-wrap max-w-[200px]">
+                        {(storesByClient[c.id] ?? []).map(s => (
+                          <span key={s.id} className="text-[10px] bg-cyan-500/10 text-cyan-300 px-2 py-0.5 rounded">
+                            {s.name}
+                          </span>
+                        ))}
+                        {(storesByClient[c.id] ?? []).length === 0 && (
+                          <span className="text-[10px] text-white/30 italic">sin tiendas</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openSendDialog('whatsapp', c)}
+                          disabled={!!sendingLinkFor || !c.telefono_personal}
+                          title={c.telefono_personal ? 'Enviar enlace por WhatsApp' : 'Sin teléfono registrado'}
+                          className="p-1.5 rounded-md text-white/30 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/30"
+                        >
+                          {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'whatsapp' ? (
+                            <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 21l1.65-3.8a9 9 0 113.4 3.39L3 21M9 10a.5.5 0 11.998-.001A.5.5 0 019 10m3 0a.5.5 0 11.998-.001A.5.5 0 0112 10m3 0a.5.5 0 11.998-.001A.5.5 0 0115 10" /></svg>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => openSendDialog('email', c)}
+                          disabled={!!sendingLinkFor}
+                          title="Enviar enlace por correo"
+                          className="p-1.5 rounded-md text-white/30 hover:text-sky-400 hover:bg-sky-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/30"
+                        >
+                          {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'email' ? (
+                            <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                          ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => openEdit(c)}
+                          title="Editar"
+                          className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClient(c)}
+                          title="Eliminar"
+                          className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-8 text-center text-white/30 text-sm">
+                      No hay coincidencias con la búsqueda.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Cards — visibles solo en móvil */}
+          <div className="flex flex-col gap-3 md:hidden">
+            {filtered.length === 0 ? (
+              <p className="text-center text-white/30 text-sm py-8">No hay coincidencias con la búsqueda.</p>
+            ) : filtered.map(c => (
+              <div key={c.id} className="bg-[#111] border border-white/5 rounded-xl p-4 space-y-3">
+                {/* Header: nombre + acciones */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white/90 truncate">
+                      {c.full_name || <span className="italic text-white/30">Sin nombre</span>}
+                    </p>
+                    <p className="text-xs text-white/40 font-mono truncate mt-0.5">{c.email}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => openSendDialog('whatsapp', c)}
+                      disabled={!!sendingLinkFor || !c.telefono_personal}
+                      title={c.telefono_personal ? 'Enviar enlace por WhatsApp' : 'Sin teléfono registrado'}
+                      className="p-2 rounded-lg text-white/30 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'whatsapp' ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 21l1.65-3.8a9 9 0 113.4 3.39L3 21M9 10a.5.5 0 11.998-.001A.5.5 0 019 10m3 0a.5.5 0 11.998-.001A.5.5 0 0112 10m3 0a.5.5 0 11.998-.001A.5.5 0 0115 10" /></svg>
                       )}
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => openSendDialog('whatsapp', c)}
-                        disabled={!!sendingLinkFor || !c.telefono_personal}
-                        title={c.telefono_personal ? 'Enviar enlace por WhatsApp' : 'Sin teléfono registrado'}
-                        className="p-1.5 rounded-md text-white/30 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/30"
-                      >
-                        {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'whatsapp' ? (
-                          <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 21l1.65-3.8a9 9 0 113.4 3.39L3 21M9 10a.5.5 0 11.998-.001A.5.5 0 019 10m3 0a.5.5 0 11.998-.001A.5.5 0 0112 10m3 0a.5.5 0 11.998-.001A.5.5 0 0115 10" /></svg>
-                        )}
-                      </button>
-                      <button
-                        onClick={() => openSendDialog('email', c)}
-                        disabled={!!sendingLinkFor}
-                        title="Enviar enlace por correo"
-                        className="p-1.5 rounded-md text-white/30 hover:text-sky-400 hover:bg-sky-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/30"
-                      >
-                        {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'email' ? (
-                          <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                        )}
-                      </button>
-                      <button
-                        onClick={() => openEdit(c)}
-                        title="Editar"
-                        className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClient(c)}
-                        title="Eliminar"
-                        className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-5 py-8 text-center text-white/30 text-sm">
-                    No hay coincidencias con la búsqueda.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                    </button>
+                    <button
+                      onClick={() => openSendDialog('email', c)}
+                      disabled={!!sendingLinkFor}
+                      title="Enviar enlace por correo"
+                      className="p-2 rounded-lg text-white/30 hover:text-sky-400 hover:bg-sky-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {sendingLinkFor?.id === c.id && sendingLinkFor.channel === 'email' ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => openEdit(c)}
+                      title="Editar"
+                      className="p-2 rounded-lg text-white/30 hover:text-white hover:bg-white/10 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteClient(c)}
+                      title="Eliminar"
+                      className="p-2 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Detalles */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-white/5 pt-3">
+                  <div>
+                    <p className="text-[10px] text-white/30 uppercase tracking-wider mb-0.5">Documento</p>
+                    <p className="text-xs text-white/60 font-mono">
+                      {c.cedula_numero ? `${c.doc_tipo || 'V'}-${c.cedula_numero}` : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-white/30 uppercase tracking-wider mb-0.5">Teléfono</p>
+                    <p className="text-xs text-white/60">{phoneForDisplay(c.telefono_personal)}</p>
+                  </div>
+                </div>
+
+                {/* Tiendas */}
+                <div className="border-t border-white/5 pt-3">
+                  <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Tiendas</p>
+                  <div className="flex gap-1 flex-wrap">
+                    {(storesByClient[c.id] ?? []).map(s => (
+                      <span key={s.id} className="text-[10px] bg-cyan-500/10 text-cyan-300 px-2 py-0.5 rounded">
+                        {s.name}
+                      </span>
+                    ))}
+                    {(storesByClient[c.id] ?? []).length === 0 && (
+                      <span className="text-[10px] text-white/30 italic">sin tiendas</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {showForm && (

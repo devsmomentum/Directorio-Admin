@@ -174,7 +174,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
         }`}
       >
         {/* logo */}
-        <div className="relative border-b border-line p-6">
+        <div className="relative h-20 shrink-0 flex items-center border-b border-line px-6">
           <div className="absolute inset-x-0 top-0 h-px brand-admin opacity-70" />
           <div className="flex items-center gap-3">
             <MallHubTile variant="admin" size={40} />
@@ -227,13 +227,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
 
         {/* footer: tema + logout */}
         <div className="border-t border-line p-3 space-y-2">
-          <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3 py-2">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-wider text-fg-subtle">Apariencia</p>
-              <p className="text-xs text-fg-muted">Modo del sistema</p>
-            </div>
-            <ThemeToggle />
-          </div>
+          
           <button
             onClick={handleLogout}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-transparent px-3 py-2.5 text-sm font-medium text-fg-muted transition-colors hover:border-line hover:bg-surface-2 hover:text-[color:var(--danger)]"
@@ -245,22 +239,38 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
       </aside>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* topbar móvil */}
-        <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
+        {/* topbar — visible en todos los tamaños */}
+        <header className="h-20 shrink-0 flex items-center justify-between border-b border-line bg-surface px-6 md:px-8">
           <button
             onClick={() => setSidebarOpen(true)}
             aria-label="Abrir menú"
-            className="rounded-lg border border-line p-2 text-fg-muted hover:text-fg"
+            className="rounded-lg border border-line p-2 text-fg-muted hover:text-fg md:hidden"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <MallHubWordmark variant="admin" size="sm" className="tracking-wider" />
-          <ThemeToggle />
+          <MallHubWordmark variant="admin" size="sm" className="tracking-wider md:hidden" />
+          <div className="flex items-center gap-2 md:ml-auto">
+            <Link
+              href="/panel/notificaciones"
+              className="relative rounded-lg border border-line p-2 text-fg-muted transition-colors hover:text-fg"
+              aria-label={`Notificaciones${unreadNotifications > 0 ? `, ${unreadNotifications} sin leer` : ''}`}
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              {unreadNotifications > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-warning px-1 text-[10px] font-bold text-white ring-2 ring-surface">
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </span>
+              )}
+            </Link>
+            <ThemeToggle />
+          </div>
         </header>
 
-        <main className="relative flex-1 overflow-y-auto">
+        <main className="relative flex-1 overflow-y-auto overflow-x-hidden">
           <div className="mx-auto max-w-[1600px] p-6 md:p-8">
             {children}
           </div>

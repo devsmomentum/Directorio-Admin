@@ -23,6 +23,14 @@ const PLAN_LABELS: Record<string, string> = {
   FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
 };
 
+function parseRejectionReason(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  const idx = notes.indexOf('[RECHAZO]');
+  if (idx === -1) return null;
+  const reason = notes.slice(idx + '[RECHAZO]'.length).trim();
+  return reason || null;
+}
+
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
   ORO: 'text-amber-400 bg-amber-500/10',
@@ -85,7 +93,6 @@ export default function ClientePagosPage() {
 
   const [months, setMonths] = useState(1);
   const [payment, setPayment] = useState<PaymentState>(emptyPaymentState());
-  const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
 
@@ -169,8 +176,9 @@ export default function ClientePagosPage() {
 
   const openForm = () => {
     setMonths(1);
-    setPayment(emptyPaymentState()); setNotes('');
-    setFormErr(null); setShowForm(true);
+    setPayment(emptyPaymentState());
+    setFormErr(null); 
+    setShowForm(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -202,21 +210,14 @@ export default function ClientePagosPage() {
       p.amountBs != null ? `Bs ${p.amountBs.toLocaleString('es-VE')}` : null,
       p.bcvRate != null ? `BCV ${p.bcvRate}` : null,
       `Ciclos: ${months}`,
-      `Cubre: ${computedPeriod.start} → ${computedPeriod.end}`,
-      notes,
-    ].filter(Boolean).join(' · ');
+        `Cubre: ${computedPeriod.start} → ${computedPeriod.end}`
+      ].filter(Boolean).join(' · ');
 
-    const { error } = await supabase.from('transactions').insert([{
-      transaction_type: 'plan_payment',
-      item_name: itemName,
-      amount_usd: amountUsd,
-      amount_bs: p.amountBs,
-      exchange_rate: p.bcvRate,
-      payment_method: p.method,
-      status: 'pending',
-      user_email: user?.email ?? null,
-      store_id: store.id,
-      period: computedPeriod.label,
+      const { error } = await supabase.from('transactions').insert([{
+        transaction_type: 'plan_payment',
+        item_name: itemName,
+        amount_usd: amountUsd > 0 ? amountUsd : null,
+        amount_bs: p.amountBs,
       months_paid: months,
       notes: notesParts || null,
       payment_date: today,
@@ -447,6 +448,14 @@ export default function ClientePagosPage() {
                         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${statusUi.cls}`}>
                           {statusUi.txt}
                         </span>
+                        {r.status === 'rejected' && (() => {
+                          const reason = parseRejectionReason(r.notes);
+                          return reason ? (
+                            <p className="text-[10px] text-red-300 mt-1 whitespace-normal leading-snug max-w-[180px]">
+                              {reason}
+                            </p>
+                          ) : null;
+                        })()}
                       </td>
                       <td className="px-3 py-2 text-white/60">{methodLabel(r.payment_method)}</td>
                       <td className="px-3 py-2 text-white/80 font-mono text-right">
@@ -528,6 +537,14 @@ export default function ClientePagosPage() {
                       }`}>
                         {(t.status || 'pending').toUpperCase()}
                       </span>
+                      {t.status === 'rejected' && (() => {
+                        const reason = parseRejectionReason(t.notes);
+                        return reason ? (
+                          <p className="text-[10px] text-red-300 mt-1 leading-snug max-w-[200px]">
+                            {reason}
+                          </p>
+                        ) : null;
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-white/40 text-xs">
                       {new Date(t.created_at).toLocaleDateString('es-VE')}
@@ -620,16 +637,6 @@ export default function ClientePagosPage() {
 
               <PaymentFields value={payment} onChange={setPayment} />
 
-              <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                  Notas (opcional)
-                </label>
-                <textarea
-                  value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
-                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 resize-none"
-                  placeholder="Hora del depósito, observaciones, etc."
-                />
-              </div>
 
               {formErr && (
                 <div className="rounded-lg p-3 text-xs border bg-red-500/10 border-red-500/30 text-red-300">

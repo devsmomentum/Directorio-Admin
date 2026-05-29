@@ -367,12 +367,12 @@ export default function CuponsAdminPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-end justify-between">
-        <div>
+      <div className="flex items-end justify-between flex-wrap gap-y-3">
+        <div className="min-w-0">
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Publicidad y Promociones</p>
           <h2 className="text-2xl font-bold text-white">Gestión de Cupones</h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={fetchData}
             disabled={refreshing}
@@ -393,7 +393,7 @@ export default function CuponsAdminPage() {
 
       {/* Indicador galería Flash Coupon */}
       {flashCouponBrands.size > 0 && (
-        <div className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+        <div className={`flex items-center justify-between flex-wrap gap-3 rounded-xl border px-4 py-3 ${
           flashCouponBrands.size >= FLASH_COUPON_MAX_BRANDS
             ? 'bg-red-950/25 border-red-500/30'
             : flashCouponBrands.size >= FLASH_COUPON_MAX_BRANDS - 3
@@ -643,7 +643,7 @@ export default function CuponsAdminPage() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Card grid */}
       {coupons.length === 0 ? (
         <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
           <svg className="w-10 h-10 text-white/10 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
@@ -651,117 +651,115 @@ export default function CuponsAdminPage() {
           <p className="text-white/15 text-xs mt-1">Haz clic en "Nuevo combo" para empezar</p>
         </div>
       ) : (
-        <div className="bg-[#111] border border-white/5 rounded-xl overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-white/5">
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Combo</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Tienda / Categoría</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Plan</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Vigencia</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium">Estado · Última rotación</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Precio / Stock</th>
-                <th className="px-5 py-3 text-[10px] text-white/30 uppercase tracking-wider font-medium text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pg.paginated.map((coupon) => (
-                <tr key={coupon.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors group">
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-md bg-[#0A0A0A] border border-white/5 overflow-hidden shrink-0">
-                        {coupon.image_url ? (
-                          <img src={coupon.image_url} alt={coupon.title} className="w-full h-full object-cover" loading="lazy" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-white/10 text-[8px]">N/A</div>
-                        )}
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {pg.paginated.map((coupon) => {
+              const isExpired = !!coupon.end_date && new Date(coupon.end_date) < new Date();
+              const outOfStock = coupon.amount_available <= 0;
+              const isInactive = !coupon.is_active || isExpired || outOfStock;
+
+              const statusLabel = isExpired ? 'Vencido' : outOfStock ? 'Sin stock' : coupon.is_active ? 'Activo' : 'Inactivo';
+              const statusClasses = isInactive
+                ? 'bg-white/5 text-white/30'
+                : 'bg-cyan-500/10 text-cyan-400';
+              const dotClasses = isInactive ? 'bg-white/20' : 'bg-cyan-400';
+
+              return (
+                <div key={coupon.id} className={`bg-[#111] border rounded-xl overflow-hidden transition-all ${isInactive ? 'border-white/5 opacity-70' : 'border-white/10'}`}>
+                  {/* Image */}
+                  <div className="h-40 bg-black relative">
+                    {coupon.image_url ? (
+                      <img
+                        src={coupon.image_url}
+                        alt={coupon.title}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <svg className="w-10 h-10 text-white/10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
                       </div>
-                      <div className="min-w-0">
-                        <span className="text-white font-medium text-sm block truncate">{coupon.title}</span>
-                        <span className="text-white/20 text-[10px] font-mono">{coupon.code}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className="text-white/40 text-xs block">{coupon.stores?.name || 'GENERICO'}</span>
-                    {coupon.category && <span className="text-white/20 text-[10px] block mt-0.5">{coupon.category}</span>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                    {/* Plan badge */}
+                    <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
                       {FLASH_COUPON_PLANS.has(coupon.plan_type) && (
-                        <span
-                          title="Cupón Flash: aparece en la galería con captura de datos"
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold tracking-wider bg-pink-500/20 text-pink-300 border border-pink-500/40"
-                        >
+                        <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/40">
                           ⚡ FLASH
                         </span>
                       )}
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[coupon.plan_type] || 'text-white/40 bg-white/5'}`}>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${PLAN_COLORS[coupon.plan_type] || 'text-white/40 bg-white/5'}`}>
                         {PLAN_LABELS[coupon.plan_type] || coupon.plan_type}
                       </span>
                     </div>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className="text-white/40 text-xs block">{new Date(coupon.start_date).toLocaleDateString()}</span>
-                    <span className="text-white/20 text-[10px] block mt-0.5">al {new Date(coupon.end_date).toLocaleDateString()}</span>
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${
-                      coupon.is_active ? 'text-emerald-300 bg-emerald-500/15' : 'text-white/40 bg-white/5'
-                    }`}>
-                      {coupon.is_active ? 'ACTIVO' : 'INACTIVO'}
-                    </span>
-                    <span className="text-white/20 text-[10px] block mt-1 font-mono">
-                      {coupon.last_shown_at
-                        ? new Date(coupon.last_shown_at).toLocaleString()
-                        : 'sin rotación aún'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <span className="text-emerald-400 text-sm font-medium block">${coupon.price_usd?.toFixed(2) || '0.00'}</span>
-                    <div className="mt-0.5">
-                      <span className={`text-xs font-medium ${coupon.amount_available <= 5 ? 'text-amber-400' : 'text-white/60'}`}>
+                    {/* Title overlay */}
+                    <div className="absolute bottom-3 left-3 right-3">
+                      <h3 className="text-white font-semibold text-sm truncate">{coupon.title}</h3>
+                      {coupon.stores?.name && <p className="text-white/50 text-[10px]">Tienda: {coupon.stores.name}</p>}
+                    </div>
+                  </div>
+
+                  {/* Body */}
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/40">Código</span>
+                      <span className="text-white/60 font-mono text-[10px]">{coupon.code}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/40">Stock</span>
+                      <span className={`font-medium ${outOfStock ? 'text-red-400' : coupon.amount_available <= 5 ? 'text-amber-400' : 'text-white/70'}`}>
                         {coupon.amount_available} disp.
                       </span>
                     </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/40">Precio</span>
+                      <span className="text-cyan-400 font-medium">${coupon.price_usd?.toFixed(2) || '0.00'}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/40">Vigencia</span>
+                      <span className="text-white/60 text-[10px]">
+                        {new Date(coupon.start_date).toLocaleDateString()} — {new Date(coupon.end_date).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {coupon.last_shown_at && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-white/40">Última rotación</span>
+                        <span className="text-white/30 text-[10px] font-mono">{new Date(coupon.last_shown_at).toLocaleDateString()}</span>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="pt-3 border-t border-white/5 flex items-center justify-between">
                       <button
                         onClick={() => handleToggleActive(coupon)}
-                        title={coupon.is_active ? 'Desactivar' : 'Reactivar'}
-                        className={`p-1.5 rounded-md transition-colors ${
-                          coupon.is_active
-                            ? 'text-white/30 hover:text-amber-300 hover:bg-amber-500/10'
-                            : 'text-white/30 hover:text-emerald-300 hover:bg-emerald-500/10'
-                        }`}
+                        className={`text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${statusClasses}`}
                       >
-                        {coupon.is_active ? (
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        )}
+                        <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
+                        {statusLabel}
                       </button>
-                      <button
-                        onClick={() => handleEditClick(coupon)}
-                        title="Editar"
-                        className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                      </button>
-                      <button
-                        onClick={() => handleDelete(coupon.id)}
-                        title="Eliminar"
-                        className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      </button>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleEditClick(coupon)}
+                          title="Editar"
+                          className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(coupon.id)}
+                          title="Eliminar"
+                          className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
           {pg.totalPages > 1 && (
             <Pagination
@@ -774,7 +772,7 @@ export default function CuponsAdminPage() {
               onPerPageChange={pg.changePerPage}
             />
           )}
-        </div>
+        </>
       )}
     </div>
   );

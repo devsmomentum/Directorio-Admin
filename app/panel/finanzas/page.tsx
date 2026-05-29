@@ -248,10 +248,10 @@ export default function FinanzasPage() {
       [`− ${MILLENNIUM_PCT}% Millennium`, fmt(dist.millennium), ''],
       ['', '', ''],
       ['INGRESOS DETALLADOS', '', '', '', ''],
-      ['Tienda', 'Plan', 'Período', 'Monto', 'Método', 'Fecha', 'Estado', 'Notas'],
+      ['Tienda', 'Plan', 'Período', 'Monto', 'Método', 'Fecha', 'Estado'],
       ...periodPayments.map(p => [
         `"${storeName(p.store_id)}"`, p.item_name, `"${p.period || ''}"`,
-        fmt(Number(p.amount_usd)), p.payment_method, p.payment_date || '', p.status, `"${p.notes || ''}"`,
+        fmt(Number(p.amount_usd)), p.payment_method, p.payment_date || '', p.status,
       ]),
       ['', '', '', '', ''],
       ['GASTOS DETALLADOS', '', '', '', ''],
@@ -289,12 +289,12 @@ export default function FinanzasPage() {
       {/* Period selector */}
       <div className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-wrap items-center gap-3">
         <span className="text-xs text-white/30 uppercase tracking-wider shrink-0">Período:</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)}
-            className="text-xs bg-[#0a0a0a] border border-white/10 text-white/70 rounded-lg px-3 py-2 focus:outline-none focus:border-pink-500" />
-          <span className="text-white/20 text-xs">→</span>
+            className="text-xs bg-[#0a0a0a] border border-white/10 text-white/70 rounded-lg px-3 py-2 focus:outline-none focus:border-pink-500 min-w-0" />
+          <span className="text-white/20 text-xs shrink-0">→</span>
           <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)}
-            className="text-xs bg-[#0a0a0a] border border-white/10 text-white/70 rounded-lg px-3 py-2 focus:outline-none focus:border-pink-500" />
+            className="text-xs bg-[#0a0a0a] border border-white/10 text-white/70 rounded-lg px-3 py-2 focus:outline-none focus:border-pink-500 min-w-0" />
         </div>
         <div className="flex flex-wrap gap-1.5">
           {presets.map(p => (
@@ -309,7 +309,7 @@ export default function FinanzasPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-[#111] rounded-lg p-1 border border-white/5 w-fit">
+      <div className="flex flex-wrap gap-1 bg-[#111] rounded-lg p-1 border border-white/5 w-fit">
         {([
           { id: 'distribucion', label: 'Distribución' },
           { id: 'ingresos', label: 'Ingresos' },
@@ -652,13 +652,6 @@ export default function FinanzasPage() {
                     <option value="pending">Pendiente</option>
                   </select>
                 </div>
-              </div>
-              {/* Notes */}
-              <div>
-                <label className="text-xs text-white/40 mb-1.5 block">Notas / Nro. de referencia (opcional)</label>
-                <input type="text" placeholder="Ej: Ref. 0045872" value={payForm.notes}
-                  onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))}
-                  className="w-full text-sm bg-[#0a0a0a] border border-white/10 text-white placeholder-white/20 rounded-lg px-3 py-2.5 focus:outline-none focus:border-pink-500" />
               </div>
               {payError && <p className="text-xs text-red-400">{payError}</p>}
             </div>

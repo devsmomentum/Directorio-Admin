@@ -69,6 +69,18 @@ Deno.serve(async (req: Request) => {
     return respond({ error: updateErr.message }, 500)
   }
 
+  // Nulificar plan_type en tiendas con contrato vencido
+  const { error: planErr } = await supabase
+    .from('stores')
+    .update({ plan_type: null })
+    .not('contract_expiry_date', 'is', null)
+    .lt('contract_expiry_date', today)
+    .not('plan_type', 'is', null)
+
+  if (planErr) {
+    console.error('[kill-switch] plan nullify error:', planErr.message)
+  }
+
   const result = {
     message: 'Kill-Switch applied successfully',
     date: today,

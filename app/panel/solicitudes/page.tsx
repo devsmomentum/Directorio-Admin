@@ -456,12 +456,6 @@ function PaymentDetailModal({
           </div>
         )}
 
-        {row.notes && (
-          <DetailRow label="Notas">
-            <pre className="whitespace-pre-wrap text-[11px] text-white/60 font-sans">{row.notes}</pre>
-          </DetailRow>
-        )}
-
         {isPaymentPending && (
           <ApproveRejectFooter
             rejectReason={rejectReason}

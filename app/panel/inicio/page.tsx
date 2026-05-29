@@ -154,25 +154,7 @@ export default function DashboardPage() {
                 <span className="text-red-400 text-sm">{offline} kiosco{offline > 1 ? 's' : ''} sin conexion</span>
               </div>
             )}
-            {notifications.length > 0 && (
-              <Link
-                href="/panel/campanias?highlight=expiring"
-                className="flex items-start gap-2 bg-purple-500/5 hover:bg-purple-500/10 border border-purple-500/20 hover:border-purple-500/40 rounded-lg px-4 py-2.5 transition-colors group"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1" />
-                <div className="space-y-1 flex-1 min-w-0">
-                  <p className="text-purple-300 text-sm font-medium flex items-center gap-1.5">
-                    Campanas por vencer ({notifications.length})
-                    <svg className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </p>
-                  {notifications.map(n => (
-                    <p key={n.id} className="text-purple-200/80 text-xs truncate">{n.message || n.title}</p>
-                  ))}
-                </div>
-              </Link>
-            )}
+            
           </div>
         </div>
       )}

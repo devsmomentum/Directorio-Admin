@@ -388,12 +388,12 @@ function CampaniasAdminInner() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-end justify-between">
-        <div>
+      <div className="flex items-end justify-between flex-wrap gap-y-3">
+        <div className="min-w-0">
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Publicidad</p>
           <h2 className="text-2xl font-bold text-white">Campañas Publicitarias</h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button onClick={fetchData} disabled={refreshing} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 disabled:opacity-50">
             <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             {refreshing ? 'Actualizando...' : 'Actualizar'}
@@ -408,7 +408,7 @@ function CampaniasAdminInner() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-white/[0.03] border border-white/5 rounded-lg p-1 w-fit">
+      <div className="flex flex-wrap gap-1 bg-white/[0.03] border border-white/5 rounded-lg p-1 w-fit">
         <button
           onClick={() => setActiveTab('campaigns')}
           className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'campaigns' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25' : 'text-white/40 hover:text-white/70'}`}
@@ -437,7 +437,7 @@ function CampaniasAdminInner() {
               : 'bg-white/[0.03] border-white/10'
           }`}>
             <div className="flex items-center justify-between flex-wrap gap-4">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 <div>
                   <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-0.5">Loop actual</p>
                   <p className="text-white font-mono text-xl">
