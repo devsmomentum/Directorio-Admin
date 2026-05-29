@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
+import { logAdminAction } from '../../../lib/audit';
 import Pagination, { usePagination } from '../../components/Pagination';
 
 // Planes BASE asignables a una tienda (PDF "PLANES DIRECTORIOS").
@@ -372,10 +373,26 @@ export default function TiendasCRUD() {
       if (editingId) {
         const { error } = await supabase.from('stores').update(storeData).eq('id', editingId);
         if (error) throw error;
+        await logAdminAction({
+          action_type: 'EDITAR',
+          entity_type: 'tienda',
+          entity_id: editingId,
+          entity_name: storeData.name,
+          details: storeData
+        });
       } else {
         const { data: inserted, error } = await supabase.from('stores').insert([storeData]).select('id').single();
         if (error) throw error;
         storeId = inserted?.id ?? null;
+        if (storeId) {
+          await logAdminAction({
+            action_type: 'CREAR',
+            entity_type: 'tienda',
+            entity_id: storeId,
+            entity_name: storeData.name,
+            details: storeData
+          });
+        }
       }
 
       // La vinculación tienda↔cliente y el envío de magic links se hace en
@@ -434,8 +451,17 @@ export default function TiendasCRUD() {
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Eliminar esta tienda?')) {
+    const store = stores.find((s) => s.id === id);
+    const storeName = store ? store.name : 'Desconocida';
+    if (confirm(`Eliminar esta tienda "${storeName}"?`)) {
       await supabase.from('stores').delete().eq('id', id);
+      await logAdminAction({
+        action_type: 'ELIMINAR',
+        entity_type: 'tienda',
+        entity_id: id,
+        entity_name: storeName,
+        details: { name: storeName }
+      });
       fetchData();
     }
   };
@@ -1207,7 +1233,9 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
   const [impressionsDaily, setImpressionsDaily] = useState<any[]>([]);
-  const [events, setEvents] = useState<any[]>([]);
+  const [interactions, setInteractions] = useState<any[]>([]);
+  const [searchRows, setSearchRows] = useState<any[]>([]);
+  const [couponStats, setCouponStats] = useState<any[]>([]);
   const [linkedUser, setLinkedUser] = useState<any>(null);
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -1265,39 +1293,35 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         if (rangeStart) impQuery = impQuery.gte('day', rangeStart.split('T')[0]);
         const impRes = await impQuery;
 
-        // 3) Eventos K2 ligados a la tienda: por item_id (storeId/couponId/campaignId)
-        //    o por item_name = nombre de la tienda.
-        const idsForEvents = [store.id, ...couponIds, ...campaignIds].filter(Boolean);
-        const evBaseSelect = 'id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data';
-        const queries: any[] = [];
+        // 3) Métricas K2 de la tienda desde los AGREGADOS diarios (las tablas
+        //    crudas se purgan a los 30 días, así que ya no se consultan):
+        //      • interaction_daily_stats → clicks/selects/navegación (store_id)
+        //      • search_daily_stats      → veces buscada (store_id_target)
+        //      • coupon_daily_stats      → apariciones/canjes de cupón (store_id)
+        const startDay = rangeStart ? rangeStart.split('T')[0] : null;
 
-        if (idsForEvents.length) {
-          let q1: any = supabase.from('analytics_events').select(evBaseSelect)
-            .in('item_id', idsForEvents)
-            .order('created_at', { ascending: false })
-            .limit(5000);
-          if (rangeStart) q1 = q1.gte('created_at', rangeStart);
-          queries.push(q1);
-        }
-        let q2: any = supabase.from('analytics_events').select(evBaseSelect)
-          .eq('item_name', store.name)
-          .order('created_at', { ascending: false })
-          .limit(5000);
-        if (rangeStart) q2 = q2.gte('created_at', rangeStart);
-        queries.push(q2);
+        let interQ: any = supabase.from('interaction_daily_stats')
+          .select('date, kiosk_id, module, event_type, item_id, item_name, count')
+          .eq('store_id', store.id);
+        if (startDay) interQ = interQ.gte('date', startDay);
 
-        const evResults: any[] = await Promise.all(queries);
+        let searchQ: any = supabase.from('search_daily_stats')
+          .select('date, search_term, search_count')
+          .eq('store_id_target', store.id);
+        if (startDay) searchQ = searchQ.gte('date', startDay);
+
+        let couponQ: any = supabase.from('coupon_daily_stats')
+          .select('coupon_id, date, shown, clicks, redeemed')
+          .eq('store_id', store.id);
+        if (startDay) couponQ = couponQ.gte('date', startDay);
+
+        const [interRes, searchRes, couponRes] = await Promise.all([interQ, searchQ, couponQ]);
         if (cancelled) return;
 
-        const dedup = new Map<string, any>();
-        for (const r of evResults) {
-          for (const e of (r.data || [])) dedup.set(e.id, e);
-        }
-
         setImpressionsDaily(impRes.data || []);
-        setEvents(Array.from(dedup.values()).sort((a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ));
+        setInteractions(interRes.data || []);
+        setSearchRows(searchRes.data || []);
+        setCouponStats(couponRes.data || []);
       } catch (err) {
         console.error('StoreDetailModal fetch error:', err);
       } finally {
@@ -1326,51 +1350,44 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   const flashCoupons = useMemo(() => coupons.filter(c => FLASH_PLAN_SET.has(c.plan_type)), [coupons]);
   const activeFlashCoupons = useMemo(() => activeCoupons.filter(c => FLASH_PLAN_SET.has(c.plan_type)), [activeCoupons]);
 
-  const flashCouponIds = useMemo(() => new Set(flashCoupons.map(c => c.id)), [flashCoupons]);
-  const campaignIdsSet = useMemo(() => new Set(campaigns.map(c => c.id)), [campaigns]);
-
   const flashShownCount = useMemo(() =>
-    events.filter(e => e.event_type === 'flash_coupon_shown' && (
-      flashCouponIds.has(e.item_id) || e.item_name === store.name
-    )).length,
-    [events, flashCouponIds, store.name]);
+    couponStats.reduce((s, r) => s + (r.shown || 0), 0),
+    [couponStats]);
 
   const campaignImpressionsTotal = useMemo(() =>
     impressionsDaily.reduce((s, d) => s + (d.count || 0), 0),
     [impressionsDaily]);
 
   const storeClicks = useMemo(() =>
-    events.filter(e => (e.event_type === 'click' || e.event_type === 'tap') && (
-      e.item_id === store.id || e.item_name === store.name
-    )).length,
-    [events, store.id, store.name]);
+    searchRows
+      .filter(r => r.search_term === '(directo)' || r.search_term === '(mapa)')
+      .reduce((s, r) => s + (r.search_count || 0), 0),
+    [searchRows]);
 
   const searchClickCount = useMemo(() =>
-    events.filter(e => e.event_type === 'search_click' && (
-      e.item_id === store.id || e.item_name === store.name
-    )).length,
-    [events, store.id, store.name]);
+    searchRows
+      .filter(r => r.search_term !== '(directo)' && r.search_term !== '(mapa)')
+      .reduce((s, r) => s + (r.search_count || 0), 0),
+    [searchRows]);
 
   const topSearchQueries = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const e of events) {
-      if (e.event_type !== 'search_click') continue;
-      if (e.item_id !== store.id && e.item_name !== store.name) continue;
-      const q = String(e.event_data?.query || '').trim().toLowerCase();
-      if (!q) continue;
-      counts.set(q, (counts.get(q) || 0) + 1);
+    for (const r of searchRows) {
+      const q = String(r.search_term || '').trim();
+      if (!q || q === '(directo)' || q === '(mapa)') continue;
+      counts.set(q, (counts.get(q) || 0) + (r.search_count || 0));
     }
     return Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
-  }, [events, store.id, store.name]);
+  }, [searchRows]);
 
   const uniqueKiosks = useMemo(() => {
     const set = new Set<string>();
     for (const d of impressionsDaily) if (d.kiosk_id) set.add(d.kiosk_id);
-    for (const e of events) if (e.kiosk_id) set.add(e.kiosk_id);
+    for (const e of interactions) if (e.kiosk_id) set.add(e.kiosk_id);
     return set.size;
-  }, [impressionsDaily, events]);
+  }, [impressionsDaily, interactions]);
 
   // ── Agregados analíticos (todos respetan el rango seleccionado) ──────────
   const analyticsBreakdown = useMemo(() => {
@@ -1381,15 +1398,35 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     let first: string | null = null;
     let last: string | null = null;
 
-    for (const e of events) {
-      byType[e.event_type] = (byType[e.event_type] || 0) + 1;
+    for (const e of interactions) {
+      const n = e.count || 0;
+      byType[e.event_type] = (byType[e.event_type] || 0) + n;
       const mod = e.module || '(sin módulo)';
-      byModule[mod] = (byModule[mod] || 0) + 1;
-      if (e.kiosk_id) byKiosk[e.kiosk_id] = (byKiosk[e.kiosk_id] || 0) + 1;
-      const day = (e.created_at || '').split('T')[0];
-      if (day) daySet.add(day);
-      if (!first || e.created_at < first) first = e.created_at;
-      if (!last || e.created_at > last) last = e.created_at;
+      byModule[mod] = (byModule[mod] || 0) + n;
+      if (e.kiosk_id) byKiosk[e.kiosk_id] = (byKiosk[e.kiosk_id] || 0) + n;
+      const day = e.date as string;
+      if (day) {
+        daySet.add(day);
+        if (!first || day < first) first = day;
+        if (!last || day > last) last = day;
+      }
+    }
+
+    // Sintetizamos los clicks directos y búsquedas que ahora viven en searchRows (search_daily_stats)
+    for (const r of searchRows) {
+      const n = r.search_count || 0;
+      const isDirect = r.search_term === '(directo)' || r.search_term === '(mapa)';
+      const type = isDirect ? 'click' : 'search_click';
+      const mod = 'directory';
+
+      byType[type] = (byType[type] || 0) + n;
+      byModule[mod] = (byModule[mod] || 0) + n;
+      const day = r.date as string;
+      if (day) {
+        daySet.add(day);
+        if (!first || day < first) first = day;
+        if (!last || day > last) last = day;
+      }
     }
 
     const impByCampaign: Record<string, number> = {};
@@ -1400,15 +1437,13 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     }
 
     const flashByCoupon: Record<string, number> = {};
-    for (const e of events) {
-      if (e.event_type !== 'flash_coupon_shown') continue;
-      const cid = e.item_id || '';
-      if (!flashCouponIds.has(cid)) continue;
-      flashByCoupon[cid] = (flashByCoupon[cid] || 0) + 1;
+    for (const r of couponStats) {
+      if (!r.shown) continue;
+      flashByCoupon[r.coupon_id] = (flashByCoupon[r.coupon_id] || 0) + r.shown;
     }
 
     return { byType, byModule, byKiosk, daySet, first, last, impByCampaign, impByKiosk, flashByCoupon };
-  }, [events, impressionsDaily, flashCouponIds]);
+  }, [interactions, searchRows, impressionsDaily, couponStats]);
 
   // ── Exportadores K2 ───────────────────────────────────────────────────────
   const slug = slugify(store.name);
@@ -1424,7 +1459,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
 
   const exportSummary = () => {
     const { byType, byModule, byKiosk, daySet, first, last, impByCampaign, impByKiosk, flashByCoupon } = analyticsBreakdown;
-    const eventsTotal = events.length;
+    const eventsTotal = interactions.reduce((s, e) => s + (e.count || 0), 0);
     const activeDays = daySet.size;
     const avgPerDay = activeDays ? (eventsTotal / activeDays) : 0;
     const campNameById: Record<string, string> = {};
@@ -1494,20 +1529,38 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   };
 
   const exportEvents = () => {
-    if (!events.length) { alert('Sin eventos K2 en el rango.'); return; }
-    const rows = events.map(e => [
-      e.id,
-      new Date(e.created_at).toISOString(),
-      e.event_type,
-      e.module || '',
-      e.item_id || '',
-      e.item_name || '',
-      e.kiosk_id || '',
-      flashCouponIds.has(e.item_id) ? 'flash' : campaignIdsSet.has(e.item_id) ? 'campaign' : e.item_id === store.id ? 'store' : 'related',
-      e.event_data ? JSON.stringify(e.event_data) : '',
-    ]);
-    downloadCSV(`K2_${slug}_eventos_${stamp}.csv`,
-      ['event_id', 'fecha_iso', 'event_type', 'module', 'item_id', 'item_name', 'kiosk_id', 'origen', 'event_data_json'],
+    if (!interactions.length && !searchRows.length) { alert('Sin interacciones K2 en el rango.'); return; }
+    const rows: any[] = [];
+    
+    interactions.forEach(e => {
+      rows.push([
+        e.date,
+        e.event_type,
+        e.module || '',
+        e.item_id || '',
+        e.item_name || '',
+        e.kiosk_id || '',
+        String(e.count ?? 0),
+      ]);
+    });
+
+    searchRows.forEach(r => {
+      const isDirect = r.search_term === '(directo)' || r.search_term === '(mapa)';
+      rows.push([
+        r.date,
+        isDirect ? 'click' : 'search_click',
+        'directory',
+        store.id,
+        isDirect ? `Click ${r.search_term}` : `Búsqueda: ${r.search_term}`,
+        'N/A',
+        String(r.search_count ?? 0),
+      ]);
+    });
+
+    rows.sort((a, b) => (a[0] < b[0] ? 1 : -1));
+
+    downloadCSV(`K2_${slug}_interacciones_diarias_${stamp}.csv`,
+      ['fecha', 'event_type', 'module', 'item_id', 'item_name', 'kiosk_id', 'cantidad'],
       rows);
   };
 
@@ -1732,7 +1785,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                     {coupons.map(c => {
                       const isFlash = FLASH_PLAN_SET.has(c.plan_type);
                       const shown = isFlash
-                        ? events.filter(e => e.event_type === 'flash_coupon_shown' && e.item_id === c.id).length
+                        ? couponStats.filter(s => s.coupon_id === c.id).reduce((sum, s) => sum + (s.shown || 0), 0)
                         : 0;
                       const live = (!c.end_date || c.end_date.split('T')[0] >= today) &&
                         (!c.start_date || c.start_date.split('T')[0] <= today);
@@ -1815,7 +1868,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                 className="px-3 py-2.5 text-xs font-medium bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 rounded-lg transition-colors disabled:opacity-40">
                 Impresiones diarias
               </button>
-              <button onClick={exportEvents} disabled={loading || !events.length}
+              <button onClick={exportEvents} disabled={loading || !interactions.length}
                 className="px-3 py-2.5 text-xs font-medium bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 text-pink-300 rounded-lg transition-colors disabled:opacity-40">
                 Eventos K2
               </button>

@@ -74,7 +74,7 @@ export default function ClienteTutorialPage() {
           <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/20 rounded-xl p-5">
             <p className="text-[10px] text-amber-300 uppercase tracking-widest font-bold mb-2">🎟️ Cupón</p>
             <h4 className="text-white font-bold mb-1">Tarjeta de la cuponera</h4>
-            <p className="text-[10px] text-white/40 mt-0.5">Cupón normal o ⚡ Flash</p>
+            <p className="text-[10px] text-white/40 mt-0.5">⚡ Cupón Flash </p>
             <div className="space-y-2 mt-4">
               <Spec label="Resolución" value="1200 × 900 px (4:3)" />
               <Spec label="Formato" value=".PNG o .JPG" />

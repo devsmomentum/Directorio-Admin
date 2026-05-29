@@ -3,16 +3,33 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 
-type AnalyticsEvent = {
-  id: string;
-  kiosk_id: string;
-  event_type: string;
+// Fila del agregado diario de interacciones (migración 028). Reemplaza el
+// consumo crudo de analytics_events (que ahora se purga a los 30 días).
+type InteractionDaily = {
+  date: string;
+  kiosk_id: string | null;
   module: string;
+  event_type: string;
   item_id?: string | null;
-  item_name: string;
-  created_at: string;
-  event_data?: unknown;
+  item_name?: string | null;
+  store_id?: string | null;
+  count: number;
 };
+
+type SearchDaily = {
+  date: string;
+  store_id_target: string | null;
+  search_term: string;
+  search_count: number;
+};
+
+type CouponDaily = {
+  date: string;
+  store_id: string | null;
+  shown: number;
+};
+
+type StoreLite = { id: string; name: string };
 
 type Kiosk = {
   id: string;
@@ -59,7 +76,10 @@ export default function AnalyticsDashboard() {
   const [periodFilter, setPeriodFilter] = useState<'day' | 'week' | 'month' | 'all'>('week');
 
   const [kiosks, setKiosks] = useState<Kiosk[]>([]);
-  const [allEvents, setAllEvents] = useState<AnalyticsEvent[]>([]);
+  const [interactions, setInteractions] = useState<InteractionDaily[]>([]);
+  const [searchDaily, setSearchDaily] = useState<SearchDaily[]>([]);
+  const [couponDaily, setCouponDaily] = useState<CouponDaily[]>([]);
+  const [stores, setStores] = useState<StoreLite[]>([]);
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [impressionTotals, setImpressionTotals] = useState<CampaignImpressionTotals[]>([]);
@@ -74,18 +94,34 @@ export default function AnalyticsDashboard() {
     try {
       const [
         { data: ks },
-        { data: analytics },
+        { data: interData },
+        { data: searchData },
+        { data: couponData },
+        { data: storeData },
         { data: campData },
         { data: totals },
         { data: daily },
       ] = await Promise.all([
         supabase.from('kiosks').select('*'),
-        // analytics_events ahora solo trae clicks/navegación (no impresiones)
+        // Interacciones (clicks/búsquedas/navegación) ya agregadas por día.
         supabase
-          .from('analytics_events')
-          .select('id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data')
-          .order('created_at', { ascending: false })
-          .limit(3000),
+          .from('interaction_daily_stats')
+          .select('date, kiosk_id, module, event_type, item_id, item_name, store_id, count')
+          .order('date', { ascending: false })
+          .limit(50000),
+        // "Clic post-búsqueda" + "tiendas más buscadas" salen del agregado de búsquedas.
+        supabase
+          .from('search_daily_stats')
+          .select('date, store_id_target, search_term, search_count')
+          .order('date', { ascending: false })
+          .limit(50000),
+        // "Flash Coupons" = apariciones de cupón (shown) del agregado de cupones.
+        supabase
+          .from('coupon_daily_stats')
+          .select('date, store_id, shown')
+          .order('date', { ascending: false })
+          .limit(50000),
+        supabase.from('stores').select('id, name'),
         supabase
           .from('ad_campaigns')
           .select('id, brand_name, start_date, end_date, is_active')
@@ -102,7 +138,10 @@ export default function AnalyticsDashboard() {
       ]);
 
       setKiosks(ks || []);
-      setAllEvents((analytics as AnalyticsEvent[]) || []);
+      setInteractions((interData as InteractionDaily[]) || []);
+      setSearchDaily((searchData as SearchDaily[]) || []);
+      setCouponDaily((couponData as CouponDaily[]) || []);
+      setStores((storeData as StoreLite[]) || []);
       setCampaigns((campData as Campaign[]) || []);
       setImpressionTotals((totals as CampaignImpressionTotals[]) || []);
       setImpressionDaily((daily as ImpressionDaily[]) || []);
@@ -134,66 +173,82 @@ export default function AnalyticsDashboard() {
     all:   'todo el histórico',
   }[periodFilter];
 
-  const inPeriod = (iso: string) => {
-    if (!periodStart) return true;
-    return new Date(iso) >= periodStart;
-  };
+  // Fechas en formato YYYY-MM-DD para comparar contra la columna `date` de los
+  // agregados (que el backend calcula en hora America/Caracas).
+  const startStr = periodStart ? periodStart.toLocaleDateString('en-CA') : null;
+  const todayStr = now.toLocaleDateString('en-CA');
+  const inPeriod = (d: string) => !startStr || d >= startStr;
+  const matchKiosk = (k: string | null) => selectedKioskId === 'all' || k === selectedKioskId;
 
-  const kioskFilteredEvents = selectedKioskId === 'all'
-    ? allEvents
-    : allEvents.filter(e => e.kiosk_id === selectedKioskId);
+  const sumCount = <T extends { count?: number; search_count?: number; shown?: number }>(
+    rows: T[], field: 'count' | 'search_count' | 'shown' = 'count',
+  ) => rows.reduce((s, r) => s + ((r[field] as number) || 0), 0);
 
-  const filteredEvents = kioskFilteredEvents.filter(e => inPeriod(e.created_at));
+  // ── Interacciones (clicks / búsquedas / navegación) desde el agregado ───────
+  // clicks       → event_type IN ('click','tap')
+  // búsquedas    → event_type IN ('filter','select')
+  // navegaciones → event_type IN ('navigate','navigation')
+  // El "clic post-búsqueda" y los "flash coupons" viven ahora en sus propios
+  // agregados (search_daily_stats / coupon_daily_stats), que NO tienen dimensión
+  // de kiosko, por lo que esas dos métricas se filtran sólo por período.
+  const isClick  = (e: InteractionDaily) => e.event_type === 'click' || e.event_type === 'tap';
+  const isSearch = (e: InteractionDaily) => e.event_type === 'filter' || e.event_type === 'select';
+  const isNav    = (e: InteractionDaily) => e.event_type === 'navigate' || e.event_type === 'navigation';
 
-  // ── Clasificación por categoría según whitelist ─────────────────────────────
-  // clicks            → event_type IN ('click','tap')
-  // búsquedas         → event_type IN ('filter','select')
-  // clic post-búsqueda → event_type = 'search_click'  (tienda abierta tras tipear)
-  // navegaciones      → event_type IN ('navigate','navigation')
-  // flash coupons     → event_type = 'flash_coupon_shown'
-  const isClick       = (e: AnalyticsEvent) => e.event_type === 'click' || e.event_type === 'tap';
-  const isSearch      = (e: AnalyticsEvent) => e.event_type === 'filter' || e.event_type === 'select';
-  const isSearchClick = (e: AnalyticsEvent) => e.event_type === 'search_click';
-  const isNav         = (e: AnalyticsEvent) => e.event_type === 'navigate' || e.event_type === 'navigation';
-  const isFlash       = (e: AnalyticsEvent) => e.event_type === 'flash_coupon_shown';
+  const filteredInteractions = interactions.filter(r => inPeriod(r.date) && matchKiosk(r.kiosk_id));
 
-  const todayKey = now.toLocaleDateString();
-  const isToday  = (e: AnalyticsEvent) => new Date(e.created_at).toLocaleDateString() === todayKey;
+  const clickRows       = filteredInteractions.filter(isClick);
+  const searchRows      = filteredInteractions.filter(isSearch);
+  const navRows         = filteredInteractions.filter(isNav);
+  const searchClickRows = searchDaily.filter(r => inPeriod(r.date) && r.search_term !== '(directo)' && r.search_term !== '(mapa)');
+  const directClickRows = searchDaily.filter(r => inPeriod(r.date) && (r.search_term === '(directo)' || r.search_term === '(mapa)'));
+  const flashRows       = couponDaily.filter(r => inPeriod(r.date));
 
-  const clickEvents       = filteredEvents.filter(isClick);
-  const searchEvents      = filteredEvents.filter(isSearch);
-  const searchClickEvents = filteredEvents.filter(isSearchClick);
-  const navEvents         = filteredEvents.filter(isNav);
-  const flashEvents       = filteredEvents.filter(isFlash);
+  const onDay = <T extends { date: string }>(rows: T[]) => rows.filter(r => r.date === todayStr);
 
   const totals = {
-    clicks:       { total: clickEvents.length,       today: clickEvents.filter(isToday).length },
-    searches:     { total: searchEvents.length,      today: searchEvents.filter(isToday).length },
-    searchClicks: { total: searchClickEvents.length, today: searchClickEvents.filter(isToday).length },
-    navs:         { total: navEvents.length,         today: navEvents.filter(isToday).length },
-    flash:        { total: flashEvents.length,       today: flashEvents.filter(isToday).length },
+    clicks:       { total: sumCount(clickRows) + sumCount(directClickRows, 'search_count'),                       today: sumCount(onDay(clickRows)) + sumCount(onDay(directClickRows), 'search_count') },
+    searches:     { total: sumCount(searchRows),                      today: sumCount(onDay(searchRows)) },
+    searchClicks: { total: sumCount(searchClickRows, 'search_count'), today: sumCount(onDay(searchClickRows), 'search_count') },
+    navs:         { total: sumCount(navRows),                         today: sumCount(onDay(navRows)) },
+    flash:        { total: sumCount(flashRows, 'shown'),              today: sumCount(onDay(flashRows), 'shown') },
   };
 
-  // Rankings por categoría
-  const countBy = (events: AnalyticsEvent[]) => {
+  // Rankings por nombre de item (suma de count del agregado).
+  const rankByName = (rows: InteractionDaily[], limit = 5): RankItem[] => {
     const acc: Record<string, number> = {};
-    events.forEach(e => { acc[e.item_name] = (acc[e.item_name] || 0) + 1; });
-    return acc;
-  };
-  const toRanking = (counts: Record<string, number>, limit = 5): RankItem[] =>
-    Object.entries(counts).map(([name, count]) => ({ name, count }))
+    rows.forEach(r => { const n = r.item_name || '(sin nombre)'; acc[n] = (acc[n] || 0) + (r.count || 0); });
+    
+    // Sumamos los clicks directos/mapa desde searchDaily
+    directClickRows.forEach(r => {
+      const n = storeNameById(r.store_id_target);
+      acc[n] = (acc[n] || 0) + (r.search_count || 0);
+    });
+
+    return Object.entries(acc).map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count).slice(0, limit);
+  };
 
-  const topClicks         = toRanking(countBy(clickEvents));
-  const topSearches       = toRanking(countBy(searchEvents));
-  const topSearchedStores = toRanking(countBy(searchClickEvents));
-  const topSections       = toRanking(countBy(navEvents));
+  const topClicks   = rankByName(clickRows);
+  const topSearches = rankByName(searchRows);
+  const topSections = rankByName(navRows);
 
-  // Tráfico por kiosco: solo interacciones reales (whitelist completo)
-  const interactionEvents = filteredEvents.filter(e => isClick(e) || isSearch(e) || isSearchClick(e) || isNav(e) || isFlash(e));
+  // Tiendas más buscadas: agrupar search_daily_stats por store destino.
+  const storeNameById = (id: string | null) => stores.find(s => s.id === id)?.name || 'Desconocido';
+  const searchByStore: Record<string, number> = {};
+  searchClickRows.forEach(r => {
+    if (!r.store_id_target) return;
+    searchByStore[r.store_id_target] = (searchByStore[r.store_id_target] || 0) + (r.search_count || 0);
+  });
+  const topSearchedStores: RankItem[] = Object.entries(searchByStore)
+    .map(([id, count]) => ({ name: storeNameById(id), count }))
+    .sort((a, b) => b.count - a.count).slice(0, 5);
+
+  // Tráfico por kiosco (clicks + búsquedas + navegación; search_click/flash no
+  // tienen kiosko en el agregado).
   const kioskActivity: Record<string, number> = {};
-  interactionEvents.forEach(event => {
-    if (event.kiosk_id) kioskActivity[event.kiosk_id] = (kioskActivity[event.kiosk_id] || 0) + 1;
+  filteredInteractions.forEach(r => {
+    if (r.kiosk_id) kioskActivity[r.kiosk_id] = (kioskActivity[r.kiosk_id] || 0) + (r.count || 0);
   });
   const topKiosksActivity: RankItem[] = Object.entries(kioskActivity).map(([kId, count]) => {
     const m = kiosks.find(k => k.id === kId);
@@ -251,12 +306,12 @@ export default function AnalyticsDashboard() {
     const byKioskModule: Record<string, Record<string, number>> = {};
     const moduleTotals: Record<string, number> = {};
 
-    filteredEvents.forEach(e => {
+    filteredInteractions.forEach(e => {
       if (!e.kiosk_id || !e.module) return;
       const mod = e.module.toLowerCase();
       if (!byKioskModule[e.kiosk_id]) byKioskModule[e.kiosk_id] = {};
-      byKioskModule[e.kiosk_id][mod] = (byKioskModule[e.kiosk_id][mod] || 0) + 1;
-      moduleTotals[mod] = (moduleTotals[mod] || 0) + 1;
+      byKioskModule[e.kiosk_id][mod] = (byKioskModule[e.kiosk_id][mod] || 0) + (e.count || 0);
+      moduleTotals[mod] = (moduleTotals[mod] || 0) + (e.count || 0);
     });
 
     const topModules = Object.entries(moduleTotals)
@@ -292,7 +347,7 @@ export default function AnalyticsDashboard() {
     });
 
     return { topModules, rows, globalMax };
-  }, [filteredEvents, kiosks]);
+  }, [filteredInteractions, kiosks]);
 
   const exportCSV = (headers: string[], rows: string[][], filename: string) => {
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -307,11 +362,11 @@ export default function AnalyticsDashboard() {
   };
 
   const handleExportTraffic = () => {
-    if (!filteredEvents.length) return alert('No hay eventos para exportar.');
-    const headers = ['ID', 'Tipo', 'Modulo', 'Elemento', 'Kiosco ID', 'Kiosco', 'Fecha'];
-    const rows = filteredEvents.map(e => {
+    if (!filteredInteractions.length) return alert('No hay interacciones para exportar.');
+    const headers = ['Fecha', 'Tipo', 'Modulo', 'Elemento', 'Kiosco ID', 'Kiosco', 'Cantidad'];
+    const rows = filteredInteractions.map(e => {
       const k = kiosks.find(k => k.id === e.kiosk_id);
-      return [e.id, e.event_type, e.module, `"${e.item_name}"`, e.kiosk_id || 'N/A', `"${k?.name || 'Desconocido'}"`, new Date(e.created_at).toLocaleString()];
+      return [e.date, e.event_type, e.module, `"${e.item_name || ''}"`, e.kiosk_id || 'N/A', `"${k?.name || 'Desconocido'}"`, String(e.count)];
     });
     exportCSV(headers, rows, `Trafico_${new Date().toISOString().split('T')[0]}.csv`);
   };

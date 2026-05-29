@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { logAdminAction } from '../../../lib/audit';
 import { removePublicidadFile } from '../../../lib/storage';
 import Pagination, { usePagination } from '../../components/Pagination';
 
@@ -297,17 +298,35 @@ export default function CuponsAdminPage() {
 
       if (publicUrl) couponData.image_url = publicUrl;
 
+      let couponId: string | null = editingCouponId;
       if (editingCouponId) {
         const { error } = await supabase.from('coupons').update(couponData).eq('id', editingCouponId);
         if (error) throw error;
+        await logAdminAction({
+          action_type: 'EDITAR',
+          entity_type: 'cupón',
+          entity_id: editingCouponId,
+          entity_name: couponData.title,
+          details: couponData
+        });
         if (imageFile && previousImageUrl && previousImageUrl !== publicUrl) {
           await removePublicidadFile(previousImageUrl);
         }
       } else {
         const storeName = stores.find(s => s.id === selectedStoreId)?.name || 'GENERICO';
         couponData.code = `CUPON-${storeName.substring(0, 3).toUpperCase()}-${Date.now().toString().substring(7)}`;
-        const { error } = await supabase.from('coupons').insert([couponData]);
+        const { data: inserted, error } = await supabase.from('coupons').insert([couponData]).select('id').single();
         if (error) throw error;
+        couponId = inserted?.id ?? null;
+        if (couponId) {
+          await logAdminAction({
+            action_type: 'CREAR',
+            entity_type: 'cupón',
+            entity_id: couponId,
+            entity_name: couponData.title,
+            details: couponData
+          });
+        }
       }
 
       resetForm();
@@ -324,6 +343,13 @@ export default function CuponsAdminPage() {
     const coupon = coupons.find(c => c.id === id);
     const { error } = await supabase.from('coupons').delete().eq('id', id);
     if (error) { alert(error.message); return; }
+    await logAdminAction({
+      action_type: 'ELIMINAR',
+      entity_type: 'cupón',
+      entity_id: id,
+      entity_name: coupon?.title || coupon?.code || 'Desconocido',
+      details: { title: coupon?.title, code: coupon?.code }
+    });
     await removePublicidadFile(coupon?.image_url);
     fetchData();
   };
@@ -353,7 +379,16 @@ export default function CuponsAdminPage() {
       .update({ is_active: !coupon.is_active })
       .eq('id', coupon.id);
     if (error) alert(error.message);
-    else fetchData();
+    else {
+      await logAdminAction({
+        action_type: !coupon.is_active ? 'ACTIVAR' : 'DESACTIVAR',
+        entity_type: 'cupón',
+        entity_id: coupon.id,
+        entity_name: coupon.title || coupon.code,
+        details: { is_active: !coupon.is_active }
+      });
+      fetchData();
+    }
   };
 
   if (loading) {

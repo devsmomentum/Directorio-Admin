@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
+import { logAdminAction } from '../../../lib/audit';
 import { removePublicidadFile } from '../../../lib/storage';
 import Pagination, { usePagination } from '../../components/Pagination';
 import KioskAssignment from './KioskAssignment';
@@ -312,15 +313,33 @@ function CampaniasAdminInner() {
         store_id: storeId || null,
       };
 
+      let campId: string | null = editingId;
       if (editingId) {
         const { error } = await supabase.from('ad_campaigns').update(payload).eq('id', editingId);
         if (error) throw error;
+        await logAdminAction({
+          action_type: 'EDITAR',
+          entity_type: 'campaña',
+          entity_id: editingId,
+          entity_name: payload.brand_name,
+          details: payload
+        });
         if (mediaFile && previousMediaUrl && previousMediaUrl !== finalUrl) {
           await removePublicidadFile(previousMediaUrl);
         }
       } else {
-        const { error } = await supabase.from('ad_campaigns').insert([payload]);
+        const { data: inserted, error } = await supabase.from('ad_campaigns').insert([payload]).select('id').single();
         if (error) throw error;
+        campId = inserted?.id ?? null;
+        if (campId) {
+          await logAdminAction({
+            action_type: 'CREAR',
+            entity_type: 'campaña',
+            entity_id: campId,
+            entity_name: payload.brand_name,
+            details: payload
+          });
+        }
       }
 
       resetForm();
@@ -335,8 +354,17 @@ function CampaniasAdminInner() {
   const handleDelete = async (id: string, url: string) => {
     if (!confirm('Eliminar campaña permanentemente?')) return;
     try {
+      const camp = campaigns.find(c => c.id === id);
+      const campName = camp ? camp.brand_name : 'Desconocida';
       const { error } = await supabase.from('ad_campaigns').delete().eq('id', id);
       if (error) throw error;
+      await logAdminAction({
+        action_type: 'ELIMINAR',
+        entity_type: 'campaña',
+        entity_id: id,
+        entity_name: campName,
+        details: { brand_name: campName }
+      });
       await removePublicidadFile(url);
       fetchData();
     } catch (err: any) {
@@ -351,6 +379,15 @@ function CampaniasAdminInner() {
     }
     const { error } = await supabase.from('ad_campaigns').update({ is_active: !current }).eq('id', id);
     if (!error) {
+      const camp = campaigns.find(c => c.id === id);
+      const campName = camp ? camp.brand_name : 'Desconocida';
+      await logAdminAction({
+        action_type: !current ? 'ACTIVAR' : 'DESACTIVAR',
+        entity_type: 'campaña',
+        entity_id: id,
+        entity_name: campName,
+        details: { is_active: !current }
+      });
       setCampaigns(prev => prev.map(c => c.id === id ? { ...c, is_active: !current } : c));
     }
   };

@@ -77,7 +77,6 @@ function LoginInner() {
           variant="mix"
           wordSize="md"
           tileSize={36}
-          tagline="Portal · Multi-mall · v2.4"
         />
         <ThemeToggle />
       </header>
@@ -177,7 +176,7 @@ function LoginInner() {
                   className="relative space-y-4"
                   noValidate
                 >
-                  <Field label="Correo electrónico" htmlFor="email" code="A1">
+                  <Field label="Correo electrónico" htmlFor="email">
                     <div className="relative">
                       <Icon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-faint">
                         <path d="M3 8l9 6 9-6M5 19h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2z" />
@@ -202,7 +201,6 @@ function LoginInner() {
                   <Field
                     label="Contraseña"
                     htmlFor="password"
-                    code="A2"
                     right={
                       <button
                         type="button"
@@ -272,9 +270,7 @@ function LoginInner() {
                   </button>
 
                   <div className="flex items-center justify-between pt-1">
-                    <span className="font-mono text-[9px] uppercase tracking-[0.28em] text-fg-faint">
-                      cifrado
-                    </span>
+
                     <button
                       type="button"
                       onClick={async () => {

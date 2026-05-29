@@ -50,7 +50,8 @@ export default function ClienteDashboardPage() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
   const [impressions, setImpressions] = useState<any[]>([]);
-  const [events, setEvents] = useState<any[]>([]);
+  const [searchRows, setSearchRows] = useState<any[]>([]);
+  const [couponRows, setCouponRows] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [range, setRange] = useState<Range>('30d');
   const [loading, setLoading] = useState(true);
@@ -96,29 +97,27 @@ export default function ClienteDashboardPage() {
         if (start) impQ = impQ.gte('day', start.split('T')[0]);
         const impRes = await impQ;
 
-        const ids = [store.id, ...camps.map(c => c.id), ...cps.map(c => c.id)].filter(Boolean);
-        const evSelect = 'id, kiosk_id, event_type, module, item_id, item_name, created_at, event_data';
-        const evQueries: any[] = [];
-        if (ids.length) {
-          let q1: any = supabase.from('analytics_events').select(evSelect)
-            .in('item_id', ids).order('created_at', { ascending: false }).limit(5000);
-          if (start) q1 = q1.gte('created_at', start);
-          evQueries.push(q1);
-        }
-        let q2: any = supabase.from('analytics_events').select(evSelect)
-          .eq('item_name', store.name).order('created_at', { ascending: false }).limit(5000);
-        if (start) q2 = q2.gte('created_at', start);
-        evQueries.push(q2);
-        const evResults = await Promise.all(evQueries);
+        // Métricas de la tienda desde los agregados diarios (las tablas crudas
+        // ya no se consultan: se purgan a los 30 días). El RLS deja a la tienda
+        // ver sólo sus propias filas.
+        const startDay = start ? start.split('T')[0] : null;
+
+        let searchQ: any = supabase.from('search_daily_stats')
+          .select('date, search_term, search_count')
+          .eq('store_id_target', store.id);
+        if (startDay) searchQ = searchQ.gte('date', startDay);
+
+        let couponQ: any = supabase.from('coupon_daily_stats')
+          .select('date, shown, redeemed')
+          .eq('store_id', store.id);
+        if (startDay) couponQ = couponQ.gte('date', startDay);
+
+        const [searchRes, couponRes] = await Promise.all([searchQ, couponQ]);
         if (cancelled) return;
 
-        const dedup = new Map<string, any>();
-        for (const r of evResults) for (const e of (r.data || [])) dedup.set(e.id, e);
-
         setImpressions(impRes.data || []);
-        setEvents(Array.from(dedup.values()).sort((a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ));
+        setSearchRows(searchRes.data || []);
+        setCouponRows(couponRes.data || []);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -130,27 +129,26 @@ export default function ClienteDashboardPage() {
     impressions.reduce((s, d) => s + (d.count || 0), 0), [impressions]);
 
   const storeClicks = useMemo(() =>
-    events.filter(e => (e.event_type === 'click' || e.event_type === 'tap') &&
-      (e.item_id === store?.id || e.item_name === store?.name)).length,
-    [events, store]);
+    searchRows
+      .filter(r => r.search_term === '(directo)' || r.search_term === '(mapa)')
+      .reduce((s, r) => s + (r.search_count || 0), 0),
+    [searchRows]);
 
   const searchClicks = useMemo(() =>
-    events.filter(e => e.event_type === 'search_click' &&
-      (e.item_id === store?.id || e.item_name === store?.name)).length,
-    [events, store]);
+    searchRows
+      .filter(r => r.search_term !== '(directo)' && r.search_term !== '(mapa)')
+      .reduce((s, r) => s + (r.search_count || 0), 0),
+    [searchRows]);
 
-  const flashShown = useMemo(() => {
-    const couponIds = new Set(coupons.map(c => c.id));
-    return events.filter(e => e.event_type === 'flash_coupon_shown' &&
-      (couponIds.has(e.item_id) || e.item_name === store?.name)).length;
-  }, [events, coupons, store]);
+  const flashShown = useMemo(() =>
+    couponRows.reduce((s, r) => s + (r.shown || 0), 0),
+    [couponRows]);
 
   const uniqueKiosks = useMemo(() => {
     const set = new Set<string>();
     for (const d of impressions) if (d.kiosk_id) set.add(d.kiosk_id);
-    for (const e of events) if (e.kiosk_id) set.add(e.kiosk_id);
     return set.size;
-  }, [impressions, events]);
+  }, [impressions]);
 
   const planVigente = !store?.contract_expiry_date || store.contract_expiry_date >= today;
   const activeCampaign = useMemo(() => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { logAdminAction } from '../../../lib/audit';
 
 const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
@@ -140,17 +141,32 @@ export default function SolicitudesPanelPage() {
     const { error } = await supabase.rpc('admin_approve_plan_payment', { p_transaction_id: row.id });
     setBusy(false);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'APROBAR',
+      entity_type: 'pago',
+      entity_id: row.id,
+      entity_name: row.item_name || 'Pago de Plan',
+      details: { amount_usd: row.amount_usd, transaction_type: row.transaction_type }
+    });
     setFeedback({ type: 'ok', msg: 'Pago aprobado y vencimiento extendido.' });
     setDetail(null);
     fetchData();
   };
   const rejectPayment = async (row: any) => {
     setBusy(true); setFeedback(null);
+    const reasonForLog = rejectReason || null;
     const { error } = await supabase.rpc('admin_reject_plan_payment', {
-      p_transaction_id: row.id, p_reason: rejectReason || null,
+      p_transaction_id: row.id, p_reason: reasonForLog,
     });
     setBusy(false);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'RECHAZAR',
+      entity_type: 'pago',
+      entity_id: row.id,
+      entity_name: row.item_name || 'Pago de Plan',
+      details: { amount_usd: row.amount_usd, reason: reasonForLog }
+    });
     setFeedback({ type: 'ok', msg: 'Pago rechazado.' });
     setDetail(null); setRejectReason('');
     fetchData();
@@ -161,17 +177,32 @@ export default function SolicitudesPanelPage() {
     const { error } = await supabase.rpc('admin_approve_campaign', { p_campaign_id: row.id });
     setBusy(false);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'APROBAR',
+      entity_type: 'campaña',
+      entity_id: row.id,
+      entity_name: row.brand_name,
+      details: { plan_type: row.plan_type }
+    });
     setFeedback({ type: 'ok', msg: 'Campaña aprobada. Ya aparece en el loop del K2.' });
     setDetail(null);
     fetchData();
   };
   const rejectCampaign = async (row: any) => {
     setBusy(true); setFeedback(null);
+    const reasonForLog = rejectReason || null;
     const { error } = await supabase.rpc('admin_reject_campaign', {
-      p_campaign_id: row.id, p_reason: rejectReason || null,
+      p_campaign_id: row.id, p_reason: reasonForLog,
     });
     setBusy(false);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'RECHAZAR',
+      entity_type: 'campaña',
+      entity_id: row.id,
+      entity_name: row.brand_name,
+      details: { plan_type: row.plan_type, reason: reasonForLog }
+    });
     setFeedback({ type: 'ok', msg: 'Campaña rechazada.' });
     setDetail(null); setRejectReason('');
     fetchData();
@@ -182,17 +213,32 @@ export default function SolicitudesPanelPage() {
     const { error } = await supabase.rpc('admin_approve_coupon', { p_coupon_id: row.id });
     setBusy(false);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'APROBAR',
+      entity_type: 'cupón',
+      entity_id: row.id,
+      entity_name: row.title || row.code,
+      details: { plan_type: row.plan_type }
+    });
     setFeedback({ type: 'ok', msg: 'Cupón aprobado. Ya aparece en la galería del K2.' });
     setDetail(null);
     fetchData();
   };
   const rejectCoupon = async (row: any) => {
     setBusy(true); setFeedback(null);
+    const reasonForLog = rejectReason || null;
     const { error } = await supabase.rpc('admin_reject_coupon', {
-      p_coupon_id: row.id, p_reason: rejectReason || null,
+      p_coupon_id: row.id, p_reason: reasonForLog,
     });
     setBusy(false);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'RECHAZAR',
+      entity_type: 'cupón',
+      entity_id: row.id,
+      entity_name: row.title || row.code,
+      details: { plan_type: row.plan_type, reason: reasonForLog }
+    });
     setFeedback({ type: 'ok', msg: 'Cupón rechazado.' });
     setDetail(null); setRejectReason('');
     fetchData();
