@@ -27,7 +27,7 @@ RETURNS TABLE (
   image_url        TEXT,
   code             TEXT,
   amount_available INTEGER,
-  price_usd        NUMERIC,
+  discount_percent NUMERIC,
   category         TEXT,
   plan_type        TEXT,
   start_date       TIMESTAMPTZ,
@@ -37,6 +37,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_ids UUID[];
 BEGIN
@@ -55,12 +56,12 @@ BEGIN
   SELECT array_agg(eligible.id) INTO v_ids FROM eligible;
 
   IF p_commit AND v_ids IS NOT NULL THEN
-    UPDATE public.coupons SET last_shown_at = NOW() WHERE id = ANY(v_ids);
+    UPDATE public.coupons SET last_shown_at = NOW() WHERE coupons.id = ANY(v_ids);
   END IF;
 
   RETURN QUERY
-    SELECT c.id, c.store_id, s.name AS store_name, c.title, c.image_url, c.code,
-           c.amount_available, c.price_usd, c.category, c.plan_type,
+    SELECT c.id, c.store_id, s.name::text AS store_name, c.title, c.image_url, c.code,
+           c.amount_available, c.discount_percent, c.category, c.plan_type,
            c.start_date, c.end_date
       FROM public.coupons c
       JOIN public.stores  s ON s.id = c.store_id

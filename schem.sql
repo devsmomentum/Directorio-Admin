@@ -114,7 +114,7 @@ CREATE TABLE public.coupons (
   amount_available integer DEFAULT 0,
   created_at timestamp with time zone DEFAULT now(),
   title text DEFAULT 'Cupón Promocional'::text,
-  price_usd numeric DEFAULT 0.00,
+  discount_percent numeric DEFAULT 0.00,
   campaign_id uuid,
   plan_type text NOT NULL DEFAULT 'IA_PERFORMANCE'::text CHECK (plan_type = ANY (ARRAY['DIAMANTE'::text, 'ORO'::text, 'IA_PERFORMANCE'::text, 'BONO_PREMIADO'::text, 'PUBLI_PROMO'::text, 'FLASH_COUPON_DIARIO'::text, 'FLASH_COUPON_SEMANAL'::text])),
   start_date timestamp with time zone DEFAULT now(),

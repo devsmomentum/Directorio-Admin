@@ -73,7 +73,7 @@ export default function ClienteDashboardPage() {
             .select('id, brand_name, plan_type, start_date, end_date, is_active, created_at, media_url, media_type, duration_seconds')
             .eq('store_id', store.id).order('created_at', { ascending: false }),
           supabase.from('coupons')
-            .select('id, title, plan_type, code, amount_available, price_usd, category, start_date, end_date, campaign_id, created_at')
+            .select('id, title, plan_type, code, amount_available, discount_percent, category, start_date, end_date, campaign_id, created_at')
             .eq('store_id', store.id).order('created_at', { ascending: false }),
           supabase.from('plan_requests')
             .select('*')

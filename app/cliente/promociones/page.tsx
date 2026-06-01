@@ -183,7 +183,7 @@ export default function ClientePromocionesPage() {
     setCEditingId(c.id);
     setCTitle(c.title || '');
     setCCategory(c.category || '');
-    setCDiscount(c.price_usd != null ? String(c.price_usd) : '');
+    setCDiscount(c.discount_percent != null ? String(c.discount_percent) : '');
     setCStock(c.amount_available != null ? String(c.amount_available) : '');
     setCImageFile(null);
     setCImageUrl(c.image_url || '');
@@ -286,7 +286,7 @@ export default function ClientePromocionesPage() {
         const { error } = await supabase.from('coupons')
           .update({
             title: cTitle, plan_type: planType, category: cCategory,
-            price_usd: discountNum, amount_available: stockNum,
+            discount_percent: discountNum, amount_available: stockNum,
             image_url: finalImageUrl || null,
             start_date: new Date(cStartDate).toISOString(),
             end_date: new Date(cEndDate).toISOString(),
@@ -306,7 +306,7 @@ export default function ClientePromocionesPage() {
         const { error } = await supabase.from('coupons').insert([{
           store_id: store.id,
           title: cTitle, plan_type: planType, category: cCategory,
-          price_usd: discountNum, amount_available: stockNum,
+          discount_percent: discountNum, amount_available: stockNum,
           image_url: finalImageUrl || null,
           start_date: new Date(cStartDate).toISOString(),
           end_date: new Date(cEndDate).toISOString(),
@@ -1391,7 +1391,7 @@ function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) =
           </span>
         </div>
         <p className="text-[11px] text-emerald-300 font-mono font-semibold">
-          {Number(c.price_usd ?? 0)}% OFF · vence {c.end_date?.split('T')[0] || '—'}
+          {Number(c.discount_percent ?? 0)}% OFF · vence {c.end_date?.split('T')[0] || '—'}
         </p>
         <p className="text-[10px] text-white/30 font-mono break-all">{c.code}</p>
         <div className="flex gap-1.5 pt-2">

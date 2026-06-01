@@ -25,7 +25,20 @@
       "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; grep -oE \"data-theme=.light.\\\\]|bg-mesh|--bg-base|text-white\\\\\\\\\\\\\\\\/40\" {} | sort -u')",
       "Bash(grep -oE '\\\\[data-theme=light\\\\] \\\\.text-white[^,{]*[,{]' .next/static/chunks/0akl8h_kz3ga0.css)",
       "Bash(flutter analyze *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(sed -n '820,832p' admin/milenium-admin/app/panel/solicitudes/page.tsx)",
+      "Bash(sed -n '25,45p' milemium/supabase/functions/claim-flash-coupon/index.ts)",
+      "Bash(sed -n '45,80p' milemium/supabase/migrations/20260425120000_flash_coupon_leads.sql)",
+      "Bash(sed -n '58,90p' milemium/supabase/migrations/20260427120000_coupons_publi_promo.sql)",
+      "Bash(sed -n '160,170p' app/panel/cupons/page.tsx)",
+      "Bash(sed -n '288,296p' app/panel/cupons/page.tsx)",
+      "Bash(sed -n '748,756p' app/panel/cupons/page.tsx)",
+      "Bash(sed -n '1572,1582p' app/panel/tiendas/page.tsx)",
+      "Bash(sed -n '1390,1396p' app/cliente/promociones/page.tsx)",
+      "Bash(sed -E 's/=.*/=.../' milemium/.env)",
+      "Bash(ls -la admin/milenium-admin/.env*)",
+      "Bash(which psql *)",
+      "Bash(curl -s -X POST https://lrjgocjubpxruobshtoe.supabase.co/rest/v1/rpc/get_flash_coupons_rotated -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyamdvY2p1YnB4cnVvYnNodG9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNTQwMTUsImV4cCI6MjA4ODgzMDAxNX0.hQrCDgMdhJ_B2ncjNhDBFetnnxhpbt7vP-EnzgKFT_I' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyamdvY2p1YnB4cnVvYnNodG9lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNTQwMTUsImV4cCI6MjA4ODgzMDAxNX0.hQrCDgMdhJ_B2ncjNhDBFetnnxhpbt7vP-EnzgKFT_I' -H 'Content-Type: application/json' -d '{\"p_commit\": true}')"
     ]
   }
 }

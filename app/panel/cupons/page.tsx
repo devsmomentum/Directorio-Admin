@@ -46,7 +46,7 @@ interface Coupon {
   image_url: string;
   code: string;
   amount_available: number;
-  price_usd: number;
+  discount_percent: number;
   plan_type: string;
   category: string;
   start_date: string;
@@ -75,7 +75,7 @@ export default function CuponsAdminPage() {
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [couponTitle, setCouponTitle] = useState('');
   const [amountAvailable, setAmountAvailable] = useState<number>(0);
-  const [priceUsd, setPriceUsd] = useState<number>(0);
+  const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
 
@@ -115,7 +115,7 @@ export default function CuponsAdminPage() {
     setStoreDropdownOpen(false);
     setCouponTitle('');
     setAmountAvailable(0);
-    setPriceUsd(0);
+    setDiscountPercent(0);
     setImageFile(null);
     setImagePreview('');
     setPlanType('');
@@ -162,7 +162,7 @@ export default function CuponsAdminPage() {
     setStoreSearch(coupon.stores?.name || '');
     setCouponTitle(coupon.title || '');
     setAmountAvailable(coupon.amount_available || 0);
-    setPriceUsd(coupon.price_usd || 0);
+    setDiscountPercent(coupon.discount_percent || 0);
     setImagePreview(coupon.image_url || '');
     setImageFile(null);
     // El plan_type del cupón se respeta tal cual (sea base o addon flash).
@@ -289,7 +289,7 @@ export default function CuponsAdminPage() {
         campaign_id: campaignId || null,
         title: couponTitle,
         amount_available: amountAvailable,
-        price_usd: priceUsd,
+        discount_percent: discountPercent,
         plan_type: planType,
         category: category,
         start_date: new Date(startDate).toISOString(),
@@ -748,8 +748,8 @@ export default function CuponsAdminPage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-white/40">Precio</span>
-                      <span className="text-cyan-400 font-medium">${coupon.price_usd?.toFixed(2) || '0.00'}</span>
+                      <span className="text-white/40">Descuento</span>
+                      <span className="text-cyan-400 font-medium">{coupon.discount_percent ?? 0}% OFF</span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-white/40">Vigencia</span>

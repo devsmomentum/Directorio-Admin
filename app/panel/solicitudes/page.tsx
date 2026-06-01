@@ -825,7 +825,7 @@ function CouponDetailModal({
           </span>
         </DetailRow>
         <DetailRow label="Código"><span className="font-mono text-white/70">{row.code || '—'}</span></DetailRow>
-        <DetailRow label="Descuento"><span className="font-mono text-emerald-300">{row.price_usd}%</span></DetailRow>
+        <DetailRow label="Descuento"><span className="font-mono text-emerald-300">{row.discount_percent}%</span></DetailRow>
         <DetailRow label="Stock"><span className="font-mono">{row.amount_available}</span></DetailRow>
         <DetailRow label="Categoría">{row.category || '—'}</DetailRow>
         <DetailRow label="Vigencia">

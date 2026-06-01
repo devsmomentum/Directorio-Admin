@@ -300,7 +300,7 @@ Gestión de identidad y acceso del aliado. Campos: email (login), `full_name`, `
 **Centro de aprobaciones** con tres pestañas (pagos, campañas, cupones) y filtro por estado (pendiente/resuelto/todos). Modales de detalle con razón de rechazo opcional y vista previa de media (9:16 campañas, 4:3 cupones). **Tablas:** `plan_requests`, `transactions`, `ad_campaigns`, `coupons`, `stores`. **RPCs:** `admin_approve_plan_payment`, `admin_reject_plan_payment`, `admin_approve_campaign`, `admin_reject_campaign`, `admin_approve_coupon`, `admin_reject_coupon`. Audita cada acción.
 
 ### 6.6. Cupones y Combos (`/panel/cupons`)
-Gestión de cupones flash. Solo planes `FLASH_COUPON_DIARIO`/`FLASH_COUPON_SEMANAL` (migración 018). Cap global: 20 marcas activas en galería. Límites por plan (diario: 10/día; semanal: 30/5 días). Campos: `store_id`, `campaign_id?`, `title`, `amount_available` (stock), `price_usd`, `plan_type`, `category`, fechas, `code` autogenerado (`CUPON-{PREFIJO}-{TIMESTAMP}`). Imagen ≤ 500 KB y ≤ 800×800 px (prefijo `coupons/` en bucket `publicidad`). **Tablas:** `stores`, `ad_campaigns`, `coupons`.
+Gestión de cupones flash. Solo planes `FLASH_COUPON_DIARIO`/`FLASH_COUPON_SEMANAL` (migración 018). Cap global: 20 marcas activas en galería. Límites por plan (diario: 10/día; semanal: 30/5 días). Campos: `store_id`, `campaign_id?`, `title`, `amount_available` (stock), `discount_percent` (% de descuento, 1–100), `plan_type`, `category`, fechas, `code` autogenerado (`CUPON-{PREFIJO}-{TIMESTAMP}`). Imagen ≤ 500 KB y ≤ 800×800 px (prefijo `coupons/` en bucket `publicidad`). **Tablas:** `stores`, `ad_campaigns`, `coupons`.
 
 ### 6.7. Banners (`/panel/banners`)
 Banners de UI superpuestos. **Restricción: solo tiendas DIAMANTE.** Posiciones `top`/`bottom`, relación 5.625:1 (80×192 px). Imágenes ≤ 2 MB, videos ≤ 15 MB. Storage bajo `slots/` con patrón `{uiPosition}_{timestamp}.{ext}` (evita keywords de ad-blockers). Vínculo opcional a campaña y fechas. **Tablas:** `banners`, `ad_campaigns`, `stores`.
@@ -376,7 +376,7 @@ Contenido estático: specs de arte (campañas 1080×1920/15 s, cupones, banners 
 - **`kiosk_campaigns`** — puente kiosco↔campaña (PK compuesta), para el override por kiosco.
 
 ### 8.4. Cupones
-- **`coupons`** — ofertas flash: `store_id`, `image_url`, `code` (único), `amount_available`, `title`, `price_usd`, `campaign_id`, `plan_type`, fechas, `category`, `last_shown_at` (rotación round-robin) y workflow de aprobación.
+- **`coupons`** — ofertas flash: `store_id`, `image_url`, `code` (único), `amount_available`, `title`, `discount_percent` (% de descuento), `campaign_id`, `plan_type`, fechas, `category`, `last_shown_at` (rotación round-robin) y workflow de aprobación.
 - **`coupon_leads`** — captura de datos de quien reclama un cupón (`email`, documento, `email_sent_at`).
 
 ### 8.5. Kioscos y navegación (wayfinding)

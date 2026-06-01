@@ -1256,7 +1256,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
             .order('created_at', { ascending: false }),
           supabase
             .from('coupons')
-            .select('id, title, plan_type, code, amount_available, price_usd, category, start_date, end_date, campaign_id, created_at')
+            .select('id, title, plan_type, code, amount_available, discount_percent, category, start_date, end_date, campaign_id, created_at')
             .order('created_at', { ascending: false }),
           supabase
             .from('user_stores')
@@ -1574,14 +1574,14 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
       FLASH_PLAN_SET.has(c.plan_type) ? 'si' : 'no',
       c.category || '',
       c.amount_available,
-      c.price_usd,
+      c.discount_percent,
       c.start_date || '',
       c.end_date || '',
       c.campaign_id || '',
       c.created_at,
     ]);
     downloadCSV(`K2_${slug}_cupones_${stamp}.csv`,
-      ['coupon_id', 'titulo', 'codigo', 'plan_type', 'es_flash', 'categoria', 'cantidad_disponible', 'precio_usd', 'inicio', 'fin', 'campaign_id', 'creado_en'],
+      ['coupon_id', 'titulo', 'codigo', 'plan_type', 'es_flash', 'categoria', 'cantidad_disponible', 'descuento_pct', 'inicio', 'fin', 'campaign_id', 'creado_en'],
       rows);
   };
 

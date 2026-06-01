@@ -256,7 +256,7 @@ Columnas relevantes en `kiosks`: `id, name, location, status, hardware_id, paper
 
 - CRUD completo. Selector de tienda con buscador (autocomplete).
 - Genera código auto: `CUPON-{ABREV_TIENDA}-{TIMESTAMP}`.
-- Campos: `title, store_id, price_usd, amount_available, image_url`.
+- Campos: `title, store_id, discount_percent, amount_available, image_url`.
 - Indicador visual de stock: verde, ámbar (<5), rojo (=0).
 
 ### 7. Directorio Servicios — `/dashboard/services`
@@ -306,7 +306,7 @@ Inferidas a partir de las queries en el código. Verifica la fuente de verdad en
 | `plans` | `id, name, plan_key, description, duration_days, price_usd, applies_to, features, is_active, display_order, created_at` | planes, tiendas, cupones |
 | `ad_campaigns` | `id, brand_name, plan_type, media_url, media_type, duration_seconds, start_date, end_date, is_active, created_at` | campañas |
 | `banners` | `id, title, image_url, screen, sort_order, is_active, created_at` | banners |
-| `coupons` | `id, title, code, store_id, image_url, price_usd, amount_available, plan_key, validity_days, created_at` | cupones |
+| `coupons` | `id, title, code, store_id, image_url, discount_percent, amount_available, plan_key, validity_days, created_at` | cupones |
 | `services` | `id, title, provider, description, image_url, is_active, created_at` | services |
 | `analytics_events` | `id, event_type, module, event_data, item_name, kiosk_id, created_at` | analíticas |
 | `transactions` | `id, transaction_type, item_name, amount_usd, amount_bs, exchange_rate, payment_method, user_email, status, kiosk_id, created_at` | analíticas |

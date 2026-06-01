@@ -249,7 +249,7 @@ BEGIN
        NEW.title            IS DISTINCT FROM OLD.title
     OR NEW.image_url        IS DISTINCT FROM OLD.image_url
     OR NEW.amount_available IS DISTINCT FROM OLD.amount_available
-    OR NEW.price_usd        IS DISTINCT FROM OLD.price_usd
+    OR NEW.discount_percent IS DISTINCT FROM OLD.discount_percent
     OR NEW.start_date       IS DISTINCT FROM OLD.start_date
     OR NEW.end_date         IS DISTINCT FROM OLD.end_date
     OR NEW.category         IS DISTINCT FROM OLD.category;
