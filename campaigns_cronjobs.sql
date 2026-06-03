@@ -57,8 +57,13 @@ END$$;
 -- Desactiva una campaña si:
 --   · su end_date ya pasó, O
 --   · el plan de su tienda venció (contract_expiry_date < hoy)
+-- Además nulifica stores.plan_type en contratos vencidos sin activación agendada
+-- pendiente (la condición "y no tiene planificado otro contrato").
 -- Los pagos viven a nivel plan/tienda (transactions); las notificaciones de
 -- cobranza son por plan vencido (notify_expired_plans).
+-- IMPORTANTE: esta definición debe quedar SINCRONIZADA con la migración
+-- supabase/migrations/20260603120000_kill_switch_nullify_plan_fix.sql.
+-- No remover el bloque de nulificación de plan_type al re-correr este archivo.
 CREATE OR REPLACE FUNCTION public.apply_kill_switch()
 RETURNS integer
 LANGUAGE plpgsql
@@ -88,6 +93,24 @@ BEGIN
 
   GET DIAGNOSTICS batch_cnt = ROW_COUNT;
   updated_cnt := updated_cnt + batch_cnt;
+
+  -- Nulificar plan_type en tiendas con contrato vencido, salvo que tengan
+  -- "planificado otro contrato": una solicitud aprobada (no flash) cuyo contrato
+  -- siga vigente (expires_at >= hoy). Lo aplicará activate_scheduled_plans().
+  UPDATE public.stores s
+  SET    plan_type = NULL
+  WHERE  s.contract_expiry_date IS NOT NULL
+    AND  s.contract_expiry_date < CURRENT_DATE
+    AND  s.plan_type IS NOT NULL
+    AND  NOT EXISTS (
+           SELECT 1
+             FROM public.plan_requests pr
+            WHERE pr.store_id   = s.id
+              AND pr.status     = 'approved'
+              AND pr.expires_at IS NOT NULL
+              AND pr.expires_at >= CURRENT_DATE
+              AND NOT public.is_flash_coupon_plan(pr.plan_key)
+         );
 
   RETURN updated_cnt;
 END;

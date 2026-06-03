@@ -69,16 +69,58 @@ Deno.serve(async (req: Request) => {
     return respond({ error: updateErr.message }, 500)
   }
 
-  // Nulificar plan_type en tiendas con contrato vencido
-  const { error: planErr } = await supabase
+  // Nulificar plan_type en tiendas con contrato vencido, PERO solo si la tienda
+  // no tiene "planificado otro contrato": una solicitud aprobada (no flash) cuyo
+  // contrato siga vigente (expires_at >= hoy). Debe quedar equivalente al guard
+  // de la función SQL apply_kill_switch() (ver migración 20260603120000): sin él,
+  // se nulificaría el plan de tiendas con una renovación agendada aún sin activar.
+  const FLASH_PLAN_KEYS = ['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL']
+
+  // Tiendas candidatas: contrato vencido y con plan activo.
+  const { data: expiredStores, error: expiredErr } = await supabase
     .from('stores')
-    .update({ plan_type: null })
+    .select('id')
     .not('contract_expiry_date', 'is', null)
     .lt('contract_expiry_date', today)
     .not('plan_type', 'is', null)
 
-  if (planErr) {
-    console.error('[kill-switch] plan nullify error:', planErr.message)
+  if (expiredErr) {
+    console.error('[kill-switch] expired stores fetch error:', expiredErr.message)
+  } else if (expiredStores && expiredStores.length > 0) {
+    // Tiendas con renovación agendada vigente → NO se nulifican.
+    const { data: pendingReqs, error: pendingErr } = await supabase
+      .from('plan_requests')
+      .select('store_id, plan_key')
+      .eq('status', 'approved')
+      .not('expires_at', 'is', null)
+      .gte('expires_at', today)
+
+    if (pendingErr) {
+      console.error('[kill-switch] pending requests fetch error:', pendingErr.message)
+    } else {
+      const protectedStores = new Set(
+        (pendingReqs ?? [])
+          .filter((r: any) => !FLASH_PLAN_KEYS.includes(r.plan_key))
+          .map((r: any) => r.store_id),
+      )
+
+      const toNullify = expiredStores
+        .map((s: any) => s.id)
+        .filter((id: string) => !protectedStores.has(id))
+
+      if (toNullify.length > 0) {
+        const { error: planErr } = await supabase
+          .from('stores')
+          .update({ plan_type: null })
+          .in('id', toNullify)
+
+        if (planErr) {
+          console.error('[kill-switch] plan nullify error:', planErr.message)
+        } else {
+          console.log(`[kill-switch] plan_type nullified for ${toNullify.length} store(s)`)
+        }
+      }
+    }
   }
 
   const result = {
