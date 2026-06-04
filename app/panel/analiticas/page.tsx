@@ -214,6 +214,8 @@ export default function AnalyticsDashboard() {
     flash:        { total: sumCount(flashRows, 'shown'),              today: sumCount(onDay(flashRows), 'shown') },
   };
 
+  const storeNameById = (id: string | null) => stores.find(s => s.id === id)?.name || 'Desconocido';
+
   // Rankings por nombre de item (suma de count del agregado).
   const rankByName = (rows: InteractionDaily[], limit = 5): RankItem[] => {
     const acc: Record<string, number> = {};
@@ -234,7 +236,6 @@ export default function AnalyticsDashboard() {
   const topSections = rankByName(navRows);
 
   // Tiendas más buscadas: agrupar search_daily_stats por store destino.
-  const storeNameById = (id: string | null) => stores.find(s => s.id === id)?.name || 'Desconocido';
   const searchByStore: Record<string, number> = {};
   searchClickRows.forEach(r => {
     if (!r.store_id_target) return;
