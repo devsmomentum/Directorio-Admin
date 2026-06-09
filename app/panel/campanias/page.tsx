@@ -243,9 +243,9 @@ function CampaniasAdminInner() {
         return;
       }
 
-      const maxSize = isVideo ? 50 * 1024 * 1024 : 5 * 1024 * 1024;
+      const maxSize = isVideo ? 200 * 1024 * 1024 : 5 * 1024 * 1024;
       if (file.size > maxSize) {
-        alert(`El archivo excede el límite (${isVideo ? '50MB para video' : '5MB para imagen'}).`);
+        alert(`El archivo excede el límite (${isVideo ? '200MB para video' : '5MB para imagen'}).`);
         e.target.value = '';
         return;
       }
@@ -768,7 +768,7 @@ function CampaniasAdminInner() {
                 </label>
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" onChange={handleFileChange} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white" />
                 <p className="text-[10px] text-white/30 mt-1">
-                  Formatos: JPG, PNG, WEBP, GIF (máx 5MB) · MP4, WEBM, MOV (máx 50MB).
+                  Formatos: JPG, PNG, WEBP, GIF (máx 5MB) · MP4, WEBM, MOV (máx 200MB).
                   {mediaFile && (
                     <span className={`ml-2 px-1.5 py-0.5 rounded ${mediaType === 'video' ? 'bg-purple-500/15 text-purple-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
                       Detectado: {mediaType === 'video' ? 'Video' : 'Imagen'}
@@ -778,7 +778,7 @@ function CampaniasAdminInner() {
                 {mediaPreview && (
                   <div className="mt-2 h-32 bg-black rounded-lg border border-white/5 overflow-hidden flex items-center justify-center">
                     {mediaType === 'video'
-                      ? <video src={mediaPreview} className="h-full object-contain" muted autoPlay loop playsInline />
+                      ? <video src={mediaPreview} className="h-full object-contain" autoPlay loop playsInline controls />
                       : <img src={mediaPreview} className="h-full object-contain" alt="preview" />}
                   </div>
                 )}

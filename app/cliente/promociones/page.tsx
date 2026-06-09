@@ -78,6 +78,8 @@ export default function ClientePromocionesPage() {
   const [aStartDate, setAStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [aEndDate, setAEndDate] = useState('');
   const [aIsActive, setAIsActive] = useState(true);
+  // Si el video de campaña debe reproducirse con audio en el kiosco.
+  const [aAudioEnabled, setAAudioEnabled] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -158,6 +160,7 @@ export default function ClientePromocionesPage() {
     setAMediaFile(null); setAMediaUrl(''); setAMediaType('video');
     setAStartDate(today); setAEndDate('');
     setAIsActive(true);
+    setAAudioEnabled(false);
   };
   const closeForm = () => {
     if (submitting) return;
@@ -201,6 +204,7 @@ export default function ClientePromocionesPage() {
     setAEndDate(c.end_date || '');
     setAMediaFile(null);
     setAIsActive(!!c.is_active);
+    setAAudioEnabled(!!c.audio_enabled);
     setForm('campaign');
   };
 
@@ -214,7 +218,7 @@ export default function ClientePromocionesPage() {
   const handleMedia = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 30 * 1024 * 1024) { alert('El archivo debe pesar menos de 30 MB.'); e.target.value = ''; return; }
+    if (f.size > 50 * 1024 * 1024) { alert('El archivo debe pesar menos de 50 MB.'); e.target.value = ''; return; }
     setAMediaFile(f);
     setAMediaType(f.type.startsWith('video/') ? 'video' : 'image');
     setAMediaUrl(URL.createObjectURL(f));
@@ -398,6 +402,8 @@ export default function ClientePromocionesPage() {
             duration_seconds: CAMPAIGN_DURATION_SECONDS,
             start_date: aStartDate, end_date: aEndDate || null,
             is_active: aIsActive,
+            // El audio solo aplica a video; una imagen nunca suena.
+            audio_enabled: finalMediaType === 'video' ? aAudioEnabled : false,
           })
           .eq('id', aEditingId)
           .select('id, is_active')
@@ -471,6 +477,8 @@ export default function ClientePromocionesPage() {
           store_id: store.id,
           is_active: false,
           approval_status: 'pending',
+          // El audio solo aplica a video; una imagen nunca suena.
+          audio_enabled: finalMediaType === 'video' ? aAudioEnabled : false,
         }]);
         if (error) throw error;
 
@@ -809,7 +817,7 @@ export default function ClientePromocionesPage() {
                 </label>
                 <input type="file" accept="video/*,image/*" onChange={handleMedia}
                   className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-white/10 file:text-white/60" />
-                <p className="text-[10px] text-white/20 mt-1">Video MP4/WebM o imagen JPG/PNG · Máx 30 MB · Recomendado <span className="text-white/40">1080 × 1920 px (9:16 vertical)</span>. El kiosco lo muestra a pantalla completa con <code className="text-white/30">cover</code>.</p>
+                <p className="text-[10px] text-white/20 mt-1">Video MP4/WebM o imagen JPG/PNG · Máx 50 MB · Recomendado <span className="text-white/40">1080 × 1920 px (9:16 vertical)</span>. El kiosco lo muestra a pantalla completa con <code className="text-white/30">cover</code>.</p>
 
                 {aMediaUrl && (
                   <div className="mt-3 flex items-start gap-3">
@@ -884,6 +892,32 @@ export default function ClientePromocionesPage() {
                   </div>
                 )}
               </div>
+              {aMediaType === 'video' && (
+                <button
+                  type="button"
+                  onClick={() => setAAudioEnabled(v => !v)}
+                  className="w-full flex items-center gap-3 bg-white/[0.03] border border-white/10 rounded-lg px-3 py-2.5 text-left hover:border-cyan-500/40 transition-colors"
+                >
+                  <span className={`shrink-0 w-9 h-5 rounded-full p-0.5 transition-colors ${aAudioEnabled ? 'bg-cyan-500' : 'bg-white/15'}`}>
+                    <span className={`block w-4 h-4 rounded-full bg-white transition-transform ${aAudioEnabled ? 'translate-x-4' : ''}`} />
+                  </span>
+                  <span className="flex-1">
+                    <span className="block text-sm text-white font-medium">
+                      {aAudioEnabled ? 'Con audio' : 'Sin audio (mudo)'}
+                    </span>
+                    <span className="block text-[11px] text-white/45 leading-snug">
+                      {aAudioEnabled
+                        ? 'El kiosco reproducirá tu video con sonido.'
+                        : 'El video se reproduce en silencio. Actívalo si quieres que suene.'}
+                    </span>
+                  </span>
+                  <svg className="w-4 h-4 text-white/40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {aAudioEnabled
+                      ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.536 8.464a5 5 0 010 7.072M19.07 4.93a10 10 0 010 14.142M5 9v6h4l5 5V4L9 9H5z" />
+                      : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 9l4 4m0-4l-4 4M5 9v6h4l5 5V4L9 9H5z" />}
+                  </svg>
+                </button>
+              )}
               <div className="bg-white/[0.03] border border-white/10 rounded-lg px-3 py-2.5 flex items-center gap-2">
                 <svg className="w-4 h-4 text-white/40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 <p className="text-xs text-white/60">
