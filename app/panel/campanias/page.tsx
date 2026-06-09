@@ -41,9 +41,12 @@ const PLAN_FREQUENCY_SECONDS: Record<string, number> = {
   PUBLI_PROMO_SEMANAL: 180,
 };
 
+// Duración por defecto (fallback) cuando un plan no define video_seconds.
+// La duración real de cada campaña vive en ad_campaigns.duration_seconds y el
+// loop se calcula sumando esas duraciones (no asumiendo 15s fijos).
 const CAMPAIGN_DURATION_SECONDS = 15;
-const LOOP_TARGET_SLOTS = 12;          // 12 slots × 15s = 180s = 3 min
-const LOOP_EXTENDED_SLOTS = 22;        // Escenario ampliado: 22 slots × 15s = 330s = 5,5 min
+const LOOP_TARGET_SLOTS = 12;          // 12 slots ≈ 3 min con piezas de 15s
+const LOOP_EXTENDED_SLOTS = 22;        // Escenario ampliado: ≈ 5,5 min con piezas de 15s
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
@@ -88,6 +91,7 @@ function CampaniasAdminInner() {
   const [activeTab, setActiveTab] = useState<Tab>('campaigns');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
+  const [plans, setPlans] = useState<{ plan_key: string; video_seconds: number | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -108,7 +112,15 @@ function CampaniasAdminInner() {
   const [storeId, setStoreId] = useState<string>('');
   const [priorityLevel, setPriorityLevel] = useState<number>(1);
   const [slotLimitGroup, setSlotLimitGroup] = useState<string>('');
+  const [durationSeconds, setDurationSeconds] = useState<number>(CAMPAIGN_DURATION_SECONDS);
   const [isActive, setIsActive] = useState<boolean>(true);
+
+  // Duración "general" definida en el plan (plans.video_seconds). Sirve como
+  // valor por defecto al elegir un plan; la campaña puede sobreescribirla.
+  const planVideoSeconds = (key: string): number => {
+    const p = plans.find(pl => pl.plan_key === key);
+    return p && p.video_seconds != null && p.video_seconds > 0 ? p.video_seconds : CAMPAIGN_DURATION_SECONDS;
+  };
 
   // File handling
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -119,9 +131,10 @@ function CampaniasAdminInner() {
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [campRes, storesRes] = await Promise.all([
+    const [campRes, storesRes, plansRes] = await Promise.all([
       supabase.from('ad_campaigns').select('*, stores(name, contract_expiry_date)').order('created_at', { ascending: false }).limit(200),
-      supabase.from('stores').select('id, name').order('name').limit(500)
+      supabase.from('stores').select('id, name').order('name').limit(500),
+      supabase.from('plans').select('plan_key, video_seconds').limit(200)
     ]);
     if (campRes.data) {
       const data = campRes.data as Campaign[];
@@ -137,6 +150,7 @@ function CampaniasAdminInner() {
       setKillSwitchCandidates(overdue);
     }
     if (storesRes.data) setStores(storesRes.data);
+    if (plansRes.data) setPlans(plansRes.data as { plan_key: string; video_seconds: number | null }[]);
     setLoading(false);
     setRefreshing(false);
   };
@@ -156,9 +170,14 @@ function CampaniasAdminInner() {
       return acc;
     }, {});
     const slots = live.length;
+    // Duración real del loop = suma de la duración de cada campaña viva.
+    const durationSeconds = live.reduce(
+      (sum, c) => sum + (c.duration_seconds || CAMPAIGN_DURATION_SECONDS),
+      0
+    );
     return {
       slots,
-      durationSeconds: slots * CAMPAIGN_DURATION_SECONDS,
+      durationSeconds,
       byPlan,
       overTarget: slots > LOOP_TARGET_SLOTS,
       overExtended: slots > LOOP_EXTENDED_SLOTS,
@@ -170,7 +189,7 @@ function CampaniasAdminInner() {
     setBrandName(''); setPlanType('ORO'); setDescription('');
     setStartDate(new Date().toISOString().split('T')[0]);
     setEndDate(''); setStoreId(''); setPriorityLevel(1);
-    setSlotLimitGroup(''); setIsActive(true);
+    setSlotLimitGroup(''); setDurationSeconds(planVideoSeconds('ORO')); setIsActive(true);
     setMediaFile(null); setMediaPreview(''); setMediaType('image');
     setShowForm(false);
   };
@@ -210,6 +229,7 @@ function CampaniasAdminInner() {
     setStoreId(c.store_id || '');
     setPriorityLevel(c.priority_level || 1);
     setSlotLimitGroup(c.slot_limit_group || '');
+    setDurationSeconds(c.duration_seconds || CAMPAIGN_DURATION_SECONDS);
     setIsActive(c.is_active);
     setMediaPreview(c.media_url);
     setMediaType(c.media_type as 'image' | 'video');
@@ -302,7 +322,7 @@ function CampaniasAdminInner() {
         plan_type: planType,
         media_url: finalUrl,
         media_type: mediaType,
-        duration_seconds: CAMPAIGN_DURATION_SECONDS,
+        duration_seconds: durationSeconds || CAMPAIGN_DURATION_SECONDS,
         start_date: startDate ? new Date(startDate).toISOString().split('T')[0] : null,
         end_date: endDate ? new Date(endDate).toISOString().split('T')[0] : null,
         is_active: isActive,
@@ -515,7 +535,7 @@ function CampaniasAdminInner() {
                   ? `Excediste el escenario ampliado de ${LOOP_EXTENDED_SLOTS} slots. La frecuencia bajará por debajo del estándar.`
                   : loopStatus.overTarget
                   ? `Pasaste el loop base de 3 min. Estás en escenario ampliado (cap. ${LOOP_EXTENDED_SLOTS}).`
-                  : `Cada slot dura ${CAMPAIGN_DURATION_SECONDS}s. Loop base = 3 min con 12 slots.`}
+                  : `El loop suma la duración de cada campaña. Loop base ≈ 3 min con 12 slots de ${CAMPAIGN_DURATION_SECONDS}s.`}
               </p>
             </div>
           </div>
@@ -720,7 +740,7 @@ function CampaniasAdminInner() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de pauta</label>
-                  <select required value={planType} onChange={e => setPlanType(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none">
+                  <select required value={planType} onChange={e => { setPlanType(e.target.value); setDurationSeconds(planVideoSeconds(e.target.value)); }} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none">
                     {PLAN_TYPES.map(p => {
                       const cap = PLAN_MAX_BRANDS[p];
                       const used = (loopStatus.byPlan[p] || 0);
@@ -748,9 +768,23 @@ function CampaniasAdminInner() {
                   <input type="number" min="1" value={priorityLevel} onChange={e => setPriorityLevel(parseInt(e.target.value) || 1)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
                 </div>
               </div>
-              <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Grupo Limitación Slot</label>
-                <input type="text" value={slotLimitGroup} onChange={e => setSlotLimitGroup(e.target.value)} placeholder="Ej: FOOD_COURT" className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Grupo Limitación Slot</label>
+                  <input type="text" value={slotLimitGroup} onChange={e => setSlotLimitGroup(e.target.value)} placeholder="Ej: FOOD_COURT" className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Duración del video (seg)</label>
+                  <input
+                    type="number" min="1" max="120"
+                    value={durationSeconds}
+                    onChange={e => setDurationSeconds(parseInt(e.target.value) || CAMPAIGN_DURATION_SECONDS)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none"
+                  />
+                  <p className="text-[10px] text-white/30 mt-1">
+                    Default del plan: {planVideoSeconds(planType)}s · cambia el tiempo del loop
+                  </p>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

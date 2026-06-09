@@ -132,7 +132,13 @@ export default function PlanesCRUD() {
 
     try {
       if (editingId) {
-        const { error } = await supabase.from('plans').update(payload).eq('id', editingId);
+        // No se reescribe plan_key en un plan existente: es la llave que vincula
+        // tiendas, campañas, cupones y solicitudes (no hay FK que haga cascada).
+        const { plan_key, ...updatePayload } = payload;
+        const { error } = await supabase
+          .from('plans')
+          .update({ ...updatePayload, updated_at: new Date().toISOString() })
+          .eq('id', editingId);
         if (error) throw error;
       } else {
         const { error } = await supabase.from('plans').insert([payload]);
@@ -189,7 +195,7 @@ export default function PlanesCRUD() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Configuración</p>
           <h2 className="text-2xl font-bold text-white">Planes</h2>
@@ -243,7 +249,7 @@ export default function PlanesCRUD() {
               </button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Nombre del plan</label>
                   <input
@@ -262,10 +268,16 @@ export default function PlanesCRUD() {
                     required
                     value={planKey}
                     onChange={(e) => setPlanKey(e.target.value.toUpperCase().replace(/\s+/g, '_'))}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-purple-500/50 transition-colors"
+                    disabled={!!editingId}
+                    title={editingId ? 'La clave no se puede cambiar en un plan existente' : undefined}
+                    className={`w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-purple-500/50 transition-colors ${editingId ? 'opacity-50 cursor-not-allowed' : ''}`}
                     placeholder="Ej: ORO"
                   />
-                  <p className="text-[10px] text-white/20 mt-1">Solo mayúsculas y guiones bajos</p>
+                  <p className="text-[10px] text-white/20 mt-1">
+                    {editingId
+                      ? 'La clave no se puede cambiar: vincula tiendas, campañas y cupones existentes.'
+                      : 'Solo mayúsculas y guiones bajos'}
+                  </p>
                 </div>
               </div>
               <div>
@@ -278,7 +290,7 @@ export default function PlanesCRUD() {
                   placeholder="Breve descripción del plan..."
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Duración (días)</label>
                   <input
@@ -340,7 +352,7 @@ export default function PlanesCRUD() {
               {/* ── Reglas del loop (Directorios) ── */}
               <div className="bg-white/[0.03] border border-white/5 rounded-lg p-3 space-y-3">
                 <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Reglas del loop (Directorios)</p>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Máx. marcas</label>
                     <input
@@ -354,12 +366,12 @@ export default function PlanesCRUD() {
                   <div>
                     <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Video (seg)</label>
                     <input
-                      type="number" min="0" max="60" value={videoSeconds}
+                      type="number" min="0" max="120" value={videoSeconds}
                       onChange={(e) => setVideoSeconds(e.target.value)}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500/50 transition-colors"
                       placeholder="15"
                     />
-                    <p className="text-[10px] text-white/20 mt-1">0 = sin video</p>
+                    <p className="text-[10px] text-white/20 mt-1">Default de las campañas · 0 = sin video</p>
                   </div>
                   <div>
                     <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Prioridad</label>
@@ -372,7 +384,7 @@ export default function PlanesCRUD() {
                     <p className="text-[10px] text-white/20 mt-1">1 = mayor</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => setLoopEligible(!loopEligible)}
