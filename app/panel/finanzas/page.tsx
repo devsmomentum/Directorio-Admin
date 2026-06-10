@@ -124,10 +124,12 @@ export default function FinanzasPage() {
       .filter(p => p.status !== 'completed')
       .reduce((s, p) => s + Number(p.amount_usd), 0);
     const totalExpenses = periodExpenses.reduce((s, e) => s + Number(e.amount_usd), 0);
-    const distributable = gross - totalExpenses;
+    // Anavi (gestión) cobra sobre los ingresos brutos: los gastos no le afectan.
+    const anavi = gross * (ANAVI_PCT / 100);
+    // El resto reparte sobre el neto, ya descontados Anavi y los gastos.
+    const distributable = gross - anavi - totalExpenses;
     const morna = distributable * (MORNA_PCT / 100);
     const sunmi = distributable * (SUNMI_PCT / 100);
-    const anavi = distributable * (ANAVI_PCT / 100);
     const millennium = distributable * (MILLENNIUM_PCT / 100);
     return { gross, pending, totalExpenses, distributable, morna, sunmi, anavi, millennium };
   }, [periodPayments, periodExpenses]);
@@ -240,11 +242,11 @@ export default function FinanzasPage() {
     const rows: string[][] = [
       ['Ingresos cobrados (pagos completados)', '', fmt(dist.gross)],
       ['Pagos pendientes (no incluidos)', '', fmt(dist.pending)],
+      [`− ${ANAVI_PCT}% Anavi (gestión, sobre bruto)`, fmt(dist.anavi), ''],
       ['− Gastos operativos registrados', fmt(dist.totalExpenses), ''],
-      ['Ganancia distribuible', '', fmt(dist.distributable)],
+      ['Ganancia distribuible (neto)', '', fmt(dist.distributable)],
       [`− ${MORNA_PCT}% Morna`, fmt(dist.morna), ''],
       [`− ${SUNMI_PCT}% Sunmi`, fmt(dist.sunmi), ''],
-      [`− ${ANAVI_PCT}% Anavi (gestión)`, fmt(dist.anavi), ''],
       [`− ${MILLENNIUM_PCT}% Millennium`, fmt(dist.millennium), ''],
       ['', '', ''],
       ['INGRESOS DETALLADOS', '', '', '', ''],
@@ -328,13 +330,13 @@ export default function FinanzasPage() {
         <div className="space-y-4">
           {/* Porcentajes (fijos) */}
           <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Porcentajes de distribución (sobre ganancia neta)</h3>
+            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Porcentajes de distribución (Anavi sobre bruto · resto sobre neto)</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: 'Morna', pct: MORNA_PCT, color: 'text-pink-400' },
-                { label: 'Sunmi', pct: SUNMI_PCT, color: 'text-cyan-400' },
-                { label: 'Anavi (gestión)', pct: ANAVI_PCT, color: 'text-purple-400' },
-                { label: 'Millennium', pct: MILLENNIUM_PCT, color: 'text-yellow-400' },
+                { label: 'Morna (neto)', pct: MORNA_PCT, color: 'text-pink-400' },
+                { label: 'Sunmi (neto)', pct: SUNMI_PCT, color: 'text-cyan-400' },
+                { label: 'Anavi (gestión · bruto)', pct: ANAVI_PCT, color: 'text-purple-400' },
+                { label: 'Millennium (neto)', pct: MILLENNIUM_PCT, color: 'text-yellow-400' },
               ].map(({ label, pct, color }) => (
                 <div key={label} className="bg-white/5 rounded-lg p-3">
                   <p className="text-[10px] text-white/30 mb-1.5">{label}</p>
@@ -350,11 +352,11 @@ export default function FinanzasPage() {
             <div className="space-y-0.5">
               <WRow label="Ingresos cobrados" sub={`${periodPayments.filter(p => p.status === 'completed').length} pagos completados`} amount={dist.gross} color="text-white" isTotal />
               {dist.pending > 0 && <WRow label="Pagos pendientes (excluidos)" amount={dist.pending} color="text-white/20" indent />}
+              <WRow label={`− ${ANAVI_PCT}% Anavi (gestión · sobre bruto)`} amount={-dist.anavi} color="text-purple-400" indent />
               <WRow label={`− Gastos operativos (${periodExpenses.length} registros)`} amount={-dist.totalExpenses} color="text-red-400" indent />
-              <WRow label="Ganancia distribuible" amount={dist.distributable} color={dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400'} isTotal borderTop />
+              <WRow label="Ganancia distribuible (neto)" amount={dist.distributable} color={dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400'} isTotal borderTop />
               <WRow label={`− ${MORNA_PCT}% Morna`} amount={-dist.morna} color="text-pink-400" indent />
               <WRow label={`− ${SUNMI_PCT}% Sunmi`} amount={-dist.sunmi} color="text-cyan-400" indent />
-              <WRow label={`− ${ANAVI_PCT}% Anavi (gestión)`} amount={-dist.anavi} color="text-purple-400" indent />
               <WRow label={`− ${MILLENNIUM_PCT}% Millennium`} amount={-dist.millennium} color="text-yellow-400" indent />
             </div>
           </div>
@@ -362,10 +364,10 @@ export default function FinanzasPage() {
           {/* Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'Para Morna (36%)', value: fmt(dist.morna), color: 'text-pink-400' },
-              { label: 'Para Sunmi (36%)', value: fmt(dist.sunmi), color: 'text-cyan-400' },
-              { label: 'Para Anavi (16%)', value: fmt(dist.anavi), color: 'text-purple-400' },
-              { label: 'Para Millennium (12%)', value: fmt(dist.millennium), color: 'text-yellow-400' },
+              { label: 'Para Morna (36% neto)', value: fmt(dist.morna), color: 'text-pink-400' },
+              { label: 'Para Sunmi (36% neto)', value: fmt(dist.sunmi), color: 'text-cyan-400' },
+              { label: 'Para Anavi (16% bruto)', value: fmt(dist.anavi), color: 'text-purple-400' },
+              { label: 'Para Millennium (12% neto)', value: fmt(dist.millennium), color: 'text-yellow-400' },
             ].map(s => (
               <div key={s.label} className="bg-[#111] border border-white/5 rounded-xl p-4">
                 <p className="text-[10px] text-white/25 uppercase tracking-wider mb-1">{s.label}</p>
@@ -531,11 +533,11 @@ export default function FinanzasPage() {
                 {[
                   { label: 'Ingresos cobrados', value: dist.gross, color: 'text-white', bold: false },
                   { label: 'Pagos pendientes (excluidos del cálculo)', value: dist.pending, color: 'text-yellow-400', bold: false },
+                  { label: `− ${ANAVI_PCT}% Anavi (gestión, sobre bruto)`, value: -dist.anavi, color: 'text-purple-400', bold: false },
                   { label: '− Gastos operativos registrados', value: -dist.totalExpenses, color: 'text-red-400', bold: false },
-                  { label: 'Ganancia distribuible', value: dist.distributable, color: dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400', bold: true },
+                  { label: 'Ganancia distribuible (neto)', value: dist.distributable, color: dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400', bold: true },
                   { label: `− ${MORNA_PCT}% Morna`, value: -dist.morna, color: 'text-pink-400', bold: false },
                   { label: `− ${SUNMI_PCT}% Sunmi`, value: -dist.sunmi, color: 'text-cyan-400', bold: false },
-                  { label: `− ${ANAVI_PCT}% Anavi (gestión)`, value: -dist.anavi, color: 'text-purple-400', bold: false },
                   { label: `− ${MILLENNIUM_PCT}% Millennium`, value: -dist.millennium, color: 'text-yellow-400', bold: false },
                 ].map((row, i) => (
                   <tr key={i} className={row.bold ? 'bg-white/3' : ''}>

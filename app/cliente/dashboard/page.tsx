@@ -45,8 +45,143 @@ function rangeStart(r: Range): string | null {
   return d.toISOString();
 }
 
+// ── Exportación CSV ───────────────────────────────────────────────────────
+// Mismo patrón que el panel admin: comillas dobladas y BOM UTF-8 para Excel.
+function csvCell(v: unknown): string {
+  if (v == null) return '';
+  const s = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCSV(filename: string, headers: string[], rows: unknown[][]) {
+  const body = [headers.map(csvCell).join(','), ...rows.map(r => r.map(csvCell).join(','))].join('\n');
+  const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function slugify(s: string): string {
+  return (s || 'tienda')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
+type StoreMetrics = {
+  campaigns: any[];
+  coupons: any[];
+  impressions: any[];
+  searchRows: any[];
+  couponRows: any[];
+};
+
+// Consulta las métricas de una tienda en el rango dado. El RLS de Supabase
+// limita las filas a las tiendas vinculadas a la cuenta del cliente.
+async function fetchStoreMetrics(storeId: string, startDay: string | null): Promise<StoreMetrics> {
+  const [campRes, couponsRes] = await Promise.all([
+    supabase.from('ad_campaigns')
+      .select('id, brand_name, plan_type, start_date, end_date, is_active, created_at')
+      .eq('store_id', storeId).order('created_at', { ascending: false }),
+    supabase.from('coupons')
+      .select('id, title, plan_type, code, amount_available, discount_percent, category, start_date, end_date, campaign_id, created_at')
+      .eq('store_id', storeId).order('created_at', { ascending: false }),
+  ]);
+
+  const campaigns = campRes.data || [];
+  const coupons = couponsRes.data || [];
+  const campIds = campaigns.map(c => c.id);
+
+  let impQ = supabase.from('ad_impressions_daily')
+    .select('campaign_id, kiosk_id, day, count')
+    .order('day', { ascending: false });
+  impQ = campIds.length
+    ? impQ.in('campaign_id', campIds)
+    : impQ.eq('campaign_id', '00000000-0000-0000-0000-000000000000');
+  if (startDay) impQ = impQ.gte('day', startDay);
+
+  let searchQ: any = supabase.from('search_daily_stats')
+    .select('date, search_term, search_count')
+    .eq('store_id_target', storeId);
+  if (startDay) searchQ = searchQ.gte('date', startDay);
+
+  let couponQ: any = supabase.from('coupon_daily_stats')
+    .select('date, shown, redeemed')
+    .eq('store_id', storeId);
+  if (startDay) couponQ = couponQ.gte('date', startDay);
+
+  const [impRes, searchRes, couponRes] = await Promise.all([impQ, searchQ, couponQ]);
+  return {
+    campaigns,
+    coupons,
+    impressions: impRes.data || [],
+    searchRows: searchRes.data || [],
+    couponRows: couponRes.data || [],
+  };
+}
+
+// Constructores de filas CSV (sin columna de tienda; se antepone para el export general).
+function buildImpressionRows(campaigns: any[], impressions: any[]): unknown[][] {
+  const byCamp: Record<string, string> = {};
+  campaigns.forEach(c => { byCamp[c.id] = c.brand_name; });
+  return impressions.slice()
+    .sort((a, b) => (a.day < b.day ? 1 : -1))
+    .map(d => [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id || '', d.count ?? 0]);
+}
+
+function buildSearchRows(searchRows: any[]): unknown[][] {
+  return searchRows.slice()
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .map(r => {
+      const isDirect = r.search_term === '(directo)' || r.search_term === '(mapa)';
+      return [r.date, isDirect ? 'click_directorio' : 'busqueda', r.search_term || '', r.search_count ?? 0];
+    });
+}
+
+function buildCouponStatRows(couponRows: any[]): unknown[][] {
+  return couponRows.slice()
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .map(r => [r.date, r.shown ?? 0, r.redeemed ?? 0]);
+}
+
+function summaryMetrics(data: StoreMetrics) {
+  const totalImpressions = data.impressions.reduce((s, d) => s + (d.count || 0), 0);
+  const storeClicks = data.searchRows
+    .filter(r => r.search_term === '(directo)' || r.search_term === '(mapa)')
+    .reduce((s, r) => s + (r.search_count || 0), 0);
+  const searchClicks = data.searchRows
+    .filter(r => r.search_term !== '(directo)' && r.search_term !== '(mapa)')
+    .reduce((s, r) => s + (r.search_count || 0), 0);
+  const flashShown = data.couponRows.reduce((s, r) => s + (r.shown || 0), 0);
+  const flashRedeemed = data.couponRows.reduce((s, r) => s + (r.redeemed || 0), 0);
+  const kioskSet = new Set<string>();
+  data.impressions.forEach(d => { if (d.kiosk_id) kioskSet.add(d.kiosk_id); });
+  return {
+    impresiones: totalImpressions,
+    clicks_directorio: storeClicks,
+    veces_buscada: searchClicks,
+    flash_mostrados: flashShown,
+    flash_canjeados: flashRedeemed,
+    kioscos_unicos: kioskSet.size,
+    campanias: data.campaigns.length,
+    cupones: data.coupons.length,
+  };
+}
+
+const SUMMARY_COLUMNS = [
+  'impresiones', 'clicks_directorio', 'veces_buscada', 'flash_mostrados',
+  'flash_canjeados', 'kioscos_unicos', 'campanias', 'cupones',
+] as const;
+
 export default function ClienteDashboardPage() {
-  const { selectedStore: store } = useClienteStore();
+  const { selectedStore: store, stores } = useClienteStore();
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
   const [impressions, setImpressions] = useState<any[]>([]);
@@ -67,14 +202,13 @@ export default function ClienteDashboardPage() {
       setLoading(true);
       try {
         const start = rangeStart(range);
+        const startDay = start ? start.split('T')[0] : null;
 
-        const [campRes, couponsRes, reqRes] = await Promise.all([
-          supabase.from('ad_campaigns')
-            .select('id, brand_name, plan_type, start_date, end_date, is_active, created_at, media_url, media_type, duration_seconds')
-            .eq('store_id', store.id).order('created_at', { ascending: false }),
-          supabase.from('coupons')
-            .select('id, title, plan_type, code, amount_available, discount_percent, category, start_date, end_date, campaign_id, created_at')
-            .eq('store_id', store.id).order('created_at', { ascending: false }),
+        // Métricas de la tienda desde los agregados diarios (las tablas crudas
+        // ya no se consultan: se purgan a los 30 días). El RLS deja a la tienda
+        // ver sólo sus propias filas.
+        const [metrics, reqRes] = await Promise.all([
+          fetchStoreMetrics(store.id, startDay),
           supabase.from('plan_requests')
             .select('*')
             .eq('store_id', store.id)
@@ -82,42 +216,12 @@ export default function ClienteDashboardPage() {
         ]);
 
         if (cancelled) return;
-        const camps = campRes.data || [];
-        const cps = couponsRes.data || [];
-        setCampaigns(camps);
-        setCoupons(cps);
+        setCampaigns(metrics.campaigns);
+        setCoupons(metrics.coupons);
+        setImpressions(metrics.impressions);
+        setSearchRows(metrics.searchRows);
+        setCouponRows(metrics.couponRows);
         setRequests(reqRes.data || []);
-
-        const campIds = camps.map(c => c.id);
-        let impQ = supabase.from('ad_impressions_daily')
-          .select('campaign_id, kiosk_id, day, count')
-          .order('day', { ascending: false });
-        if (campIds.length) impQ = impQ.in('campaign_id', campIds);
-        else impQ = impQ.eq('campaign_id', '00000000-0000-0000-0000-000000000000');
-        if (start) impQ = impQ.gte('day', start.split('T')[0]);
-        const impRes = await impQ;
-
-        // Métricas de la tienda desde los agregados diarios (las tablas crudas
-        // ya no se consultan: se purgan a los 30 días). El RLS deja a la tienda
-        // ver sólo sus propias filas.
-        const startDay = start ? start.split('T')[0] : null;
-
-        let searchQ: any = supabase.from('search_daily_stats')
-          .select('date, search_term, search_count')
-          .eq('store_id_target', store.id);
-        if (startDay) searchQ = searchQ.gte('date', startDay);
-
-        let couponQ: any = supabase.from('coupon_daily_stats')
-          .select('date, shown, redeemed')
-          .eq('store_id', store.id);
-        if (startDay) couponQ = couponQ.gte('date', startDay);
-
-        const [searchRes, couponRes] = await Promise.all([searchQ, couponQ]);
-        if (cancelled) return;
-
-        setImpressions(impRes.data || []);
-        setSearchRows(searchRes.data || []);
-        setCouponRows(couponRes.data || []);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -201,6 +305,91 @@ export default function ClienteDashboardPage() {
     const exp = new Date(store.contract_expiry_date + 'T00:00:00');
     return Math.round((exp.getTime() - today.getTime()) / 86400000);
   }, [store]);
+
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  const stamp = useMemo(
+    () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-'),
+    [],
+  );
+
+  // ── Descargas: tienda seleccionada (usa la data ya cargada) ──────────────
+  const selData: StoreMetrics = { campaigns, coupons, impressions, searchRows, couponRows };
+
+  const exportSelImpresiones = () => {
+    const rows = buildImpressionRows(campaigns, impressions);
+    if (!rows.length) { alert('Sin impresiones de campaña en el rango seleccionado.'); return; }
+    downloadCSV(`metricas_${slugify(store!.name)}_impresiones_${stamp}.csv`,
+      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones'], rows);
+  };
+
+  const exportSelBusquedas = () => {
+    const rows = buildSearchRows(searchRows);
+    if (!rows.length) { alert('Sin búsquedas ni clicks en el rango seleccionado.'); return; }
+    downloadCSV(`metricas_${slugify(store!.name)}_busquedas_${stamp}.csv`,
+      ['fecha', 'tipo', 'termino', 'cantidad'], rows);
+  };
+
+  const exportSelCupones = () => {
+    const rows = buildCouponStatRows(couponRows);
+    if (!rows.length) { alert('Sin actividad de cupones flash en el rango seleccionado.'); return; }
+    downloadCSV(`metricas_${slugify(store!.name)}_cupones_${stamp}.csv`,
+      ['fecha', 'mostrados', 'canjeados'], rows);
+  };
+
+  const exportSelResumen = () => {
+    const m = summaryMetrics(selData);
+    downloadCSV(`metricas_${slugify(store!.name)}_resumen_${stamp}.csv`,
+      ['metrica', 'valor'],
+      [
+        ['tienda', store!.name],
+        ['plan', store!.plan_type || ''],
+        ['rango', RANGE_LABELS[range]],
+        ...SUMMARY_COLUMNS.map(k => [k, (m as Record<string, number>)[k]]),
+      ]);
+  };
+
+  // ── Descargas: todas las tiendas vinculadas (consulta cada tienda) ───────
+  const exportGeneral = async (kind: 'impresiones' | 'busquedas' | 'cupones' | 'resumen') => {
+    if (!stores.length || exporting) return;
+    setExporting(kind);
+    try {
+      const startDay = (() => { const s = rangeStart(range); return s ? s.split('T')[0] : null; })();
+      const all = await Promise.all(
+        stores.map(async s => ({ store: s, data: await fetchStoreMetrics(s.id, startDay) })),
+      );
+
+      if (kind === 'resumen') {
+        const rows = all.map(({ store: s, data }) => {
+          const m = summaryMetrics(data);
+          return [s.name, s.plan_type || '', ...SUMMARY_COLUMNS.map(k => (m as Record<string, number>)[k])];
+        });
+        downloadCSV(`metricas_todas_tiendas_resumen_${stamp}.csv`,
+          ['tienda', 'plan', ...SUMMARY_COLUMNS], rows);
+        return;
+      }
+
+      const rows: unknown[][] = [];
+      for (const { store: s, data } of all) {
+        const part = kind === 'impresiones'
+          ? buildImpressionRows(data.campaigns, data.impressions)
+          : kind === 'busquedas'
+            ? buildSearchRows(data.searchRows)
+            : buildCouponStatRows(data.couponRows);
+        for (const r of part) rows.push([s.name, ...r]);
+      }
+      if (!rows.length) { alert('Sin datos para exportar en el rango seleccionado.'); return; }
+
+      const header = kind === 'impresiones'
+        ? ['tienda', 'fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones']
+        : kind === 'busquedas'
+          ? ['tienda', 'fecha', 'tipo', 'termino', 'cantidad']
+          : ['tienda', 'fecha', 'mostrados', 'canjeados'];
+      downloadCSV(`metricas_todas_tiendas_${kind}_${stamp}.csv`, header, rows);
+    } finally {
+      setExporting(null);
+    }
+  };
 
   if (!store) {
     return (
@@ -611,6 +800,47 @@ export default function ClienteDashboardPage() {
       </div>
 
 
+      {/* Descarga de métricas */}
+      <div className="bg-[#0A0A0A] border border-white/10 rounded-2xl p-5">
+        <div className="flex items-start gap-3 mb-4">
+          <svg className="w-5 h-5 text-cyan-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          <div>
+            <p className="text-sm font-semibold text-white">Descargar métricas</p>
+            <p className="text-xs text-white/40 mt-0.5">
+              Exporta tus métricas en CSV (Excel) · {RANGE_LABELS[range].toLowerCase()}
+            </p>
+          </div>
+        </div>
+
+        {/* Tienda seleccionada */}
+        <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">
+          Tienda actual · {store.name}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <ExportBtn label="Impresiones" onClick={exportSelImpresiones} />
+          <ExportBtn label="Búsquedas y clicks" onClick={exportSelBusquedas} />
+          <ExportBtn label="Cupones flash" onClick={exportSelCupones} />
+          <ExportBtn label="Resumen" onClick={exportSelResumen} primary />
+        </div>
+
+        {/* Todas las tiendas vinculadas */}
+        {stores.length > 1 && (
+          <>
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mt-5 mb-2">
+              Todas mis tiendas ({stores.length})
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <ExportBtn label="Impresiones" busy={exporting === 'impresiones'} disabled={!!exporting} onClick={() => exportGeneral('impresiones')} />
+              <ExportBtn label="Búsquedas y clicks" busy={exporting === 'busquedas'} disabled={!!exporting} onClick={() => exportGeneral('busquedas')} />
+              <ExportBtn label="Cupones flash" busy={exporting === 'cupones'} disabled={!!exporting} onClick={() => exportGeneral('cupones')} />
+              <ExportBtn label="Resumen comparativo" busy={exporting === 'resumen'} disabled={!!exporting} onClick={() => exportGeneral('resumen')} primary />
+            </div>
+          </>
+        )}
+      </div>
+
       <div>
         <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Campañas ({campaigns.length})</p>
         {campaigns.length === 0 ? (
@@ -731,6 +961,36 @@ export default function ClienteDashboardPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+function ExportBtn({ label, onClick, primary, busy, disabled }: {
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+  busy?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || busy}
+      className={`inline-flex items-center gap-1.5 text-xs font-medium rounded-lg px-3 py-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        primary
+          ? 'bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-200'
+          : 'bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-white/70'
+      }`}
+    >
+      {busy ? (
+        <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+      ) : (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+        </svg>
+      )}
+      {busy ? 'Generando…' : label}
+      {!busy && <span className="text-[9px] font-mono text-white/30">CSV</span>}
+    </button>
   );
 }
 

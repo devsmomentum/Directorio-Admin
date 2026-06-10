@@ -417,11 +417,11 @@ export default function TiendasCRUD() {
 
   const validateImage = (file: File): Promise<boolean> =>
     new Promise((resolve) => {
-      if (file.size > 500 * 1024) { alert('El logo debe pesar menos de 500 KB.'); resolve(false); return; }
+      if (file.size > 2 * 1024 * 1024) { alert('El logo debe pesar menos de 2 MB.'); resolve(false); return; }
       const img = new Image();
       img.onload = () => {
-        if (img.width > 800 || img.height > 800) {
-          alert(`Dimensiones excedidas (${img.width}x${img.height}). Maximo: 800x800px.`);
+        if (img.width > 4000 || img.height > 4000) {
+          alert(`Dimensiones excedidas (${img.width}x${img.height}). Maximo: 4000x4000px.`);
           resolve(false);
         } else { resolve(true); }
       };
@@ -429,7 +429,7 @@ export default function TiendasCRUD() {
     });
 
   const validateDoc = (file: File): boolean => {
-    if (file.size > 10 * 1024 * 1024) { alert('El documento debe pesar menos de 10 MB.'); return false; }
+    if (file.size > 50 * 1024 * 1024) { alert('El documento debe pesar menos de 50 MB.'); return false; }
     return true;
   };
 
@@ -1104,7 +1104,7 @@ export default function TiendasCRUD() {
                         onChange={handleContractChange}
                         className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
                       />
-                      <p className="text-[10px] text-white/20 mt-1">PDF, JPG o PNG — Max 10MB</p>
+                      <p className="text-[10px] text-white/20 mt-1">PDF, JPG o PNG — Max 25MB</p>
                     </div>
                   </div>
                 </div>
@@ -1134,7 +1134,7 @@ export default function TiendasCRUD() {
                         onChange={handleMercantilChange}
                         className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
                       />
-                      <p className="text-[10px] text-white/20 mt-1">PDF, JPG o PNG — Max 10MB</p>
+                      <p className="text-[10px] text-white/20 mt-1">PDF, JPG o PNG — Max 25MB</p>
                     </div>
                   </div>
                 </div>
@@ -1309,7 +1309,7 @@ export default function TiendasCRUD() {
                       type="file" accept="image/*" onChange={handleLogoChange}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
                     />
-                    <p className="text-[10px] text-white/20 mt-1">Max 500KB, rec 400x400px</p>
+                    <p className="text-[10px] text-white/20 mt-1">Max 2MB, hasta 4000x4000px</p>
                   </div>
                 </div>
               </div>
