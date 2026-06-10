@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { validateKioskVideo } from '../../../lib/videoValidation';
 import Pagination, { usePagination } from '../../components/Pagination';
 
 const BANNER_W = 80;
@@ -199,6 +200,11 @@ export default function BannersAdminPage() {
     if (file.size > (isVideo ? 15 : 2) * 1024 * 1024) {
       alert(`Máximo ${isVideo ? '15 MB (video)' : '2 MB (imagen)'}.`);
       e.target.value = ''; return;
+    }
+    // Compatibilidad con el decoder del kiosco K2 (rechaza 4K / HEVC / Level alto).
+    if (isVideo) {
+      const check = await validateKioskVideo(file);
+      if (!check.ok) { alert(check.message); e.target.value = ''; return; }
     }
     setMediaFile(file);
     setMediaType(isVideo ? 'video' : 'image');

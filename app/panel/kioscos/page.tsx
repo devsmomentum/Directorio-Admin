@@ -6,6 +6,7 @@ import Pagination, { usePagination } from '../../components/Pagination';
 
 export default function KioscosCRUD() {
   const [kiosks, setKiosks] = useState<any[]>([]);
+  const [malls, setMalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -15,6 +16,15 @@ export default function KioscosCRUD() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
+  // Centro comercial al que pertenece el kiosco: define qué tiendas lista en
+  // su directorio/mapa. La app del kiosco filtra `stores` por este mall_id.
+  const [mallId, setMallId] = useState('');
+
+  // Mall por defecto para kioscos nuevos: Millennium si existe, si no el primero.
+  const defaultMallId = useMemo(
+    () => malls.find(m => m.code === 'MILLENNIUM')?.id || malls[0]?.id || '',
+    [malls]
+  );
 
   useEffect(() => {
     fetchKiosks();
@@ -22,13 +32,13 @@ export default function KioscosCRUD() {
 
   const fetchKiosks = async () => {
     setRefreshing(true);
-    const { data } = await supabase
-      .from('kiosks')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(500);
+    const [kiosksRes, mallsRes] = await Promise.all([
+      supabase.from('kiosks').select('*').order('created_at', { ascending: false }).limit(500),
+      supabase.from('malls').select('id, name, code').order('name', { ascending: true }),
+    ]);
 
-    if (data) setKiosks(data);
+    if (kiosksRes.data) setKiosks(kiosksRes.data);
+    if (mallsRes.data) setMalls(mallsRes.data);
     setLoading(false);
     setRefreshing(false);
   };
@@ -40,7 +50,7 @@ export default function KioscosCRUD() {
     if (editingId) {
       const { error } = await supabase
         .from('kiosks')
-        .update({ name, location })
+        .update({ name, location, mall_id: mallId || null })
         .eq('id', editingId);
 
       if (error) alert('Error al actualizar: ' + error.message);
@@ -48,6 +58,7 @@ export default function KioscosCRUD() {
       const { error } = await supabase.from('kiosks').insert([{
         name,
         location,
+        mall_id: mallId || null,
         status: 'offline',
         hardware_id: null
       }]);
@@ -64,6 +75,7 @@ export default function KioscosCRUD() {
     setEditingId(kiosk.id);
     setName(kiosk.name || '');
     setLocation(kiosk.location || '');
+    setMallId(kiosk.mall_id || '');
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -72,6 +84,7 @@ export default function KioscosCRUD() {
     setEditingId(null);
     setName('');
     setLocation('');
+    setMallId(defaultMallId);
     setShowForm(false);
   };
 
@@ -190,6 +203,21 @@ export default function KioscosCRUD() {
                   className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
                   placeholder="Ej: Nivel C2, frente a Arturo's"
                 />
+              </div>
+              <div>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Centro comercial</label>
+                <select
+                  required
+                  value={mallId}
+                  onChange={(e) => setMallId(e.target.value)}
+                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                >
+                  <option value="">Seleccionar...</option>
+                  {malls.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-white/20 mt-1">El kiosco solo mostrará tiendas de este centro comercial.</p>
               </div>
               <div className="flex gap-2 pt-2">
                 <button

@@ -157,8 +157,17 @@ CREATE TABLE public.kiosks (
   floor_level text,
   kiosk_mode boolean DEFAULT true,
   binding_enabled boolean DEFAULT false,
+  mall_id uuid,
   CONSTRAINT kiosks_pkey PRIMARY KEY (id),
-  CONSTRAINT kiosks_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.map_nodes(id)
+  CONSTRAINT kiosks_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.map_nodes(id),
+  CONSTRAINT kiosks_mall_id_fkey FOREIGN KEY (mall_id) REFERENCES public.malls(id)
+);
+CREATE TABLE public.malls (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  code text UNIQUE,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT malls_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.map_calibration (
   floor_code text NOT NULL,
@@ -307,9 +316,11 @@ CREATE TABLE public.stores (
   mercantil_url text,
   contract_expiry_date date,
   cedula_url text,
+  mall_id uuid,
   CONSTRAINT stores_pkey PRIMARY KEY (id),
   CONSTRAINT stores_node_id_fkey FOREIGN KEY (node_id) REFERENCES public.map_nodes(id),
-  CONSTRAINT stores_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
+  CONSTRAINT stores_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id),
+  CONSTRAINT stores_mall_id_fkey FOREIGN KEY (mall_id) REFERENCES public.malls(id)
 );
 CREATE TABLE public.temp_locales (
   Local text,

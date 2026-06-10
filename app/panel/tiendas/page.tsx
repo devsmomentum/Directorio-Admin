@@ -30,6 +30,16 @@ const PLAN_MAX_BRANDS: Record<string, number | null> = {
 const FLASH_ADDON_OPTIONS = ['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL'] as const;
 const FLASH_ADDON_MAX_BRANDS = 20;
 
+// Capacidad de cupos por plan: la fuente de verdad EDITABLE es `plans.max_brands`
+// (se ajusta desde /panel/planes). Estas constantes quedan solo como FALLBACK
+// para cuando la tabla `plans` no trae la fila del plan (BD incompleta), de modo
+// que el comportamiento nunca empeora respecto a hoy. null = ilimitado.
+const FALLBACK_PLAN_CAPS: Record<string, number | null> = {
+  ...PLAN_MAX_BRANDS,
+  FLASH_COUPON_DIARIO: FLASH_ADDON_MAX_BRANDS,
+  FLASH_COUPON_SEMANAL: FLASH_ADDON_MAX_BRANDS,
+};
+
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
   ORO: 'text-amber-400 bg-amber-500/10',
@@ -169,6 +179,7 @@ function StoreLogo({
 export default function TiendasCRUD() {
   const [stores, setStores] = useState<any[]>([]);
   const [categoriesList, setCategoriesList] = useState<any[]>([]);
+  const [malls, setMalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -181,6 +192,9 @@ export default function TiendasCRUD() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  // Centro comercial al que pertenece la tienda. '' = tienda externa (sin CC):
+  // en ese caso no aplica piso/local físico y el kiosco no la lista.
+  const [mallId, setMallId] = useState('');
   const [floorLevel, setFloorLevel] = useState('');
   const [localNumber, setLocalNumber] = useState('');
   const [description, setDescription] = useState('');
@@ -193,33 +207,157 @@ export default function TiendasCRUD() {
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
 
-  // Usuario vinculado: solo lectura. La gestión completa (crear, editar,
-  // vincular/desvincular, enviar link) vive en /panel/clientes.
+  // Cliente vinculado a la tienda. Se puede vincular un cliente YA EXISTENTE al
+  // crear/editar la tienda (reusa la RPC admin_link_store_user). Crear clientes
+  // nuevos / enviar magic link sigue viviendo en /panel/clientes.
   const [linkedUser, setLinkedUser] = useState<any | null>(null);
+  const [clientsList, setClientsList] = useState<any[]>([]);
+  // Si la carga de clientes falla (RLS, columna inexistente, etc.) lo mostramos
+  // explícitamente en vez de un dropdown vacío silencioso.
+  const [clientsError, setClientsError] = useState<string | null>(null);
+  // Cliente elegido en el formulario ('' = sin vincular) + texto de búsqueda
+  // para filtrar por nombre / cédula / email.
+  const [linkClientId, setLinkClientId] = useState('');
+  const [clientSearch, setClientSearch] = useState('');
 
   // Documents
   const [contractFile, setContractFile] = useState<File | null>(null);
   const [contractUrl, setContractUrl] = useState('');
   const [mercantilFile, setMercantilFile] = useState<File | null>(null);
   const [mercantilUrl, setMercantilUrl] = useState('');
-  const [contractExpiryDate, setContractExpiryDate] = useState('');
+  // El vencimiento del contrato ya no es manual: se calcula en
+  // `computedContractExpiry` a partir del plan asignado.
 
   // Addon Flash Coupon (independiente del plan base)
   const [flashCouponPlan, setFlashCouponPlan] = useState<string>('');
   const [flashCouponExpiryDate, setFlashCouponExpiryDate] = useState('');
 
+  // Capacidad de cupos por plan leída de `plans.max_brands` (editable desde
+  // /panel/planes). Vacío hasta que carga; capFor() cae al fallback mientras.
+  const [planCaps, setPlanCaps] = useState<Record<string, number | null>>({});
+  // Duración (días) por plan, leída de `plans.duration_days`. Se usa para
+  // calcular automáticamente el vencimiento del contrato. Fallback: 30 días.
+  const [planDurations, setPlanDurations] = useState<Record<string, number>>({});
+
+  // Intervalos de ocupación por plan (RPC plan_capacity_intervals, SECURITY
+  // DEFINER → ve TODAS las tiendas). Sirve para validar que al asignar un plan
+  // no choque con otro contrato vigente ni con un cambio futuro, igual que en
+  // el portal del cliente (request_plan_atomic / plan_capacity_intervals).
+  type CapacityInterval = { plan_key: string; start_d: string; end_d: string; source: string };
+  const [capacityIntervals, setCapacityIntervals] = useState<CapacityInterval[]>([]);
+
+  // Mall por defecto para tiendas nuevas: Millennium si existe, si no el primero.
+  const defaultMallId = useMemo(
+    () => malls.find(m => m.code === 'MILLENNIUM')?.id || malls[0]?.id || '',
+    [malls]
+  );
+
+  // Vencimiento del contrato calculado automáticamente (no manual):
+  //   - Sin plan → null (sin plan no hay contrato).
+  //   - Editando y el plan NO cambió → se conserva el vencimiento ya guardado.
+  //   - Plan nuevo o cambiado → hoy + duración del plan (plans.duration_days,
+  //     fallback 30 días). El cupo del plan ya se valida aparte (capFor),
+  //     así que solo se asigna cuando hay disponibilidad.
+  const FALLBACK_DURATION_DAYS = 30;
+  const computedContractExpiry = useMemo<string | null>(() => {
+    if (!planType) return null;
+    const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
+    if (editingStore && editingStore.plan_type === planType && editingStore.contract_expiry_date) {
+      return editingStore.contract_expiry_date;
+    }
+    const days = planDurations[planType] ?? FALLBACK_DURATION_DAYS;
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split('T')[0];
+  }, [planType, planDurations, editingId, stores]);
+
+  // Réplica del sweep-line del backend (plan_max_overlap_in_window) usando los
+  // intervalos anonimizados de plan_capacity_intervals. Devuelve la ocupación
+  // máxima simultánea de OTROS contratos/cambios del plan en la ventana dada.
+  const computeMaxOverlapInWindow = (
+    planKey: string,
+    windowStart: string,
+    windowEnd: string,
+  ): number => {
+    const clipped: Array<[string, string]> = [];
+    for (const iv of capacityIntervals) {
+      if (iv.plan_key !== planKey) continue;
+      const rawStart = iv.source === 'store'
+        ? (windowStart > iv.start_d ? windowStart : iv.start_d)
+        : iv.start_d;
+      const s = rawStart > windowStart ? rawStart : windowStart;
+      const e = iv.end_d < windowEnd ? iv.end_d : windowEnd;
+      if (s <= windowEnd && e >= windowStart && s <= e) {
+        clipped.push([s, e]);
+      }
+    }
+    if (clipped.length === 0) return 0;
+
+    const evts: Array<[string, number]> = [];
+    for (const [s, e] of clipped) {
+      evts.push([s, 1]);
+      const nxt = new Date(e + 'T00:00:00');
+      nxt.setDate(nxt.getDate() + 1);
+      evts.push([nxt.toISOString().split('T')[0], -1]);
+    }
+    evts.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : b[1] - a[1]);
+    let count = 0, max = 0;
+    for (const [, delta] of evts) {
+      count += delta;
+      if (count > max) max = count;
+    }
+    return max;
+  };
+
+  // ¿El plan base seleccionado choca con otro contrato/cambio futuro en la
+  // ventana del contrato? (igual criterio que el cliente). Solo aplica cuando se
+  // asigna un plan NUEVO o se CAMBIA de plan; una renovación del mismo plan usa
+  // su propio cupo y no se revalida.
+  const planCollision = useMemo(() => {
+    if (!planType || !computedContractExpiry) return null;
+    // cap inline (capFor se define más abajo): plans.max_brands o fallback.
+    const cap = planType in planCaps
+      ? planCaps[planType]
+      : (planType in FALLBACK_PLAN_CAPS ? FALLBACK_PLAN_CAPS[planType] : null);
+    if (cap == null) return null;
+    const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
+    const planChanged = !editingStore || editingStore.plan_type !== planType;
+    if (!planChanged) return null;
+    const start = new Date().toISOString().split('T')[0];
+    const overlap = computeMaxOverlapInWindow(planType, start, computedContractExpiry);
+    if (overlap >= cap) {
+      return { start, end: computedContractExpiry, overlap, cap };
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planType, computedContractExpiry, editingId, stores, capacityIntervals]);
+
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [catsRes, storesRes, linksRes, usersRes] = await Promise.all([
+    const [catsRes, storesRes, linksRes, usersRes, plansRes, mallsRes, capRes] = await Promise.all([
       supabase.from('categories').select('*').order('name', { ascending: true }).limit(200),
       supabase.from('stores').select('*, categories(id, name, icon)').order('created_at', { ascending: false }).limit(500),
       supabase.from('user_stores').select('user_id, store_id'),
-      supabase.from('users').select('id, email, full_name, cedula_numero, telefono_personal').eq('role', 'cliente')
+      supabase.from('users').select('id, email, full_name, cedula_numero, telefono_personal').eq('role', 'cliente'),
+      supabase.from('plans').select('plan_key, max_brands, duration_days').limit(200),
+      supabase.from('malls').select('id, name, code').order('name', { ascending: true }),
+      supabase.rpc('plan_capacity_intervals'),
     ]);
     if (catsRes.data) setCategoriesList(catsRes.data);
+    if (mallsRes.data) setMalls(mallsRes.data);
+    setCapacityIntervals((capRes.data as CapacityInterval[]) || []);
     
+    // Lista de clientes para el selector de vinculación del formulario.
+    if (usersRes.error) {
+      console.warn('[tiendas] no se pudieron cargar los clientes:', usersRes.error);
+      setClientsError(usersRes.error.message);
+    } else {
+      setClientsError(null);
+    }
+    setClientsList(usersRes.data || []);
+
     // Armar el mapa de dueños
     const userMap = new Map((usersRes.data || []).map(u => [u.id, u]));
     const storeToUser: Record<string, any> = {};
@@ -229,6 +367,20 @@ export default function TiendasCRUD() {
     }
     setUsersByStore(storeToUser);
     if (storesRes.data) setStores(storesRes.data);
+
+    // Mapa clave→max_brands desde la BD. Si la tabla `plans` no existe o falla,
+    // planCaps queda vacío y capFor() usa el fallback hardcodeado.
+    const caps: Record<string, number | null> = {};
+    const durations: Record<string, number> = {};
+    for (const p of (plansRes.data || [])) {
+      if (p.plan_key) {
+        caps[p.plan_key] = p.max_brands ?? null;
+        if (p.duration_days) durations[p.plan_key] = p.duration_days;
+      }
+    }
+    setPlanCaps(caps);
+    setPlanDurations(durations);
+
     setLoading(false);
     setRefreshing(false);
   };
@@ -256,6 +408,12 @@ export default function TiendasCRUD() {
     }
     return byPlan;
   }, [stores]);
+
+  // Capacidad efectiva del cupo de un plan: `plans.max_brands` de la BD
+  // (editable en /panel/planes) o, si la fila no está cargada, el fallback
+  // hardcodeado. null = ilimitado. Es la única fuente de cap en toda la página.
+  const capFor = (key: string): number | null =>
+    key in planCaps ? planCaps[key] : (key in FALLBACK_PLAN_CAPS ? FALLBACK_PLAN_CAPS[key] : null);
 
   const validateImage = (file: File): Promise<boolean> =>
     new Promise((resolve) => {
@@ -300,9 +458,9 @@ export default function TiendasCRUD() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validación de capacidad del plan base (Diamante ≤ 2, Oro ≤ 30)
+    // Validación de capacidad del plan base (cupo leído de plans.max_brands)
     if (planType) {
-      const cap = PLAN_MAX_BRANDS[planType];
+      const cap = capFor(planType);
       if (cap != null) {
         // Excluir la tienda que se está editando si ya tenía ese plan
         const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
@@ -323,13 +481,28 @@ export default function TiendasCRUD() {
       const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
       const wasSameAddon = editingStore?.flash_coupon_plan === flashCouponPlan;
       const currentCount = (flashAddonUsage[flashCouponPlan] || 0) - (wasSameAddon ? 1 : 0);
-      if (currentCount >= FLASH_ADDON_MAX_BRANDS) {
+      const flashCap = capFor(flashCouponPlan);
+      if (flashCap != null && currentCount >= flashCap) {
         alert(
-          `Límite alcanzado: ${currentCount}/${FLASH_ADDON_MAX_BRANDS} tiendas con addon ${PLAN_LABELS[flashCouponPlan]}.\n\n` +
+          `Límite alcanzado: ${currentCount}/${flashCap} tiendas con addon ${PLAN_LABELS[flashCouponPlan]}.\n\n` +
           `Libera un cupo desactivando el addon en otra tienda.`
         );
         return;
       }
+    }
+
+    // Validación de solapamiento del plan base (igual que el portal del cliente):
+    // que el plan no choque con otro contrato vigente o un cambio futuro ya
+    // aprobado/pendiente dentro de la ventana del contrato.
+    if (planCollision) {
+      alert(
+        `Sin cupo para ${PLAN_LABELS[planType] || planType} en el período ` +
+        `${planCollision.start} – ${planCollision.end}.\n\n` +
+        `Ocupación máxima proyectada: ${planCollision.overlap}/${planCollision.cap} ` +
+        `(cuenta contratos vigentes y cambios futuros). Elige otro plan o libera un cupo ` +
+        `antes de asignarlo.`
+      );
+      return;
     }
 
     setSubmitting(true);
@@ -351,20 +524,29 @@ export default function TiendasCRUD() {
         finalMercantilUrl = await uploadPrivateDoc(mercantilFile, `mercantil/mercantil_${Date.now()}.${ext}`);
       }
 
+      // Tienda externa (sin CC): no tiene ubicación física en un mall, así que
+      // no arrastramos piso/local.
+      const isExternal = !mallId;
       const storeData: any = {
         name,
-        category_id: categoryId || null,
-        floor_level: floorLevel,
-        local_number: localNumber,
+        // Las tiendas externas no se listan en el directorio, así que no usan
+        // categoría.
+        category_id: isExternal ? null : (categoryId || null),
+        mall_id: mallId || null,
+        floor_level: isExternal ? null : floorLevel,
+        local_number: isExternal ? null : localNumber,
         description,
         logo_url: finalLogoUrl,
         plan_type: planType || null,
         rif: rif || null,
         contact_email: contactEmail || null,
         contact_phone: contactPhone || null,
-        contract_url: finalContractUrl || null,
+        // Sin plan no hay contrato: no se sube contrato ni se calcula vencimiento.
+        contract_url: planType ? (finalContractUrl || null) : null,
         mercantil_url: finalMercantilUrl || null,
-        contract_expiry_date: contractExpiryDate || null,
+        // El vencimiento del contrato se calcula automáticamente según la
+        // duración del plan (no es manual). Sin plan = sin vencimiento.
+        contract_expiry_date: computedContractExpiry,
         flash_coupon_plan: flashCouponPlan || null,
         flash_coupon_expiry_date: flashCouponPlan ? (flashCouponExpiryDate || null) : null,
       };
@@ -395,8 +577,35 @@ export default function TiendasCRUD() {
         }
       }
 
-      // La vinculación tienda↔cliente y el envío de magic links se hace en
-      // /panel/clientes. Acá solo persistimos los campos de la tienda en sí.
+      // Reconciliar el cliente vinculado (cliente ya existente). Crear clientes
+      // nuevos / enviar magic link sigue en /panel/clientes.
+      if (storeId) {
+        const previousUserId = linkedUser?.id ?? null;
+        if (linkClientId && linkClientId !== previousUserId) {
+          // Vincular el cliente elegido (reemplaza al dueño previo si lo había).
+          const client = clientsList.find(c => c.id === linkClientId);
+          if (client?.email) {
+            const { data: linkedId, error: linkErr } = await supabase.rpc('admin_link_store_user', {
+              p_email: client.email,
+              p_store_id: storeId,
+            });
+            if (linkErr) throw linkErr;
+            if (!linkedId) {
+              alert(
+                `La tienda se guardó, pero "${client.email}" aún no tiene cuenta activa. ` +
+                `Envíale el magic link desde Clientes para completar la vinculación.`
+              );
+            }
+          }
+        } else if (!linkClientId && previousUserId) {
+          // Se quitó el cliente: desvincular.
+          const { error: unlinkErr } = await supabase.rpc('admin_unlink_store_user', {
+            p_user_id: previousUserId,
+            p_store_id: storeId,
+          });
+          if (unlinkErr) throw unlinkErr;
+        }
+      }
 
       resetForm();
       fetchData();
@@ -411,6 +620,7 @@ export default function TiendasCRUD() {
     setEditingId(store.id);
     setName(store.name || '');
     setCategoryId(store.category_id || '');
+    setMallId(store.mall_id || '');
     setFloorLevel(store.floor_level || '');
     setLocalNumber(store.local_number || '');
     setDescription(store.description || '');
@@ -424,12 +634,10 @@ export default function TiendasCRUD() {
     setContractFile(null);
     setMercantilUrl(store.mercantil_url || '');
     setMercantilFile(null);
-    setContractExpiryDate(store.contract_expiry_date || '');
     setFlashCouponPlan(store.flash_coupon_plan || '');
     setFlashCouponExpiryDate(store.flash_coupon_expiry_date || '');
 
-    // Cargar el usuario vinculado a esta tienda (read-only). La gestión vive
-    // en /panel/clientes.
+    // Cargar el cliente vinculado a esta tienda y preseleccionarlo en el selector.
     const { data: link } = await supabase
       .from('user_stores')
       .select('user_id')
@@ -443,9 +651,12 @@ export default function TiendasCRUD() {
         .eq('id', link.user_id)
         .maybeSingle();
       setLinkedUser(user);
+      setLinkClientId(link.user_id);
     } else {
       setLinkedUser(null);
+      setLinkClientId('');
     }
+    setClientSearch('');
 
     setShowForm(true);
   };
@@ -468,16 +679,18 @@ export default function TiendasCRUD() {
 
   const resetForm = () => {
     setEditingId(null);
-    setName(''); setCategoryId(''); setFloorLevel(''); setLocalNumber('');
+    setName(''); setCategoryId(''); setMallId(defaultMallId);
+    setFloorLevel(''); setLocalNumber('');
     setDescription(''); setPlanType(''); setLogoFile(null); setLogoPreview('');
     setRif('');
     setContactEmail(''); setContactPhone('');
     setContractFile(null); setContractUrl('');
     setMercantilFile(null); setMercantilUrl('');
-    setContractExpiryDate('');
     setFlashCouponPlan('');
     setFlashCouponExpiryDate('');
     setLinkedUser(null);
+    setLinkClientId('');
+    setClientSearch('');
     setShowForm(false);
   };
 
@@ -561,8 +774,9 @@ export default function TiendasCRUD() {
           <div className="flex items-center gap-2 flex-wrap">
             {FLASH_ADDON_OPTIONS.map(opt => {
               const used = flashAddonUsage[opt] || 0;
-              const saturated = used >= FLASH_ADDON_MAX_BRANDS;
-              const tight = used >= FLASH_ADDON_MAX_BRANDS - 2;
+              const cap = capFor(opt);
+              const saturated = cap != null && used >= cap;
+              const tight = cap != null && used >= cap - 2;
               return (
                 <span
                   key={opt}
@@ -574,12 +788,12 @@ export default function TiendasCRUD() {
                       : `${PLAN_COLORS[opt]} border-transparent`
                   }`}
                 >
-                  + {PLAN_LABELS[opt]} <span className="font-mono">{used}/{FLASH_ADDON_MAX_BRANDS}</span>
+                  + {PLAN_LABELS[opt]} <span className="font-mono">{used}/{cap ?? '∞'}</span>
                 </span>
               );
             })}
             {PLAN_TYPES.map(p => {
-              const cap = PLAN_MAX_BRANDS[p];
+              const cap = capFor(p);
               const used = planUsage[p] || 0;
               if (cap == null) {
                 return (
@@ -640,6 +854,23 @@ export default function TiendasCRUD() {
               <div className="space-y-4">
                 <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Info del Local</p>
                 <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Centro comercial</label>
+                  <select
+                    value={mallId} onChange={(e) => setMallId(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                  >
+                    {malls.map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                    <option value="">Tienda externa (sin centro comercial)</option>
+                  </select>
+                  <p className="text-[10px] text-white/20 mt-1">
+                    {mallId
+                      ? 'Tienda dentro del centro comercial: define su piso y local.'
+                      : 'Tienda externa: no aparece en el directorio/mapa del kiosco, pero puede adquirir planes.'}
+                  </p>
+                </div>
+                <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Nombre de la tienda</label>
                   <input
                     type="text" required value={name} onChange={(e) => setName(e.target.value)}
@@ -647,42 +878,46 @@ export default function TiendasCRUD() {
                     placeholder="Ej: Cinex"
                   />
                 </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Categoria</label>
-                  <select
-                    required value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                  >
-                    <option value="">Seleccionar...</option>
-                    {categoriesList.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
+                {mallId && (
                   <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Piso</label>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Categoria</label>
                     <select
-                      required value={floorLevel} onChange={(e) => setFloorLevel(e.target.value)}
+                      required value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
                     >
-                      <option value="">Elegir...</option>
-                      <option value="C4">Nivel C4</option>
-                      <option value="C3">Nivel C3</option>
-                      <option value="C2">Nivel C2</option>
-                      <option value="C1">Nivel C1</option>
-                      <option value="RG">Nivel RG</option>
+                      <option value="">Seleccionar...</option>
+                      {categoriesList.map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ))}
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Local N</label>
-                    <input
-                      type="text" required value={localNumber} onChange={(e) => setLocalNumber(e.target.value)}
-                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                      placeholder="Ej: L-45"
-                    />
+                )}
+                {mallId && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Piso</label>
+                      <select
+                        required value={floorLevel} onChange={(e) => setFloorLevel(e.target.value)}
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                      >
+                        <option value="">Elegir...</option>
+                        <option value="C4">Nivel C4</option>
+                        <option value="C3">Nivel C3</option>
+                        <option value="C2">Nivel C2</option>
+                        <option value="C1">Nivel C1</option>
+                        <option value="RG">Nivel RG</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Local N</label>
+                      <input
+                        type="text" required value={localNumber} onChange={(e) => setLocalNumber(e.target.value)}
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                        placeholder="Ej: L-45"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descripcion</label>
                   <textarea
@@ -725,10 +960,10 @@ export default function TiendasCRUD() {
                 </div>
               </div>
 
-              {/* ── Sección: Cliente vinculado (read-only) ──
-                  La gestión completa (crear, editar, vincular/desvincular,
-                  enviar magic link) vive en /panel/clientes. Acá solo
-                  informamos quién es el dueño actual de la tienda. */}
+              {/* ── Sección: Cliente vinculado ──
+                  Se puede vincular un cliente YA EXISTENTE al crear/editar la
+                  tienda. Para crear un cliente nuevo o enviar el magic link, se
+                  usa /panel/clientes. */}
               <div className="border-t border-white/5 pt-5 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
@@ -738,43 +973,114 @@ export default function TiendasCRUD() {
                     href="/panel/clientes"
                     className="text-[10px] text-cyan-400 hover:text-cyan-300 underline"
                   >
-                    Ir a Clientes →
+                    ¿Cliente nuevo? Créalo en Clientes →
                   </Link>
                 </div>
 
-                {editingId && linkedUser ? (
-                  <div className="bg-white/[0.03] border border-white/10 rounded-lg p-3">
-                    <p className="text-sm text-white/85 font-medium truncate">
-                      {linkedUser.full_name || <span className="text-white/40 italic">Sin nombre</span>}
-                    </p>
-                    <p className="text-[11px] text-white/50 truncate">{linkedUser.email}</p>
-                    <div className="flex gap-3 mt-1 flex-wrap">
-                      {linkedUser.cedula_numero && (
-                        <span className="text-[10px] text-white/40 font-mono">
-                          CI: {linkedUser.cedula_numero}
-                        </span>
-                      )}
-                      {linkedUser.telefono_personal && (
-                        <span className="text-[10px] text-white/40">
-                          📱 {linkedUser.telefono_personal}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-white/40 bg-white/[0.02] border border-white/5 rounded-lg p-3">
-                    {editingId
-                      ? 'Esta tienda no tiene cliente vinculado. Vincúlala desde Clientes.'
-                      : 'Tras crear la tienda, vincúlale un cliente desde Clientes.'}
+                {clientsError && (
+                  <p className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2.5">
+                    No se pudieron cargar los clientes: {clientsError}
                   </p>
                 )}
+                {!clientsError && clientsList.length === 0 && (
+                  <p className="text-[11px] text-amber-300/80 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg p-2.5">
+                    No hay clientes registrados (rol «cliente»). Créalos en{' '}
+                    <Link href="/panel/clientes" className="underline">Clientes</Link>.
+                  </p>
+                )}
+                {(() => {
+                  const sel = clientsList.find(c => c.id === linkClientId);
+
+                  // Cliente ya elegido: tarjeta + botón para cambiarlo/quitarlo.
+                  if (sel) {
+                    return (
+                      <div className="bg-white/[0.03] border border-white/10 rounded-lg p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm text-white/85 font-medium truncate">
+                              {sel.full_name || <span className="text-white/40 italic">Sin nombre</span>}
+                            </p>
+                            <p className="text-[11px] text-white/50 truncate">{sel.email}</p>
+                            <div className="flex gap-3 mt-1 flex-wrap">
+                              {sel.cedula_numero && (
+                                <span className="text-[10px] text-white/40 font-mono">CI: {sel.cedula_numero}</span>
+                              )}
+                              {sel.telefono_personal && (
+                                <span className="text-[10px] text-white/40">📱 {sel.telefono_personal}</span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setLinkClientId(''); setClientSearch(''); }}
+                            className="text-[10px] text-cyan-400 hover:text-cyan-300 underline shrink-0"
+                          >
+                            Cambiar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (clientsList.length === 0) return null; // cubierto por el aviso de arriba
+
+                  // Buscador por nombre / cédula / correo.
+                  const q = clientSearch.trim().toLowerCase();
+                  const matches = (q
+                    ? clientsList.filter(c =>
+                        (c.full_name || '').toLowerCase().includes(q) ||
+                        (c.cedula_numero || '').toLowerCase().includes(q) ||
+                        (c.email || '').toLowerCase().includes(q))
+                    : clientsList
+                  ).slice(0, 8);
+
+                  return (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        <input
+                          type="text"
+                          value={clientSearch}
+                          onChange={(e) => setClientSearch(e.target.value)}
+                          placeholder="Buscar cliente por nombre, cédula o correo..."
+                          className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-pink-500/50 transition-colors"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto rounded-lg border border-white/5 divide-y divide-white/5">
+                        {matches.length === 0 ? (
+                          <p className="text-[11px] text-white/30 p-3">Sin coincidencias para «{clientSearch}».</p>
+                        ) : matches.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setLinkClientId(c.id)}
+                            className="w-full text-left px-3 py-2 hover:bg-white/5 transition-colors"
+                          >
+                            <p className="text-sm text-white/85 truncate">{c.full_name || 'Sin nombre'}</p>
+                            <div className="flex gap-2 flex-wrap">
+                              <span className="text-[10px] text-white/40 truncate">{c.email}</span>
+                              {c.cedula_numero && (
+                                <span className="text-[10px] text-white/40 font-mono">CI: {c.cedula_numero}</span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-white/40">
+                        Busca y elige un cliente existente para vincularlo
+                        {editingId ? ' a esta tienda.' : ' al crear la tienda.'}
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* ── Sección: Documentación Legal ── */}
               <div className="border-t border-white/5 pt-5 space-y-4">
                 <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Documentacion Legal</p>
 
-                {/* Contrato */}
+                {/* Contrato — solo si la tienda tiene un plan asignado */}
+                {planType && (
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
                     Contrato de Cesion de Espacios
@@ -802,6 +1108,7 @@ export default function TiendasCRUD() {
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/* Registro Mercantil */}
                 <div>
@@ -833,19 +1140,24 @@ export default function TiendasCRUD() {
                 </div>
 
 
-                {/* Vencimiento del contrato */}
+                {/* Vencimiento del contrato — calculado automáticamente según el
+                    plan (no editable). Solo aplica si hay plan asignado. */}
+                {planType && (
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Vencimiento del Contrato</label>
-                  <input
-                    type="date"
-                    value={contractExpiryDate}
-                    onChange={(e) => setContractExpiryDate(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
-                  />
-                  {contractExpiryDate && isExpiringSoon(contractExpiryDate) && (
+                  <div className="w-full bg-[#0A0A0A]/60 border border-white/5 rounded-lg px-3 py-2.5 text-sm text-white/70 font-mono">
+                    {computedContractExpiry || '—'}
+                  </div>
+                  <p className="text-[10px] text-white/20 mt-1">
+                    {editingId && stores.find(s => s.id === editingId)?.plan_type === planType && stores.find(s => s.id === editingId)?.contract_expiry_date
+                      ? 'Se conserva el vencimiento actual mientras no cambies de plan.'
+                      : `Calculado: hoy + ${planDurations[planType] ?? FALLBACK_DURATION_DAYS} días (duración del plan).`}
+                  </p>
+                  {computedContractExpiry && isExpiringSoon(computedContractExpiry) && (
                     <p className="text-[10px] text-amber-400 mt-1">Contrato por vencer en menos de 30 dias</p>
                   )}
                 </div>
+                )}
               </div>
 
               {/* ── Sección: Plan Publicitario ── */}
@@ -861,7 +1173,7 @@ export default function TiendasCRUD() {
                     Sin plan
                   </button>
                   {PLAN_TYPES.map(pt => {
-                    const cap = PLAN_MAX_BRANDS[pt];
+                    const cap = capFor(pt);
                     const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
                     const wasSamePlan = editingStore?.plan_type === pt;
                     const used = (planUsage[pt] || 0) - (wasSamePlan ? 1 : 0);
@@ -889,8 +1201,8 @@ export default function TiendasCRUD() {
                   })}
                 </div>
                 {/* Aviso de cupo */}
-                {planType && PLAN_MAX_BRANDS[planType] != null && (() => {
-                  const cap = PLAN_MAX_BRANDS[planType]!;
+                {planType && capFor(planType) != null && (() => {
+                  const cap = capFor(planType)!;
                   const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
                   const wasSamePlan = editingStore?.plan_type === planType;
                   const used = (planUsage[planType] || 0) - (wasSamePlan ? 1 : 0);
@@ -903,6 +1215,20 @@ export default function TiendasCRUD() {
                     </p>
                   );
                 })()}
+
+                {/* Aviso de solapamiento con otro contrato / cambio futuro */}
+                {planCollision && (
+                  <div className="mt-2 bg-red-500/10 border border-red-500/30 rounded-lg p-2.5">
+                    <p className="text-[11px] text-red-300 font-semibold">
+                      Choca con otro contrato o cambio futuro
+                    </p>
+                    <p className="text-[10px] text-white/50 mt-0.5">
+                      En el período {planCollision.start} – {planCollision.end} la ocupación
+                      máxima proyectada es {planCollision.overlap}/{planCollision.cap}.
+                      No podrás guardar este plan hasta que se libere un cupo.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* ── Sección: Addon Flash Coupon ── */}
@@ -925,14 +1251,15 @@ export default function TiendasCRUD() {
                     const editingStore = editingId ? stores.find(s => s.id === editingId) : null;
                     const wasSameAddon = editingStore?.flash_coupon_plan === opt;
                     const used = (flashAddonUsage[opt] || 0) - (wasSameAddon ? 1 : 0);
-                    const saturated = used >= FLASH_ADDON_MAX_BRANDS;
+                    const cap = capFor(opt);
+                    const saturated = cap != null && used >= cap;
                     const isSelected = flashCouponPlan === opt;
                     return (
                       <button
                         key={opt} type="button"
                         onClick={() => { if (!saturated || isSelected) setFlashCouponPlan(opt); }}
                         disabled={saturated && !isSelected}
-                        title={saturated && !isSelected ? `Addon saturado: ${used}/${FLASH_ADDON_MAX_BRANDS}` : undefined}
+                        title={saturated && !isSelected ? `Addon saturado: ${used}/${cap ?? '∞'}` : undefined}
                         className={`py-2 text-xs font-medium rounded-lg border transition-colors ${isSelected
                           ? `${PLAN_COLORS[opt]} border-current`
                           : saturated
@@ -941,7 +1268,7 @@ export default function TiendasCRUD() {
                           }`}
                       >
                         <div>{PLAN_LABELS[opt]}</div>
-                        <div className="text-[9px] opacity-70 font-mono mt-0.5">{used}/{FLASH_ADDON_MAX_BRANDS}</div>
+                        <div className="text-[9px] opacity-70 font-mono mt-0.5">{used}/{cap ?? '∞'}</div>
                       </button>
                     );
                   })}
@@ -996,7 +1323,8 @@ export default function TiendasCRUD() {
                   Cancelar
                 </button>
                 <button
-                  type="submit" disabled={submitting}
+                  type="submit" disabled={submitting || !!planCollision}
+                  title={planCollision ? 'El plan choca con otro contrato o cambio futuro' : undefined}
                   className="flex-1 px-5 py-2.5 text-sm font-medium bg-pink-500/15 text-pink-400 hover:bg-pink-500/25 border border-pink-500/30 rounded-lg transition-colors disabled:opacity-50"
                 >
                   {submitting ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear tienda'}
@@ -1046,6 +1374,11 @@ export default function TiendasCRUD() {
                         {store.rif && (
                           <span className="text-white/30 text-[10px] font-mono block">{store.rif}</span>
                         )}
+                        {!store.mall_id && (
+                          <span className="inline-block mt-0.5 text-[9px] font-medium text-orange-300 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded">
+                            Externa
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -1053,9 +1386,13 @@ export default function TiendasCRUD() {
                     <span className="text-white/40 bg-white/5 px-2 py-0.5 rounded-md text-xs">{getCategoryName(store)}</span>
                   </td>
                   <td className="px-5 py-3.5 max-w-[120px]">
-                    <span className="text-white/50 text-xs font-mono block truncate" title={`${store.floor_level} — ${store.local_number}`}>
-                      {store.floor_level} — {store.local_number}
-                    </span>
+                    {store.mall_id ? (
+                      <span className="text-white/50 text-xs font-mono block truncate" title={`${store.floor_level} — ${store.local_number}`}>
+                        {store.floor_level} — {store.local_number}
+                      </span>
+                    ) : (
+                      <span className="text-white/20 text-xs">—</span>
+                    )}
                   </td>
                   <td className="px-5 py-3.5 max-w-[160px]">
                     {usersByStore[store.id] ? (

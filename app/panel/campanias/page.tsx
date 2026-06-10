@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
 import { removePublicidadFile } from '../../../lib/storage';
+import { validateKioskVideo } from '../../../lib/videoValidation';
 import Pagination, { usePagination } from '../../components/Pagination';
 import KioskAssignment from './KioskAssignment';
 
@@ -269,6 +270,11 @@ function CampaniasAdminInner() {
         e.target.value = '';
         return;
       }
+      // Compatibilidad con el decoder del kiosco K2 (rechaza 4K / HEVC / Level alto).
+      if (isVideo) {
+        const check = await validateKioskVideo(file);
+        if (!check.ok) { alert(check.message); e.target.value = ''; return; }
+      }
       setMediaFile(file);
       setMediaType(isVideo ? 'video' : 'image');
       setMediaPreview(URL.createObjectURL(file));
@@ -397,19 +403,32 @@ function CampaniasAdminInner() {
       if (!confirm('¿Deseas pausar esta campaña?')) return;
       if (!confirm('¿Confirmas pausar la campaña?')) return;
     }
-    const { error } = await supabase.from('ad_campaigns').update({ is_active: !current }).eq('id', id);
-    if (!error) {
-      const camp = campaigns.find(c => c.id === id);
-      const campName = camp ? camp.brand_name : 'Desconocida';
-      await logAdminAction({
-        action_type: !current ? 'ACTIVAR' : 'DESACTIVAR',
-        entity_type: 'campaña',
-        entity_id: id,
-        entity_name: campName,
-        details: { is_active: !current }
-      });
-      setCampaigns(prev => prev.map(c => c.id === id ? { ...c, is_active: !current } : c));
+    // Pedimos el row de vuelta: así detectamos tanto un error explícito como
+    // el caso en que la BD no actualizó ninguna fila (RLS/permiso) sin lanzar.
+    // Antes el `if (!error)` sin else se tragaba el fallo y la UI quedaba
+    // optimista mostrándola activa aunque en BD no cambió nada.
+    const { data: updated, error } = await supabase
+      .from('ad_campaigns')
+      .update({ is_active: !current })
+      .eq('id', id)
+      .select('id, is_active')
+      .single();
+    if (error) { alert('Error: ' + error.message); return; }
+    if (!updated || updated.is_active !== !current) {
+      alert('No se pudo cambiar el estado de la campaña (permisos o regla de la base de datos). Vuelve a intentar.');
+      fetchData();
+      return;
     }
+    const camp = campaigns.find(c => c.id === id);
+    const campName = camp ? camp.brand_name : 'Desconocida';
+    await logAdminAction({
+      action_type: !current ? 'ACTIVAR' : 'DESACTIVAR',
+      entity_type: 'campaña',
+      entity_id: id,
+      entity_name: campName,
+      details: { is_active: !current }
+    });
+    setCampaigns(prev => prev.map(c => c.id === id ? { ...c, is_active: !current } : c));
   };
 
   const handleApplyKillSwitch = async () => {

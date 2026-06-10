@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, ChangeEvent } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { removePublicidadFile } from '../../../lib/storage';
+import { validateKioskVideo } from '../../../lib/videoValidation';
 import { useClienteStore } from '../store-context';
 
 const PLAN_LABELS: Record<string, string> = {
@@ -215,10 +216,16 @@ export default function ClientePromocionesPage() {
     setCImageFile(f);
     setCImageUrl(URL.createObjectURL(f));
   };
-  const handleMedia = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleMedia = async (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     if (f.size > 50 * 1024 * 1024) { alert('El archivo debe pesar menos de 50 MB.'); e.target.value = ''; return; }
+    // Los videos 4K / HEVC / Level alto no los levanta el decoder del kiosco K2:
+    // los bloqueamos aquí para que el cliente no descubra el fallo en el equipo.
+    if (f.type.startsWith('video/')) {
+      const check = await validateKioskVideo(f);
+      if (!check.ok) { alert(check.message); e.target.value = ''; return; }
+    }
     setAMediaFile(f);
     setAMediaType(f.type.startsWith('video/') ? 'video' : 'image');
     setAMediaUrl(URL.createObjectURL(f));
@@ -406,7 +413,7 @@ export default function ClientePromocionesPage() {
             audio_enabled: finalMediaType === 'video' ? aAudioEnabled : false,
           })
           .eq('id', aEditingId)
-          .select('id, is_active')
+          .select('id, is_active, approval_status')
           .single();
         if (error) throw error;
         if (updated && updated.is_active !== aIsActive) {
@@ -419,9 +426,15 @@ export default function ClientePromocionesPage() {
         if (aMediaFile && previousMediaUrl && previousMediaUrl !== finalMediaUrl) {
           await removePublicidadFile(previousMediaUrl);
         }
+        // El trigger decide: si cambió contenido, vuelve a 'pending'; si solo
+        // se tocó is_active/audio, sigue 'approved'. Mensajeamos según el
+        // resultado REAL para no decir "en revisión" cuando no es cierto.
+        const wentToReview = updated?.approval_status === 'pending';
         setFeedback({
           type: 'ok',
-          msg: 'Campaña actualizada. Quedó en revisión por el administrador antes de volver al loop.',
+          msg: wentToReview
+            ? 'Campaña actualizada. Como cambiaste su contenido, quedó en revisión por el administrador antes de volver al loop.'
+            : 'Campaña actualizada.',
         });
       } else {
         // Si reemplazamos: desactivar TODAS las activas de la tienda primero.
@@ -517,6 +530,50 @@ export default function ClientePromocionesPage() {
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
     await removePublicidadFile(c.media_url);
     setFeedback({ type: 'ok', msg: 'Campaña eliminada.' });
+    fetchData();
+  };
+
+  // Pausa/reactiva una campaña SIN re-enviarla a revisión. Clave: el update
+  // toca ÚNICAMENTE is_active. Como no cambia contenido (media, fechas, etc.),
+  // el trigger guard_campaigns_owner_update conserva approval_status='approved'
+  // y la campaña vuelve directo al loop. Reactivar desde "Editar" reenviaba
+  // todos los campos del formulario y podía disparar el guard de contenido
+  // (p.ej. duration_seconds o start_date normalizados) mandándola a 'pending'.
+  const toggleCampaignActive = async (c: any, next: boolean) => {
+    if (next && !planActive) {
+      setFeedback({ type: 'err', msg: 'Tu plan está vencido — renueva para volver a activar campañas.' });
+      return;
+    }
+    setFeedback(null);
+    // Pedimos el row de vuelta: el guard puede revertir la transición sin
+    // lanzar error (plan vencido / ya hay otra activa). Si is_active no quedó
+    // como pedimos, el guard nos bloqueó.
+    const { data: updated, error } = await supabase.from('ad_campaigns')
+      .update({ is_active: next })
+      .eq('id', c.id)
+      .select('id, is_active, approval_status')
+      .single();
+    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    if (!updated) {
+      setFeedback({ type: 'err', msg: 'No se encontró la campaña o no tienes permiso para cambiarla.' });
+      return;
+    }
+    if (updated.is_active !== next) {
+      setFeedback({
+        type: 'err',
+        msg: next
+          ? 'No se pudo reactivar: tu plan venció o ya tienes otra campaña activa. Pausa la otra primero.'
+          : 'No se pudo pausar la campaña. Revisa permisos.',
+      });
+      fetchData();
+      return;
+    }
+    setFeedback({
+      type: 'ok',
+      msg: next
+        ? 'Campaña reactivada — volvió al loop sin pasar de nuevo por revisión.'
+        : 'Campaña pausada. Se liberó tu slot en el loop.',
+    });
     fetchData();
   };
 
@@ -799,6 +856,15 @@ export default function ClientePromocionesPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
+            {/* Feedback DENTRO del modal: el banner global vive detrás de este
+                overlay (z-50), así que un error al guardar quedaba invisible.
+                Aquí el cliente sí ve por qué falló. */}
+            {feedback && (
+              <div className={`mx-6 mt-4 rounded-lg p-3 text-sm border ${feedback.type === 'ok'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-red-500/10 border-red-500/40 text-red-300'
+                }`}>{feedback.msg}</div>
+            )}
             <form onSubmit={submitCampaign} className="px-6 py-5 space-y-4">
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Nombre de la campaña</label>
@@ -1278,6 +1344,7 @@ export default function ClientePromocionesPage() {
                     c={c}
                     onEdit={openEditCampaign}
                     onDelete={deleteCampaign}
+                    onToggleActive={toggleCampaignActive}
                     today={today}
                   />
                 ))}
@@ -1441,9 +1508,12 @@ function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) =
   );
 }
 
-function CampaignCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; today: string }) {
+function CampaignCard({ c, onEdit, onDelete, onToggleActive, today }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; onToggleActive: (c: any, next: boolean) => void; today: string }) {
   const active = c.is_active && (!c.end_date || c.end_date >= today);
   const approval = APPROVAL_CHIP[c.approval_status || 'approved'] || APPROVAL_CHIP.approved;
+  // Solo una campaña aprobada puede pausarse/reactivarse directo (sin volver a
+  // revisión). Pendientes/rechazadas no tienen toggle: aún no están aprobadas.
+  const isApproved = (c.approval_status || 'approved') === 'approved';
   return (
     <div className="bg-[#0F0F0F] border border-white/5 rounded-xl overflow-hidden">
       <div className="aspect-[9/16] bg-black flex items-center justify-center relative">
@@ -1502,13 +1572,26 @@ function CampaignCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any)
         <p className="text-[10px] text-white/40 font-mono">
           {c.start_date}{c.end_date ? ` → ${c.end_date}` : ' · sin fin'}
         </p>
-        <div className="flex gap-1.5 pt-2">
-          <button onClick={() => onEdit(c)} className="flex-1 text-[11px] text-white/70 bg-white/5 hover:bg-white/10 rounded-md py-1.5">
-            Editar
-          </button>
-          <button onClick={() => onDelete(c)} className="flex-1 text-[11px] text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-md py-1.5">
-            Eliminar
-          </button>
+        <div className="flex flex-col gap-1.5 pt-2">
+          {isApproved && (
+            <button
+              onClick={() => onToggleActive(c, !c.is_active)}
+              className={`w-full text-[11px] font-semibold rounded-md py-1.5 border ${c.is_active
+                ? 'text-white/70 bg-white/5 hover:bg-white/10 border-white/15'
+                : 'text-emerald-200 bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40'
+                }`}
+            >
+              {c.is_active ? 'Pausar' : 'Activar (sin re-aprobación)'}
+            </button>
+          )}
+          <div className="flex gap-1.5">
+            <button onClick={() => onEdit(c)} className="flex-1 text-[11px] text-white/70 bg-white/5 hover:bg-white/10 rounded-md py-1.5">
+              Editar
+            </button>
+            <button onClick={() => onDelete(c)} className="flex-1 text-[11px] text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-md py-1.5">
+              Eliminar
+            </button>
+          </div>
         </div>
       </div>
     </div>
