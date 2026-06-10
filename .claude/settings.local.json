@@ -42,7 +42,9 @@
       "Bash(node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json)",
       "Bash(echo \"EXIT: $?\")",
       "Read(//tmp/**)",
-      "Bash(flutter pub *)"
+      "Bash(flutter pub *)",
+      "Bash(sed -n '90,118p' cliente_portal_auth.sql)",
+      "Bash(sed -n '540,596p' cliente_portal_auth.sql)"
     ]
   }
 }

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
-import { ClienteStore, ClienteStoreContext } from './store-context';
+import { ClienteStore, ClienteStoreContext, StoreRole } from './store-context';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { MallHubWordmark } from '../components/MallHubMark';
 
@@ -43,9 +43,13 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
     const { data: links } = await supabase
       .from('user_stores')
-      .select('store_id')
+      .select('store_id, store_role')
       .eq('user_id', user.id);
     const storeIds = (links ?? []).map(l => l.store_id);
+    // Mapa tienda → rol del usuario en ella (define nav/permisos en la UI).
+    const roleById = new Map<string, ClienteStore['store_role']>(
+      (links ?? []).map(l => [l.store_id, (l.store_role ?? 'owner') as ClienteStore['store_role']]),
+    );
 
     if (storeIds.length === 0) {
       setStores([]);
@@ -59,7 +63,10 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
       .select('id, name, plan_type, floor_level, local_number, rif, contract_expiry_date, flash_coupon_plan, flash_coupon_expiry_date, description, categories(id, name, icon)')
       .in('id', storeIds)
       .order('name', { ascending: true });
-    const list = (data || []) as any as ClienteStore[];
+    const list = ((data || []) as any[]).map(s => ({
+      ...s,
+      store_role: roleById.get(s.id) ?? 'owner',
+    })) as ClienteStore[];
     setStores(list);
 
     // Recuperar selección persistida si sigue siendo válida
@@ -167,6 +174,18 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     [stores, selectedId]
   );
 
+  // Landing/guard por rol en la tienda activa: el vendedor solo puede estar en
+  // Candidatos y el publicista solo en Promociones. Si navega (o cae) en otra
+  // ruta, lo devolvemos a su pantalla. El dueño no tiene restricción. Esto es
+  // cosmético/UX; la barrera real es RLS + RPC del lado servidor.
+  useEffect(() => {
+    if (!isAuthorized || !selectedStore) return;
+    const role = selectedStore.store_role;
+    if (role === 'owner') return;
+    const home = role === 'seller' ? '/cliente/candidatos' : '/cliente/promociones';
+    if (pathname !== home) router.replace(home);
+  }, [isAuthorized, selectedStore, pathname, router]);
+
   const ctxValue = useMemo(() => ({
     stores,
     selectedStore,
@@ -209,6 +228,9 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     { name: 'Pagos', path: '/cliente/pagos', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
     )},
+    { name: 'Equipo', path: '/cliente/equipo', icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4 0m8-2a3 3 0 10-2.5-4.5M7 8.5A3 3 0 104.5 4" /></svg>
+    )},
     { name: 'Notificaciones', path: '/cliente/notificaciones', icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
     )},
@@ -216,6 +238,18 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
     )},
   ];
+
+  // Nav según el rol en la tienda activa (la barrera real es RLS/RPC):
+  //   · owner      → todo.
+  //   · seller     → solo Candidatos.
+  //   · advertiser → solo Promociones (publicidad: cupones + campañas).
+  const role: StoreRole = selectedStore?.store_role ?? 'owner';
+  const visibleItems =
+    role === 'owner'
+      ? menuItems
+      : role === 'seller'
+      ? menuItems.filter((i) => i.path === '/cliente/candidatos')
+      : menuItems.filter((i) => i.path === '/cliente/promociones');
 
   const initials = (profile?.full_name || profile?.email || '?')
     .split(/\s+/).filter(Boolean).slice(0, 2)
@@ -311,7 +345,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
           {/* nav */}
           <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-            {menuItems.map((item) => {
+            {visibleItems.map((item) => {
               const isActive = pathname === item.path;
               const badgeCount = item.path === '/cliente/notificaciones' ? unreadNotifications : 0;
               const showBadge = badgeCount > 0;
@@ -372,20 +406,22 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
             </button>
             <h1 className="text-sm font-bold tracking-wider text-brand-cliente md:hidden">MI COMERCIO</h1>
             <div className="flex items-center gap-2 md:ml-auto">
-              <Link
-                href="/cliente/notificaciones"
-                className="relative rounded-lg border border-line p-2 text-fg-muted transition-colors hover:text-fg"
-                aria-label={`Notificaciones${unreadNotifications > 0 ? `, ${unreadNotifications} sin leer` : ''}`}
-              >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-                {unreadNotifications > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-warning px-1 text-[10px] font-bold text-white ring-2 ring-surface">
-                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
-                  </span>
-                )}
-              </Link>
+              {role === 'owner' && (
+                <Link
+                  href="/cliente/notificaciones"
+                  className="relative rounded-lg border border-line p-2 text-fg-muted transition-colors hover:text-fg"
+                  aria-label={`Notificaciones${unreadNotifications > 0 ? `, ${unreadNotifications} sin leer` : ''}`}
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  {unreadNotifications > 0 && (
+                    <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-warning px-1 text-[10px] font-bold text-white ring-2 ring-surface">
+                      {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                    </span>
+                  )}
+                </Link>
+              )}
               <ThemeToggle />
             </div>
           </header>

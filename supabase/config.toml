@@ -35,6 +35,11 @@ verify_jwt = false
 [functions.send-magic-link]
 verify_jwt = true
 
+# invite-store-staff: la invoca el DUEÑO desde /cliente/equipo. Supabase valida
+# el JWT y la function comprueba que el caller es dueño de la tienda destino.
+[functions.invite-store-staff]
+verify_jwt = true
+
 # send-contract-expiry-reminders: la llama pg_cron con x-cron-secret. Envía
 # recordatorios por correo a clientes cuyo plan vence en 5/3/1/0 días.
 [functions.send-contract-expiry-reminders]

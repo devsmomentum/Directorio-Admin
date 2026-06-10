@@ -2,9 +2,13 @@
 
 import { createContext, useContext } from 'react';
 
+export type StoreRole = 'owner' | 'seller' | 'advertiser';
+
 export type ClienteStore = {
   id: string;
   name: string;
+  /** Rol del usuario actual EN ESTA tienda. Define qué puede hacer/ver. */
+  store_role: StoreRole;
   plan_type: string | null;
   floor_level: string | null;
   local_number: string | null;

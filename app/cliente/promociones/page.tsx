@@ -37,6 +37,10 @@ const APPROVAL_CHIP: Record<string, { label: string; cls: string }> = {
 const CAMPAIGN_CAPABLE = new Set(['DIAMANTE', 'ORO', 'PUBLI_PROMO_DIARIO', 'PUBLI_PROMO_SEMANAL']);
 
 const FLASH_GALLERY_MAX = 20;
+// Tope de inventario de cupones por tienda: la SUMA de amount_available de los
+// cupones vigentes (no rechazados, no vencidos) no puede pasar de 20. La barrera
+// real es el trigger guard_coupons_owner_insert/update; esto es solo UX.
+const COUPON_STOCK_CAP = 20;
 const FLASH_PERIOD_LIMITS: Record<string, { max: number; windowDays: number; label: string }> = {
   FLASH_COUPON_DIARIO: { max: 10, windowDays: 1, label: 'día' },
   FLASH_COUPON_SEMANAL: { max: 30, windowDays: 5, label: 'semana (5 días)' },
@@ -260,6 +264,23 @@ export default function ClientePromocionesPage() {
     const stockNum = parseInt(cStock, 10);
     if (!cStock || isNaN(stockNum) || stockNum <= 0) {
       setFeedback({ type: 'err', msg: 'Ingresa un stock mayor a 0.' });
+      return;
+    }
+    // Tope de inventario por tienda: la suma del stock vigente no puede pasar de
+    // COUPON_STOCK_CAP. Excluimos el cupón en edición para no contarlo dos veces.
+    // (El trigger del servidor es la barrera definitiva.)
+    const usedExcludingThis = coupons
+      .filter(c => c.id !== cEditingId
+        && FLASH_PLANS.has(c.plan_type)
+        && c.approval_status !== 'rejected'
+        && (!c.end_date || c.end_date >= new Date().toISOString()))
+      .reduce((s, c) => s + (Number(c.amount_available) || 0), 0);
+    if (usedExcludingThis + stockNum > COUPON_STOCK_CAP) {
+      const left = Math.max(0, COUPON_STOCK_CAP - usedExcludingThis);
+      setFeedback({
+        type: 'err',
+        msg: `Superas el tope de ${COUPON_STOCK_CAP} cupones de tu tienda. Ya tienes ${usedExcludingThis} en stock vigente; puedes publicar hasta ${left} más.`,
+      });
       return;
     }
 
@@ -615,6 +636,17 @@ export default function ClientePromocionesPage() {
     && c.amount_available > 0
     && (!c.end_date || c.end_date >= new Date().toISOString())).length;
 
+  // Inventario de cupones consumido (suma de stock vigente) y cuánto queda del
+  // tope de 20. Mismo criterio que el trigger del servidor: no cuenta los
+  // rechazados ni los vencidos.
+  const nowIsoStock = new Date().toISOString();
+  const couponStockUsed = coupons
+    .filter(c => FLASH_PLANS.has(c.plan_type)
+      && c.approval_status !== 'rejected'
+      && (!c.end_date || c.end_date >= nowIsoStock))
+    .reduce((s, c) => s + (Number(c.amount_available) || 0), 0);
+  const couponStockRemaining = Math.max(0, COUPON_STOCK_CAP - couponStockUsed);
+
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -674,6 +706,25 @@ export default function ClientePromocionesPage() {
                 );
               })()}
             </div>
+          </div>
+
+          {/* Presupuesto de inventario: la SUMA del stock vigente ≤ 20. */}
+          <div className="mt-3 pt-3 border-t border-pink-500/15">
+            <div className="flex items-center justify-between text-xs mb-1.5">
+              <span className="text-white/60">Inventario de cupones (stock total)</span>
+              <span className="font-mono font-bold text-pink-200">{couponStockUsed}/{COUPON_STOCK_CAP}</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${couponStockRemaining === 0 ? 'bg-red-400' : 'bg-pink-400'}`}
+                style={{ width: `${Math.min(100, (couponStockUsed / COUPON_STOCK_CAP) * 100)}%` }}
+              />
+            </div>
+            <p className="mt-1.5 text-[11px] text-white/50">
+              {couponStockRemaining > 0
+                ? <>Te quedan <strong className="text-pink-200">{couponStockRemaining}</strong> unidades de stock para publicar (puedes repartirlas en varios cupones).</>
+                : <>Alcanzaste el tope de {COUPON_STOCK_CAP}. Reduce el stock de un cupón, o espera a que venza/se canjee, para publicar más.</>}
+            </p>
           </div>
         </div>
       )}

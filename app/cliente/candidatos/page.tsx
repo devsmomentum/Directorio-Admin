@@ -151,6 +151,17 @@ export default function CandidatosPage() {
     );
   }
 
+  // Defensa en profundidad: el canje es solo para dueño o vendedor. El
+  // publicista no debe llegar aquí (el layout ya redirige), pero por si acaso
+  // evitamos mostrar la pantalla. La barrera real es RLS + el RPC redeem_coupon.
+  if (store.store_role !== 'owner' && store.store_role !== 'seller') {
+    return (
+      <div className="max-w-2xl mx-auto mt-20 bg-amber-500/5 border border-amber-500/20 rounded-2xl p-8 text-center text-amber-300">
+        El canje de cupones no está disponible para tu rol en esta tienda.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
