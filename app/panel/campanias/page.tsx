@@ -305,6 +305,27 @@ function CampaniasAdminInner() {
       }
     }
 
+    // Validación de unicidad: una sola campaña activa por tienda
+    // Solo aplica a campañas nuevas; para ediciones el toggle maneja el swap.
+    let campaignToDeactivate: Campaign | null = null;
+    if (!editingId && isActive && storeId) {
+      const today = new Date().toISOString().split('T')[0];
+      const conflict = campaigns.find(c =>
+        c.store_id === storeId &&
+        c.is_active &&
+        (!c.end_date || c.end_date >= today)
+      );
+      if (conflict) {
+        const ok = confirm(
+          `Esta tienda ya tiene la campaña "${conflict.brand_name}" activa.\n\n` +
+          `Al crear esta campaña como activa, "${conflict.brand_name}" quedará desactivada.\n\n` +
+          `¿Confirmar?`
+        );
+        if (!ok) return;
+        campaignToDeactivate = conflict;
+      }
+    }
+
     setIsSaving(true);
 
     try {
@@ -368,6 +389,23 @@ function CampaniasAdminInner() {
         }
       }
 
+      // Desactivar la campaña anterior de la tienda si el admin confirmó el swap
+      if (campaignToDeactivate) {
+        const { error: dErr } = await supabase
+          .from('ad_campaigns')
+          .update({ is_active: false })
+          .eq('id', campaignToDeactivate.id);
+        if (!dErr) {
+          await logAdminAction({
+            action_type: 'DESACTIVAR',
+            entity_type: 'campaña',
+            entity_id: campaignToDeactivate.id,
+            entity_name: campaignToDeactivate.brand_name,
+            details: { is_active: false, reason: `Reemplazada por "${brandName}"` }
+          });
+        }
+      }
+
       resetForm();
       fetchData();
     } catch (err: any) {
@@ -399,19 +437,63 @@ function CampaniasAdminInner() {
   };
 
   const handleToggleActive = async (id: string, current: boolean) => {
+    const camp = campaigns.find(c => c.id === id);
+    const campName = camp ? camp.brand_name : 'Desconocida';
+
     if (current) {
       if (!confirm('¿Deseas pausar esta campaña?')) return;
       if (!confirm('¿Confirmas pausar la campaña?')) return;
+    } else {
+      // Activating: enforce one-active-per-store rule
+      if (camp?.store_id) {
+        const today = new Date().toISOString().split('T')[0];
+        const conflict = campaigns.find(c =>
+          c.id !== id &&
+          c.store_id === camp.store_id &&
+          c.is_active &&
+          (!c.end_date || c.end_date >= today)
+        );
+        if (conflict) {
+          const ok = confirm(
+            `Esta tienda ya tiene la campaña "${conflict.brand_name}" activa.\n\n` +
+            `Activar "${campName}" desactivará "${conflict.brand_name}" automáticamente.\n\n` +
+            `¿Confirmar el cambio?`
+          );
+          if (!ok) return;
+          const { error: dErr } = await supabase
+            .from('ad_campaigns')
+            .update({ is_active: false })
+            .eq('id', conflict.id);
+          if (dErr) { alert('Error al desactivar campaña anterior: ' + dErr.message); return; }
+          await logAdminAction({
+            action_type: 'DESACTIVAR',
+            entity_type: 'campaña',
+            entity_id: conflict.id,
+            entity_name: conflict.brand_name,
+            details: { is_active: false, reason: `Reemplazada por "${campName}"` }
+          });
+          setCampaigns(prev => prev.map(c => c.id === conflict.id ? { ...c, is_active: false } : c));
+        }
+      }
     }
+
     // Pedimos el row de vuelta: así detectamos tanto un error explícito como
     // el caso en que la BD no actualizó ninguna fila (RLS/permiso) sin lanzar.
-    // Antes el `if (!error)` sin else se tragaba el fallo y la UI quedaba
-    // optimista mostrándola activa aunque en BD no cambió nada.
+    const updatePayload: Record<string, unknown> = { is_active: !current };
+
+    // Reactivación: si la campaña vuelve a activarse y su start_date quedó en el
+    // pasado, la adelantamos a hoy para que los reportes y el loop reflejen la
+    // fecha real de arranque de este nuevo ciclo.
+    if (!current && camp?.start_date) {
+      const today = new Date().toISOString().split('T')[0];
+      if (camp.start_date < today) updatePayload.start_date = today;
+    }
+
     const { data: updated, error } = await supabase
       .from('ad_campaigns')
-      .update({ is_active: !current })
+      .update(updatePayload)
       .eq('id', id)
-      .select('id, is_active')
+      .select('id, is_active, start_date')
       .single();
     if (error) { alert('Error: ' + error.message); return; }
     if (!updated || updated.is_active !== !current) {
@@ -419,16 +501,18 @@ function CampaniasAdminInner() {
       fetchData();
       return;
     }
-    const camp = campaigns.find(c => c.id === id);
-    const campName = camp ? camp.brand_name : 'Desconocida';
     await logAdminAction({
       action_type: !current ? 'ACTIVAR' : 'DESACTIVAR',
       entity_type: 'campaña',
       entity_id: id,
       entity_name: campName,
-      details: { is_active: !current }
+      details: updatePayload
     });
-    setCampaigns(prev => prev.map(c => c.id === id ? { ...c, is_active: !current } : c));
+    setCampaigns(prev => prev.map(c =>
+      c.id === id
+        ? { ...c, is_active: !current, start_date: (updated.start_date as string) ?? c.start_date }
+        : c
+    ));
   };
 
   const handleApplyKillSwitch = async () => {
