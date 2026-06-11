@@ -43,6 +43,20 @@ export default function ClientePlanesPage() {
   const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
 
   const [pendingTxCount, setPendingTxCount] = useState(0);
+
+  // ── Lista de espera ─────────────────────────────────────────────────────────
+  const [waitlistPlan, setWaitlistPlan] = useState<any | null>(null);
+  const [userEmail, setUserEmail] = useState('');
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
+  const [waitlistSuccess, setWaitlistSuccess] = useState(false);
+  const [waitlistErr, setWaitlistErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data.user?.email ?? '');
+    });
+  }, []);
+
   // Intervalos anonimizados de ocupación, devueltos por plan_capacity_intervals().
   // SECURITY DEFINER en backend → vemos info de TODAS las tiendas (no solo la nuestra),
   // necesario para replicar el sweep-line del backend y evitar UI "disponible" cuando la BD rechaza.
@@ -273,6 +287,38 @@ export default function ClientePlanesPage() {
     setWidgetPlan(null);
   };
 
+  const openWaitlist = (plan: any) => {
+    setWaitlistPlan(plan);
+    setWaitlistSuccess(false);
+    setWaitlistErr(null);
+  };
+
+  const closeWaitlist = () => {
+    if (waitlistLoading) return;
+    setWaitlistPlan(null);
+  };
+
+  const handleJoinWaitlist = async () => {
+    if (!waitlistPlan || !userEmail) return;
+    setWaitlistLoading(true);
+    setWaitlistErr(null);
+    const { data, error } = await supabase.rpc('join_plan_waitlist', {
+      p_plan_key: waitlistPlan.plan_key,
+      p_email: userEmail,
+    });
+    setWaitlistLoading(false);
+    if (error) {
+      setWaitlistErr('No se pudo registrar. Intenta de nuevo.');
+      return;
+    }
+    const result = data as any;
+    if (result?.error === 'PLAN_HAS_SLOTS') {
+      setWaitlistErr('¡El plan ya tiene cupos disponibles! Puedes solicitarlo directamente.');
+      return;
+    }
+    setWaitlistSuccess(true);
+  };
+
   if (!store) {
     return (
       <div className="max-w-2xl mx-auto mt-20 bg-amber-500/5 border border-amber-500/20 rounded-2xl p-8 text-center text-amber-300">
@@ -409,7 +455,9 @@ export default function ClientePlanesPage() {
             const currentExp = flash ? store.flash_coupon_expiry_date : store.contract_expiry_date;
             const today = new Date().toISOString().split('T')[0];
             const isCurrent = currentKey === p.plan_key && (!currentExp || currentExp >= today);
-            const isChange  = !!currentKey && !isCurrent;
+            const isRenewal = currentKey === p.plan_key;
+            const isExpiredRenewal = isRenewal && !isCurrent;
+            const isChange  = !!currentKey && !isRenewal;
             const noExpiry  = (isChange || isCurrent) && !currentExp;
             const pendingThisTrack = hasPendingFor(p.plan_key);
             const avail = planAvailability(p);
@@ -424,7 +472,7 @@ export default function ClientePlanesPage() {
 
             // Ocupación máxima proyectada en la ventana de 1 ciclo, usando el mismo
             // sweep-line que el backend (stores + approved future + pending).
-            const futureOccupancy = (isChange && effDate && winEnd && avail.total != null)
+            const futureOccupancy = ((isChange || isExpiredRenewal) && effDate && winEnd && avail.total != null)
               ? computeMaxOverlapInWindow(p.plan_key, effDate, winEnd)
               : null;
             const futureAvailFull = futureOccupancy != null
@@ -487,7 +535,7 @@ export default function ClientePlanesPage() {
                 </div>
 
                 {/* ── Bloque de activación + disponibilidad proyectada ── */}
-                {isChange && effDate && (
+                {(isChange || isExpiredRenewal) && effDate && (
                   <div className={`rounded-xl border p-3 mb-4 ${
                     futureAvailFull
                       ? 'bg-red-500/8 border-red-500/30'
@@ -602,6 +650,8 @@ export default function ClientePlanesPage() {
                       ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 border border-emerald-500/30'
                       : futureAvailFull
                       ? 'bg-red-500/10 text-red-400 cursor-not-allowed'
+                      : isExpiredRenewal
+                      ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 border border-emerald-500/30'
                       : isChange
                       ? 'bg-blue-500/15 text-blue-200 hover:bg-blue-500/25 border border-blue-500/30'
                       : 'bg-white/10 text-white hover:bg-white/20'
@@ -615,11 +665,13 @@ export default function ClientePlanesPage() {
                     ? (flash ? 'Renovar addon' : 'Renovar plan')
                     : futureAvailFull
                     ? 'Sin cupo para tu fecha'
+                    : isExpiredRenewal
+                    ? (flash ? 'Renovar addon' : 'Renovar plan')
                     : isChange
                     ? (flash ? 'Cambiar addon' : 'Solicitar cambio')
                     : (flash ? 'Adquirir addon' : 'Solicitar plan')}
                 </button>
-                {isCurrent && !disabled && effDate && (
+                {(isCurrent || isExpiredRenewal) && !disabled && effDate && (
                   <p className="text-[10px] text-white/40 mt-1.5 text-center">
                     Renovación activa el{' '}
                     <span className="font-mono text-emerald-300">{effDate}</span>
@@ -631,6 +683,19 @@ export default function ClientePlanesPage() {
                       ? 'Tu addon actual no tiene fecha de venc. — contacta a la admin.'
                       : 'Tu plan actual no tiene fecha de venc. — contacta a la admin.'}
                   </p>
+                )}
+
+                {/* ── Botón de lista de espera ─────────────────────────── */}
+                {futureAvailFull && !isCurrent && !pendingThisTrack && (
+                  <button
+                    onClick={() => openWaitlist(p)}
+                    className="w-full mt-2 text-xs font-medium rounded-lg px-4 py-2 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/25 text-amber-300 transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                    Notificarme por correo cuando se libere un cupo
+                  </button>
                 )}
               </div>
             );
@@ -648,7 +713,10 @@ export default function ClientePlanesPage() {
                 const currentKey = flashW ? store.flash_coupon_plan : store.plan_type;
                 const currentExp = flashW ? store.flash_coupon_expiry_date : store.contract_expiry_date;
                 const effW = effectiveDateFor(widgetPlan.plan_key);
+                const today = new Date().toISOString().split('T')[0];
+                const isCurrent = currentKey === widgetPlan.plan_key && (!currentExp || currentExp >= today);
                 const isRenewal = currentKey === widgetPlan.plan_key;
+                const isExpiredRenewal = isRenewal && !isCurrent;
                 const isChange = !!currentKey && !isRenewal;
 
                 const wAvail = planAvailability(widgetPlan);
@@ -658,7 +726,7 @@ export default function ClientePlanesPage() {
                   d.setDate(d.getDate() + months * widgetPlan.duration_days - 1);
                   return d.toISOString().split('T')[0];
                 })() : null;
-                const wFutureOcc = (isChange && effW && wWinEnd && wAvail.total != null)
+                const wFutureOcc = ((isChange || isExpiredRenewal) && effW && wWinEnd && wAvail.total != null)
                   ? computeMaxOverlapInWindow(widgetPlan.plan_key, effW, wWinEnd)
                   : null;
                 const wFutureFull = wFutureOcc != null
@@ -725,7 +793,7 @@ export default function ClientePlanesPage() {
                           </div>
 
                           {/* Badge de disponibilidad en la fecha de activación */}
-                          {wAvail.total != null && !isRenewal && (
+                          {wAvail.total != null && (!isRenewal || isExpiredRenewal) && (
                             wFutureFull ? (
                               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
                                 <div className="flex items-start gap-2">
@@ -881,6 +949,116 @@ export default function ClientePlanesPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: lista de espera ───────────────────────────────────────────── */}
+      {waitlistPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeWaitlist} />
+          <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+
+            {/* Header */}
+            <div className={`bg-gradient-to-br ${PLAN_COLORS[waitlistPlan.plan_key] || 'from-white/5 to-white/0'} border-b border-white/10 px-6 py-5`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <svg className="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                    <p className="text-[11px] text-white/50 uppercase tracking-widest">Lista de espera</p>
+                  </div>
+                  <h3 className="text-xl font-bold text-white">{waitlistPlan.name}</h3>
+                  <p className="text-[11px] text-white/40 font-mono mt-0.5">
+                    {(() => {
+                      const a = planAvailability(waitlistPlan);
+                      return a.total != null ? `${a.used} / ${a.total} cupos ocupados` : '';
+                    })()}
+                  </p>
+                </div>
+                <button onClick={closeWaitlist} disabled={waitlistLoading} className="text-white/40 hover:text-white/80 disabled:opacity-30 mt-1 shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="px-6 py-5">
+              {waitlistSuccess ? (
+                /* Estado de éxito */
+                <div className="text-center py-4 space-y-4">
+                  <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto">
+                    <svg className="w-7 h-7 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-white font-bold text-lg">¡Listo!</p>
+                    <p className="text-white/60 text-sm mt-1.5 leading-relaxed">
+                      Te avisaremos a{' '}
+                      <span className="text-cyan-300 font-mono">{userEmail}</span>{' '}
+                      en cuanto se libere un cupo en{' '}
+                      <span className="font-semibold text-white">{waitlistPlan.name}</span>.
+                      Date prisa cuando llegue el correo — ¡los cupos se van rápido!
+                    </p>
+                  </div>
+                  <button
+                    onClick={closeWaitlist}
+                    className="w-full px-4 py-2.5 text-sm font-semibold bg-white/10 hover:bg-white/15 text-white rounded-lg transition-colors"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              ) : (
+                /* Confirmación */
+                <div className="space-y-5">
+                  <p className="text-white/60 text-sm leading-relaxed">
+                    Cuando se libere un cupo en este plan recibirás un correo automático.
+                    <span className="text-amber-300 font-medium"> ¡Date prisa</span> cuando llegue — los cupos se agotan rápido.
+                  </p>
+
+                  <div className="bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3 flex items-center gap-3">
+                    <svg className="w-4 h-4 text-white/30 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-white/30 uppercase tracking-wider mb-0.5">Notificación a</p>
+                      <p className="text-white text-sm font-mono truncate">{userEmail || '—'}</p>
+                    </div>
+                  </div>
+
+                  {waitlistErr && (
+                    <div className="rounded-lg p-3 text-xs border bg-red-500/10 border-red-500/30 text-red-300">
+                      {waitlistErr}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button" onClick={closeWaitlist} disabled={waitlistLoading}
+                      className="flex-1 px-4 py-2.5 text-sm text-white/60 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg disabled:opacity-50 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleJoinWaitlist}
+                      disabled={waitlistLoading || !userEmail}
+                      className="flex-1 px-5 py-2.5 text-sm font-semibold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 rounded-lg disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {waitlistLoading ? (
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                        </svg>
+                      ) : 'Notificarme'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
