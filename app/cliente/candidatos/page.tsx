@@ -24,7 +24,16 @@ type Candidate = {
   status: string;
   created_at: string;
   redemption_token: string;
-  coupons: { title: string | null } | null;
+  coupons: {
+    title: string | null;
+    code: string | null;
+    discount_percent: number | null;
+    end_date: string | null;
+    image_url: string | null;
+    amount_available: number | null;
+    category: string | null;
+    plan_type: string | null;
+  } | null;
 };
 
 type RedeemError =
@@ -59,6 +68,8 @@ export default function CandidatosPage() {
   const [redeemingId, setRedeemingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
+  const [detailCandidate, setDetailCandidate] = useState<Candidate | null>(null);
+  const [confirmRedeemCandidate, setConfirmRedeemCandidate] = useState<Candidate | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!store) {
@@ -69,7 +80,7 @@ export default function CandidatosPage() {
     const { data } = await supabase
       .from('coupon_leads')
       .select(
-        'id, coupon_id, first_name, last_name, id_document, telefono, email, status, created_at, redemption_token, coupons(title)',
+        'id, coupon_id, first_name, last_name, id_document, telefono, email, status, created_at, redemption_token, coupons(title, code, discount_percent, end_date, image_url, amount_available, category, plan_type)',
       )
       .eq('store_id', store.id)
       .eq('status', 'PENDIENTE')
@@ -83,10 +94,10 @@ export default function CandidatosPage() {
     fetchData();
   }, [fetchData]);
 
-  // Auto-ocultar el toast.
+  // Errores duran más para que el vendedor los pueda leer.
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
+    const t = setTimeout(() => setToast(null), toast.kind === 'err' ? 7000 : 4000);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -99,6 +110,7 @@ export default function CandidatosPage() {
         c.redemption_token.toLowerCase() === q ||
         (c.id_document ?? '').toLowerCase().includes(q) ||
         c.email.toLowerCase().includes(q) ||
+        (c.telefono ?? '').replace(/[\s\-]/g, '').includes(q.replace(/[\s\-]/g, '')) ||
         name.includes(q)
       );
     });
@@ -107,10 +119,20 @@ export default function CandidatosPage() {
   const handleRedeem = async (c: Candidate) => {
     if (redeemingId) return;
     setRedeemingId(c.id);
-    const { data, error } = await supabase.rpc('redeem_coupon', {
-      p_claim_id: c.id,
-      p_coupon_id: c.coupon_id,
-    });
+
+    let data: unknown, error: { message?: string } | null;
+    try {
+      const res = await supabase.rpc('redeem_coupon', {
+        p_claim_id: c.id,
+        p_coupon_id: c.coupon_id,
+      });
+      data = res.data;
+      error = res.error;
+    } catch {
+      setRedeemingId(null);
+      setToast({ kind: 'err', text: 'Error de red. Verifica la conexión e intenta de nuevo.' });
+      return;
+    }
     setRedeemingId(null);
 
     if (error) {
@@ -216,7 +238,8 @@ export default function CandidatosPage() {
             <CandidateRow
               key={c.id}
               c={c}
-              onRedeem={() => handleRedeem(c)}
+              onRedeem={() => setConfirmRedeemCandidate(c)}
+              onViewDetails={() => setDetailCandidate(c)}
               busy={redeemingId === c.id}
               disabled={redeemingId !== null && redeemingId !== c.id}
             />
@@ -237,6 +260,254 @@ export default function CandidatosPage() {
       )}
 
       {scanOpen && <QrScanner onClose={() => setScanOpen(false)} onScanned={onScanned} />}
+
+      {/* Modal: Detalle de Cupón/Reserva */}
+      {detailCandidate && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/85 backdrop-blur-sm"
+            onClick={() => setDetailCandidate(null)}
+          />
+          <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between shrink-0">
+              <h3 className="text-base font-bold text-white">
+                Detalles del Cupón y Reserva
+              </h3>
+              <button
+                onClick={() => setDetailCandidate(null)}
+                className="text-white/50 hover:text-white text-xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-5 overflow-y-auto">
+              {/* Coupon Info */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-3">
+                <span className="inline-block bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold font-mono">
+                  Detalles del Cupón
+                </span>
+                {detailCandidate.coupons?.image_url && (
+                  <div className="relative h-32 w-full rounded-lg overflow-hidden bg-black/50 border border-white/5 flex items-center justify-center">
+                    <img
+                      src={detailCandidate.coupons.image_url}
+                      alt={detailCandidate.coupons.title ?? 'Cupón'}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <h4 className="text-lg font-bold text-white leading-tight">
+                    {detailCandidate.coupons?.title ?? 'Cupón Promocional'}
+                  </h4>
+                  <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                    <div className="bg-white/5 rounded-lg p-2 border border-white/5">
+                      <span className="block text-white/45 text-[10px] uppercase">Descuento</span>
+                      <span className="text-emerald-400 font-bold font-mono text-sm">
+                        {detailCandidate.coupons?.discount_percent
+                          ? `${Number(detailCandidate.coupons.discount_percent)}% OFF`
+                          : '—'}
+                      </span>
+                    </div>
+                    <div className="bg-white/5 rounded-lg p-2 border border-white/5">
+                      <span className="block text-white/45 text-[10px] uppercase">Código de Cupón</span>
+                      <span className="text-white/80 font-bold font-mono text-sm">
+                        {detailCandidate.coupons?.code ?? '—'}
+                      </span>
+                    </div>
+                    <div className="bg-white/5 rounded-lg p-2 border border-white/5">
+                      <span className="block text-white/45 text-[10px] uppercase">Categoría</span>
+                      <span className="text-white/80 font-semibold text-sm">
+                        {detailCandidate.coupons?.category ?? 'General'}
+                      </span>
+                    </div>
+                    <div className="bg-white/5 rounded-lg p-2 border border-white/5">
+                      <span className="block text-white/45 text-[10px] uppercase">Stock Disponible</span>
+                      <span className="text-white/80 font-semibold font-mono text-sm">
+                        {detailCandidate.coupons?.amount_available ?? 0} u.
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px] text-white/40 pt-2 border-t border-white/5 font-mono">
+                    {detailCandidate.coupons?.plan_type && (
+                      <span>Plan: {detailCandidate.coupons.plan_type}</span>
+                    )}
+                    {detailCandidate.coupons?.end_date && (
+                      <span>Vence: {new Date(detailCandidate.coupons.end_date).toLocaleDateString('es-VE')}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Client Info */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-3">
+                <span className="inline-block bg-white/5 text-white/60 border border-white/10 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold font-mono">
+                  Datos del Cliente
+                </span>
+                <div className="space-y-2.5">
+                  <div>
+                    <span className="block text-white/40 text-[10px] uppercase">Nombre Completo</span>
+                    <span className="text-white font-semibold">
+                      {`${detailCandidate.first_name ?? ''} ${detailCandidate.last_name ?? ''}`.trim() || '(sin nombre)'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="block text-white/40 text-[10px] uppercase">Cédula / Documento</span>
+                      <span className="text-white/80 font-mono text-xs">
+                        {detailCandidate.id_document ?? '—'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="block text-white/40 text-[10px] uppercase">Teléfono</span>
+                      <span className="text-white/80 font-mono text-xs">
+                        {detailCandidate.telefono ?? '—'}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="block text-white/40 text-[10px] uppercase">Correo Electrónico</span>
+                    <span className="text-white/80 text-xs font-mono">
+                      {detailCandidate.email}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 border-t border-white/5 pt-2 text-[11px] text-white/40 font-mono">
+                    <div>
+                      <span>Reservado:</span>
+                      <span className="block mt-0.5 font-sans">
+                        {new Date(detailCandidate.created_at).toLocaleString('es-VE')}
+                      </span>
+                    </div>
+                    <div>
+                      <span>Token:</span>
+                      <span className="block mt-0.5 text-white/60 truncate">
+                        {detailCandidate.redemption_token}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-white/10 flex gap-3 bg-[#0a0a0a] shrink-0">
+              <button
+                type="button"
+                onClick={() => setDetailCandidate(null)}
+                className="flex-1 px-4 py-2.5 text-sm font-semibold text-white/80 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/10"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const candidate = detailCandidate;
+                  setDetailCandidate(null);
+                  setConfirmRedeemCandidate(candidate);
+                }}
+                className="flex-1 px-4 py-2.5 text-sm font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors shadow-lg shadow-emerald-500/10"
+              >
+                Ir a Canjear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmación de Canje */}
+      {confirmRedeemCandidate && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/85 backdrop-blur-sm"
+            onClick={() => setConfirmRedeemCandidate(null)}
+          />
+          <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between shrink-0">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <span className="inline-flex w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                ¿Confirmar Canje del Cupón?
+              </h3>
+              <button
+                onClick={() => setConfirmRedeemCandidate(null)}
+                className="text-white/50 hover:text-white text-xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-5 overflow-y-auto">
+              <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-4 flex gap-3">
+                <div className="shrink-0 text-emerald-400 pt-0.5">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="text-xs text-white/70 space-y-1">
+                  <p className="font-semibold text-emerald-400">Verifica los datos antes de proceder.</p>
+                  <p>Asegúrate de que el cupón y la identidad del cliente coinciden con los presentados.</p>
+                </div>
+              </div>
+
+              {/* Summary table */}
+              <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-4">
+                <div>
+                  <span className="text-[10px] text-white/40 uppercase block tracking-wider font-mono">Cupón a Canjear</span>
+                  <span className="text-white font-bold text-base block mt-0.5">
+                    {confirmRedeemCandidate.coupons?.title ?? 'Cupón Promocional'}
+                  </span>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs font-mono">
+                    {confirmRedeemCandidate.coupons?.discount_percent && (
+                      <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold">
+                        {Number(confirmRedeemCandidate.coupons.discount_percent)}% OFF
+                      </span>
+                    )}
+                    {confirmRedeemCandidate.coupons?.code && (
+                      <span className="bg-white/5 text-white/75 border border-white/10 px-1.5 py-0.5 rounded font-bold">
+                        Código: {confirmRedeemCandidate.coupons.code}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t border-white/5 pt-3">
+                  <span className="text-[10px] text-white/40 uppercase block tracking-wider font-mono">Cliente / Receptor</span>
+                  <span className="text-white font-semibold text-sm block mt-0.5">
+                    {`${confirmRedeemCandidate.first_name ?? ''} ${confirmRedeemCandidate.last_name ?? ''}`.trim() || '(sin nombre)'}
+                  </span>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/60 font-mono">
+                    {confirmRedeemCandidate.id_document && <span>CI: {confirmRedeemCandidate.id_document}</span>}
+                    <span>Email: {confirmRedeemCandidate.email}</span>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-amber-400/80 bg-amber-500/5 border border-amber-500/10 rounded-lg p-3 leading-relaxed font-sans">
+                ⚠️ <strong>Nota:</strong> Esta acción descontará stock inmediatamente y cambiará el estado de la reserva a canjeado.
+              </p>
+            </div>
+
+            <div className="px-6 py-4 border-t border-white/10 flex gap-3 bg-[#0a0a0a] shrink-0">
+              <button
+                type="button"
+                onClick={() => setConfirmRedeemCandidate(null)}
+                className="flex-1 px-4 py-2.5 text-sm font-semibold text-white/60 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const candidate = confirmRedeemCandidate;
+                  setConfirmRedeemCandidate(null);
+                  handleRedeem(candidate);
+                }}
+                className="flex-1 px-4 py-2.5 text-sm font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors shadow-lg shadow-emerald-500/10"
+              >
+                Sí, Canjear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -244,36 +515,80 @@ export default function CandidatosPage() {
 function CandidateRow({
   c,
   onRedeem,
+  onViewDetails,
   busy,
   disabled,
 }: {
   c: Candidate;
   onRedeem: () => void;
+  onViewDetails: () => void;
   busy: boolean;
   disabled: boolean;
 }) {
   const name = `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || '(sin nombre)';
   return (
-    <div className="rounded-xl border border-white/10 bg-[#0F0F0F] p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-white truncate">{name}</p>
-        <p className="text-[13px] text-white/60 truncate">{c.coupons?.title ?? 'Cupón'}</p>
-        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-white/40 font-mono">
+    <div className="rounded-xl border border-white/10 bg-[#0F0F0F] p-4 flex flex-col md:flex-row md:items-center gap-4 justify-between font-sans">
+      {/* Left: Client/Candidate info */}
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center justify-center bg-white/5 text-white/70 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold font-mono">
+            Candidato
+          </span>
+          <p className="text-sm font-semibold text-white truncate">{name}</p>
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-white/50 font-mono">
           {c.id_document && <span>CI: {c.id_document}</span>}
           {c.telefono && <span>Tel: {c.telefono}</span>}
           <span className="truncate">{c.email}</span>
         </div>
-        <p className="text-[10px] text-white/25 font-mono mt-1">
+        <p className="text-[10px] text-white/30 font-mono">
           Reservado: {new Date(c.created_at).toLocaleString('es-VE')}
         </p>
       </div>
-      <button
-        onClick={onRedeem}
-        disabled={busy || disabled}
-        className="shrink-0 rounded-lg bg-emerald-500/90 hover:bg-emerald-500 disabled:opacity-40 px-5 py-2.5 text-sm font-bold text-white transition-colors"
-      >
-        {busy ? 'Canjeando…' : 'Canjear'}
-      </button>
+
+      {/* Middle: Coupon info */}
+      <div className="border-t border-white/5 md:border-t-0 md:border-l md:pl-4 pt-3 md:pt-0 min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center justify-center bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold font-mono">
+            Cupón
+          </span>
+          <p className="text-sm font-bold text-white truncate">{c.coupons?.title ?? 'Cupón'}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {c.coupons?.discount_percent && (
+            <span className="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold font-mono">
+              {Number(c.coupons.discount_percent)}% OFF
+            </span>
+          )}
+          {c.coupons?.code && (
+            <span className="text-[11px] text-white/60 font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/10">
+              Código: {c.coupons.code}
+            </span>
+          )}
+          {c.coupons?.end_date && (
+            <span className="text-[11px] text-white/40">
+              Vence: {new Date(c.coupons.end_date).toLocaleDateString('es-VE')}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Right: Actions */}
+      <div className="flex items-center gap-2 border-t border-white/5 md:border-t-0 pt-3 md:pt-0 shrink-0">
+        <button
+          onClick={onViewDetails}
+          className="rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2.5 text-xs font-semibold text-white/80 transition-colors"
+        >
+          Ver Detalle
+        </button>
+        <button
+          onClick={onRedeem}
+          disabled={busy || disabled}
+          className="rounded-lg bg-emerald-500/90 hover:bg-emerald-500 disabled:opacity-40 px-5 py-2.5 text-sm font-bold text-white transition-colors"
+        >
+          {busy ? 'Canjeando…' : 'Canjear'}
+        </button>
+      </div>
     </div>
   );
 }

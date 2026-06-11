@@ -37,13 +37,15 @@ export default function ClienteCuentaPage() {
     }
   }, [store]);
 
+  const isOwner = store?.store_role === 'owner';
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setFeedback(null);
 
     try {
-      if (store) {
+      if (store && isOwner) {
         const { error: sErr } = await supabase.from('stores').update({
           description: storeDescription,
         }).eq('id', store.id);
@@ -149,19 +151,21 @@ export default function ClienteCuentaPage() {
               />
             </div>
 
-            <div className="border-t border-white/5 pt-4 space-y-3">
-              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
-                Editables por ti
-              </p>
-              <div>
-                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descripción</label>
-                <textarea
-                  value={storeDescription} onChange={(e) => setStoreDescription(e.target.value)}
-                  rows={2}
-                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 resize-none"
-                />
+            {isOwner && (
+              <div className="border-t border-white/5 pt-4 space-y-3">
+                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+                  Editables por ti
+                </p>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descripción</label>
+                  <textarea
+                    value={storeDescription} onChange={(e) => setStoreDescription(e.target.value)}
+                    rows={2}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 resize-none"
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </section>
         ) : (
           <section className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-5 text-amber-300 text-sm">

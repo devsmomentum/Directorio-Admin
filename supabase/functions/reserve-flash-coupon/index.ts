@@ -8,12 +8,11 @@
 // stock y marca la reserva como 'CANJEADO'.
 //
 // Variables de entorno (supabase secrets set):
-//   SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM
+//   RESEND_API_KEY, RESEND_FROM (mismas que send-contract-expiry-reminders)
 // SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY las inyecta Supabase en runtime.
 // ---------------------------------------------------------------------------
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 interface ReserveRequest {
   coupon_id?: string;
@@ -194,8 +193,9 @@ Deno.serve(async (req: Request) => {
     return jsonResponse(500, { error: "rpc_empty" });
   }
 
-  // 2) Envío SMTP con el QR. Si falla, NO revertimos la reserva: el lead ya
-  //    quedó registrado y el negocio puede reenviar el correo.
+  // 2) Envío del QR vía Resend (misma infraestructura que el resto del
+  //    proyecto). Si falla, NO revertimos la reserva: el lead ya quedó
+  //    registrado y el negocio puede reenviar el correo.
   const { subject, html, text } = buildEmail({
     nombre,
     couponTitle: row.coupon_title,
@@ -204,37 +204,34 @@ Deno.serve(async (req: Request) => {
     token: row.redemption_token,
   });
 
-  const smtpHost = Deno.env.get("SMTP_HOST");
-  const smtpPort = Number(Deno.env.get("SMTP_PORT") ?? "587");
-  const smtpUser = Deno.env.get("SMTP_USERNAME");
-  const smtpPass = Deno.env.get("SMTP_PASSWORD");
-  const smtpFrom = Deno.env.get("SMTP_FROM");
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  const resendFrom =
+    Deno.env.get("RESEND_FROM") ?? "Millennium Mall <noreply@morna.tech>";
 
-  if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
-    console.error("[reserve-flash-coupon] SMTP env vars missing");
+  if (!resendApiKey) {
+    console.error("[reserve-flash-coupon] RESEND_API_KEY missing");
     return jsonResponse(500, {
-      error: "smtp_misconfigured",
+      error: "email_misconfigured",
       lead_id: row.lead_id,
     });
   }
 
-  const client = new SMTPClient({
-    connection: {
-      hostname: smtpHost,
-      port: smtpPort,
-      tls: smtpPort === 465,
-      auth: { username: smtpUser, password: smtpPass },
+  const sendRes = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify({ from: resendFrom, to: [email], subject, html, text }),
   });
 
-  try {
-    await client.send({ from: smtpFrom, to: email, subject, content: text, html });
-    await client.close();
-  } catch (e) {
-    console.error("[reserve-flash-coupon] SMTP send error:", e);
-    try { await client.close(); } catch { /* ignore */ }
+  if (!sendRes.ok) {
+    const errBody = await sendRes.text().catch(() => "");
+    console.error(
+      `[reserve-flash-coupon] Resend ${sendRes.status}: ${errBody || sendRes.statusText}`,
+    );
     return jsonResponse(502, {
-      error: "smtp_send_failed",
+      error: "email_send_failed",
       lead_id: row.lead_id,
     });
   }

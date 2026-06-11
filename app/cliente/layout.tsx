@@ -193,6 +193,16 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     refreshStores: fetchStores,
   }), [stores, selectedStore, fetchStores]);
 
+  // Si el rol del vendedor/publicista aún no coincide con la ruta, el redirect
+  // de abajo ya se disparó pero el render se adelanta (React es síncrono,
+  // useEffect no). Mostramos spinner en el área de contenido para suprimir
+  // el flash del dashboard del dueño.
+  const isRoutePending = Boolean(
+    selectedStore &&
+    selectedStore.store_role !== 'owner' &&
+    pathname !== (selectedStore.store_role === 'seller' ? '/cliente/candidatos' : '/cliente/promociones'),
+  );
+
   if (isBypassRoute) {
     return <>{children}</>;
   }
@@ -428,7 +438,11 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
           <main className="relative flex-1 overflow-y-auto">
             <div className="mx-auto max-w-[1600px] p-6 md:p-8">
-              {children}
+              {isRoutePending ? (
+                <div className="flex h-full min-h-[40vh] items-center justify-center">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-[color:var(--brand-cliente-from)]" />
+                </div>
+              ) : children}
             </div>
           </main>
         </div>

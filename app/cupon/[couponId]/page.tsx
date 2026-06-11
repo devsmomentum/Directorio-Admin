@@ -45,8 +45,10 @@ export default function CapturaCuponPage({
   const [invalidReason, setInvalidReason] = useState<string>('');
 
   const [nombre, setNombre] = useState('');
-  const [cedula, setCedula] = useState('');
-  const [telefono, setTelefono] = useState('');
+  const [cedulaType, setCedulaType] = useState('V');
+  const [cedulaNum, setCedulaNum] = useState('');
+  const [phonePrefix, setPhonePrefix] = useState('0412');
+  const [phoneNum, setPhoneNum] = useState('');
   const [email, setEmail] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -72,8 +74,9 @@ export default function CapturaCuponPage({
 
       const c = data as unknown as CouponView;
       const expired = new Date(c.end_date).getTime() <= Date.now();
+      const REDEEMABLE_TYPES = ['PUBLI_PROMO', 'FLASH_COUPON_SEMANAL', 'FLASH_COUPON_DIARIO'];
       const usable =
-        c.plan_type === 'PUBLI_PROMO' &&
+        REDEEMABLE_TYPES.includes(c.plan_type) &&
         c.is_active &&
         c.approval_status === 'approved' &&
         !expired &&
@@ -107,8 +110,12 @@ export default function CapturaCuponPage({
 
   const validate = (): string | null => {
     if (nombre.trim().length < 2) return 'Ingresa tu nombre.';
-    if (cedula.trim().length < 4) return 'Ingresa una cédula válida.';
-    if (telefono.trim().length < 7) return 'Ingresa un teléfono válido.';
+    if (cedulaNum.trim().length < 5) return 'Ingresa una cédula válida.';
+    if (phonePrefix.startsWith('+')) {
+      if (phoneNum.trim().length < 6) return 'Ingresa un teléfono válido.';
+    } else {
+      if (phoneNum.trim().length < 7) return 'Ingresa un teléfono de 7 dígitos.';
+    }
     if (!EMAIL_RE.test(email.trim())) return 'Ingresa un correo válido.';
     return null;
   };
@@ -123,12 +130,15 @@ export default function CapturaCuponPage({
     setFormError(null);
     setPhase('submitting');
 
+    const formattedCedula = `${cedulaType}-${cedulaNum.trim()}`;
+    const formattedTelefono = `${phonePrefix}-${phoneNum.trim()}`;
+
     const { data, error } = await supabase.functions.invoke('reserve-flash-coupon', {
       body: {
         coupon_id: couponId,
         nombre: nombre.trim(),
-        cedula: cedula.trim(),
-        telefono: telefono.trim(),
+        cedula: formattedCedula,
+        telefono: formattedTelefono,
         email: email.trim().toLowerCase(),
       },
     });
@@ -215,7 +225,7 @@ export default function CapturaCuponPage({
                 ¡Ve rápido antes de que se agote!
               </p>
 
-              <form onSubmit={handleSubmit} className="mt-5 space-y-3">
+              <form onSubmit={handleSubmit} className="mt-5 space-y-4">
                 <Field
                   label="Nombre completo"
                   value={nombre}
@@ -223,21 +233,57 @@ export default function CapturaCuponPage({
                   placeholder="Tu nombre"
                   autoComplete="name"
                 />
-                <Field
-                  label="Cédula"
-                  value={cedula}
-                  onChange={(v) => setCedula(v.replace(/[^\dVvEe.\-]/g, ''))}
-                  placeholder="V-12345678"
-                  inputMode="text"
-                />
-                <Field
-                  label="Teléfono"
-                  value={telefono}
-                  onChange={(v) => setTelefono(v.replace(/[^\d+\s]/g, ''))}
-                  placeholder="0412-1234567"
-                  inputMode="tel"
-                  autoComplete="tel"
-                />
+
+                <div className="block">
+                  <span className="text-[11px] uppercase tracking-wider text-white/50">Cédula / Documento</span>
+                  <div className="flex gap-2 mt-1">
+                    <select
+                      value={cedulaType}
+                      onChange={(e) => setCedulaType(e.target.value)}
+                      className="rounded-lg border border-white/15 bg-neutral-800 px-3 py-2.5 text-sm text-white focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 font-sans"
+                    >
+                      <option value="V">V</option>
+                      <option value="E">E</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={cedulaNum}
+                      onChange={(e) => setCedulaNum(e.target.value.replace(/[^\d]/g, ''))}
+                      placeholder="12345678"
+                      inputMode="numeric"
+                      className="flex-1 rounded-lg border border-white/15 bg-neutral-800 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="block">
+                  <span className="text-[11px] uppercase tracking-wider text-white/50">Teléfono</span>
+                  <div className="flex gap-2 mt-1">
+                    <select
+                      value={phonePrefix}
+                      onChange={(e) => setPhonePrefix(e.target.value)}
+                      className="rounded-lg border border-white/15 bg-neutral-800 px-3 py-2.5 text-sm text-white focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 font-sans"
+                    >
+                      <option value="0412">0412</option>
+                      <option value="0414">0414</option>
+                      <option value="0424">0424</option>
+                      <option value="0416">0416</option>
+                      <option value="0426">0426</option>
+                      <option value="0212">0212</option>
+                      <option value="+58">+58</option>
+                      <option value="+1">+1</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={phoneNum}
+                      onChange={(e) => setPhoneNum(e.target.value.replace(/[^\d]/g, ''))}
+                      placeholder="1234567"
+                      inputMode="tel"
+                      className="flex-1 rounded-lg border border-white/15 bg-neutral-800 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500 font-sans"
+                    />
+                  </div>
+                </div>
+
                 <Field
                   label="Correo electrónico"
                   value={email}

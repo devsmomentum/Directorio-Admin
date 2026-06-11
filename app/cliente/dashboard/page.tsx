@@ -193,6 +193,11 @@ export default function ClienteDashboardPage() {
   const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
   const [abonoFeedback, setAbonoFeedback] = useState<string | null>(null);
 
+  // Historial de canjes — solo para el dueño; no depende del rango de métricas.
+  const [redeemed, setRedeemed] = useState<any[]>([]);
+  const [redeemedQuery, setRedeemedQuery] = useState('');
+  const [redeemedLoading, setRedeemedLoading] = useState(false);
+
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   useEffect(() => {
@@ -305,6 +310,39 @@ export default function ClienteDashboardPage() {
     const exp = new Date(store.contract_expiry_date + 'T00:00:00');
     return Math.round((exp.getTime() - today.getTime()) / 86400000);
   }, [store]);
+
+  // Fetch canjes del dueño (independiente del rango de métricas).
+  useEffect(() => {
+    if (!store || store.store_role !== 'owner') { setRedeemed([]); return; }
+    let cancelled = false;
+    setRedeemedLoading(true);
+    (async () => {
+      const { data } = await supabase
+        .from('coupon_leads')
+        .select('id, first_name, last_name, id_document, email, telefono, redeemed_at, coupons(title)')
+        .eq('store_id', store.id)
+        .eq('status', 'CANJEADO')
+        .order('redeemed_at', { ascending: false })
+        .limit(200);
+      if (cancelled) return;
+      setRedeemed(data || []);
+      setRedeemedLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [store]);
+
+  const visibleRedeemed = useMemo(() => {
+    const q = redeemedQuery.trim().toLowerCase();
+    if (!q) return redeemed;
+    return redeemed.filter((r) => {
+      const name = `${r.first_name ?? ''} ${r.last_name ?? ''}`.toLowerCase();
+      return (
+        (r.id_document ?? '').toLowerCase().includes(q) ||
+        (r.email ?? '').toLowerCase().includes(q) ||
+        name.includes(q)
+      );
+    });
+  }, [redeemed, redeemedQuery]);
 
   const [exporting, setExporting] = useState<string | null>(null);
 
@@ -927,6 +965,61 @@ export default function ClienteDashboardPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Canjes de cupones — solo para el dueño */}
+      {store.store_role === 'owner' && (
+        <div>
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
+              Personas que canjearon ({redeemed.length})
+            </p>
+            <input
+              value={redeemedQuery}
+              onChange={(e) => setRedeemedQuery(e.target.value)}
+              placeholder="Buscar por cédula, nombre o correo…"
+              className="h-8 w-64 rounded-lg border border-white/10 bg-white/[0.03] px-3 text-xs text-white placeholder-white/30 focus:border-cyan-500/50 focus:outline-none"
+            />
+          </div>
+          {redeemedLoading ? (
+            <div className="flex h-20 items-center justify-center">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-line border-t-cyan-400" />
+            </div>
+          ) : visibleRedeemed.length === 0 ? (
+            <div className="bg-white/[0.02] border border-white/5 rounded-lg p-6 text-center text-white/30 text-xs">
+              {redeemedQuery ? 'Ningún canje coincide con la búsqueda.' : 'Aún no hay canjes registrados para esta tienda.'}
+            </div>
+          ) : (
+            <div className="bg-white/[0.02] border border-white/5 rounded-lg overflow-hidden">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-white/5 text-white/30 uppercase text-[10px] tracking-wider">
+                    <th className="px-3 py-2 font-medium">Nombre</th>
+                    <th className="px-3 py-2 font-medium">Cédula</th>
+                    <th className="px-3 py-2 font-medium">Correo</th>
+                    <th className="px-3 py-2 font-medium">Cupón</th>
+                    <th className="px-3 py-2 font-medium">Canjeado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRedeemed.map((r) => {
+                    const name = `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim() || '—';
+                    const dt = r.redeemed_at ? new Date(r.redeemed_at).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+                    return (
+                      <tr key={r.id} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
+                        <td className="px-3 py-2 text-white/80 font-medium">{name}</td>
+                        <td className="px-3 py-2 text-white/50 font-mono">{r.id_document || '—'}</td>
+                        <td className="px-3 py-2 text-white/50 truncate max-w-[180px]">{r.email}</td>
+                        <td className="px-3 py-2 text-white/60">{(r.coupons as any)?.title ?? '—'}</td>
+                        <td className="px-3 py-2 text-white/40 font-mono whitespace-nowrap">{dt}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

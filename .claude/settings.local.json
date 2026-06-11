@@ -44,7 +44,11 @@
       "Read(//tmp/**)",
       "Bash(flutter pub *)",
       "Bash(sed -n '90,118p' cliente_portal_auth.sql)",
-      "Bash(sed -n '540,596p' cliente_portal_auth.sql)"
+      "Bash(sed -n '540,596p' cliente_portal_auth.sql)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__execute_sql",
+      "mcp__claude_ai_Supabase__get_logs",
+      "mcp__claude_ai_Supabase__apply_migration"
     ]
   }
 }
