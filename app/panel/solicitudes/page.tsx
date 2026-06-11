@@ -36,7 +36,7 @@ const METHOD_LABEL: Record<string, string> = {
   otro: 'Otro',
 };
 
-type Tab = 'payments' | 'campaigns' | 'coupons';
+type Tab = 'payments' | 'campaigns' | 'coupons' | 'banners';
 type StatusFilter = 'pending' | 'resolved' | 'all';
 
 type StoreLite = { id: string; name: string; local_number: string | null };
@@ -48,6 +48,7 @@ export default function SolicitudesPanelPage() {
   const [payments, setPayments] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
   const [storesById, setStoresById] = useState<Record<string, StoreLite>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,10 +58,12 @@ export default function SolicitudesPanelPage() {
   const [detail, setDetail] = useState<{ kind: Tab; row: any } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [approvalPosition, setApprovalPosition] = useState<string>('top');
+  const [approvalSlot, setApprovalSlot] = useState<string>('1');
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [reqRes, payRes, campRes, coupRes, storeRes] = await Promise.all([
+    const [reqRes, payRes, campRes, coupRes, storeRes, bannerRes] = await Promise.all([
       supabase.from('plan_requests').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('transactions')
         .select('*')
@@ -78,11 +81,17 @@ export default function SolicitudesPanelPage() {
         .order('created_at', { ascending: false })
         .limit(500),
       supabase.from('stores').select('id, name, local_number'),
+      supabase.from('banners')
+        .select('*')
+        .in('approval_status', ['pending', 'approved', 'rejected'])
+        .order('created_at', { ascending: false })
+        .limit(500),
     ]);
     setRequests(reqRes.data || []);
     setPayments(payRes.data || []);
     setCampaigns(campRes.data || []);
     setCoupons(coupRes.data || []);
+    setBanners(bannerRes.data || []);
     const map: Record<string, StoreLite> = {};
     for (const s of (storeRes.data || [])) map[s.id] = s as StoreLite;
     setStoresById(map);
@@ -123,6 +132,14 @@ export default function SolicitudesPanelPage() {
     return coupons.filter(c => c.approval_status !== 'pending');
   }, [coupons, statusFilter]);
 
+  const filteredBanners = useMemo(() => {
+    if (statusFilter === 'all') return banners;
+    if (statusFilter === 'pending') {
+      return banners.filter(b => b.approval_status === 'pending');
+    }
+    return banners.filter(b => b.approval_status !== 'pending');
+  }, [banners, statusFilter]);
+
   const pendingPayCount = useMemo(
     () => payments.filter(p => (p.status ?? 'pending') === 'pending').length,
     [payments]
@@ -134,6 +151,10 @@ export default function SolicitudesPanelPage() {
   const pendingCouponCount = useMemo(
     () => coupons.filter(c => c.approval_status === 'pending').length,
     [coupons]
+  );
+  const pendingBannerCount = useMemo(
+    () => banners.filter(b => b.approval_status === 'pending').length,
+    [banners]
   );
 
   const approvePayment = async (row: any) => {
@@ -244,6 +265,52 @@ export default function SolicitudesPanelPage() {
     fetchData();
   };
 
+  const approveBanner = async (row: any) => {
+    if (approvalPosition !== 'top' && approvalPosition !== 'bottom') {
+      setFeedback({ type: 'err', msg: 'Debes seleccionar "top" o "bottom" — son las únicas posiciones que el K2 renderiza.' });
+      return;
+    }
+    setBusy(true); setFeedback(null);
+    // Asignar posición y slot antes de aprobar (el RPC no los toca)
+    const { error: updErr } = await supabase.from('banners')
+      .update({ ui_position: approvalPosition, slot_position: Number(approvalSlot) || null })
+      .eq('id', row.id);
+    if (updErr) { setBusy(false); setFeedback({ type: 'err', msg: updErr.message }); return; }
+    const { error } = await supabase.rpc('admin_approve_banner', { p_banner_id: row.id });
+    setBusy(false);
+    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'APROBAR',
+      entity_type: 'banner',
+      entity_id: row.id,
+      entity_name: `Banner ${approvalPosition} (Slot ${approvalSlot})`,
+      details: { store_id: row.store_id, ui_position: approvalPosition, slot_position: Number(approvalSlot) }
+    });
+    setFeedback({ type: 'ok', msg: `Banner aprobado en posición "${approvalPosition}" slot ${approvalSlot}. Aparecerá en el K2 en los próximos 3 minutos.` });
+    setDetail(null);
+    fetchData();
+  };
+
+  const rejectBanner = async (row: any) => {
+    setBusy(true); setFeedback(null);
+    const reasonForLog = rejectReason || null;
+    const { error } = await supabase.rpc('admin_reject_banner', {
+      p_banner_id: row.id, p_reason: reasonForLog,
+    });
+    setBusy(false);
+    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await logAdminAction({
+      action_type: 'RECHAZAR',
+      entity_type: 'banner',
+      entity_id: row.id,
+      entity_name: `Banner ${row.ui_position} (Slot ${row.slot_position})`,
+      details: { store_id: row.store_id, reason: reasonForLog }
+    });
+    setFeedback({ type: 'ok', msg: 'Banner rechazado.' });
+    setDetail(null); setRejectReason('');
+    fetchData();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -256,6 +323,7 @@ export default function SolicitudesPanelPage() {
     { key: 'payments',  label: 'Pagos',     pending: pendingPayCount,      cls: 'bg-[#FF007A]/20 text-[#FF99CC]' },
     { key: 'campaigns', label: 'Campañas',  pending: pendingCampaignCount, cls: 'bg-orange-500/20 text-orange-300' },
     { key: 'coupons',   label: 'Cupones',   pending: pendingCouponCount,   cls: 'bg-cyan-500/20 text-cyan-300' },
+    { key: 'banners',   label: 'Banners',   pending: pendingBannerCount,   cls: 'bg-emerald-500/20 text-emerald-300' },
   ];
 
   return (
@@ -380,6 +448,23 @@ export default function SolicitudesPanelPage() {
         )
       )}
 
+      {activeTab === 'banners' && (
+        filteredBanners.length === 0 ? (
+          <EmptyState text="Sin banners en revisión" />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {filteredBanners.map(b => (
+              <BannerCard
+                key={b.id}
+                row={b}
+                store={storesById[b.store_id]}
+                onOpen={() => { setRejectReason(''); setApprovalPosition(b.ui_position || 'top'); setApprovalSlot(String(b.slot_position || 1)); setDetail({ kind: 'banners', row: b }); }}
+              />
+            ))}
+          </div>
+        )
+      )}
+
       {detail && detail.kind === 'payments' && (
         <PaymentDetailModal
           row={detail.row}
@@ -417,6 +502,23 @@ export default function SolicitudesPanelPage() {
           onClose={() => { if (!busy) { setDetail(null); setRejectReason(''); } }}
           onApprove={() => approveCoupon(detail.row)}
           onReject={() => rejectCoupon(detail.row)}
+        />
+      )}
+
+      {detail && detail.kind === 'banners' && (
+        <BannerDetailModal
+          row={detail.row}
+          store={storesById[detail.row.store_id]}
+          rejectReason={rejectReason}
+          setRejectReason={setRejectReason}
+          approvalPosition={approvalPosition}
+          setApprovalPosition={setApprovalPosition}
+          approvalSlot={approvalSlot}
+          setApprovalSlot={setApprovalSlot}
+          busy={busy}
+          onClose={() => { if (!busy) { setDetail(null); setRejectReason(''); } }}
+          onApprove={() => approveBanner(detail.row)}
+          onReject={() => rejectBanner(detail.row)}
         />
       )}
     </div>
@@ -944,5 +1046,196 @@ function EmptyState({ text }: { text: string }) {
     <div className="bg-[#111] border border-white/5 rounded-xl p-10 text-center">
       <p className="text-white/30 text-sm">{text}</p>
     </div>
+  );
+}
+
+function BannerCard({
+  row, store, onOpen,
+}: { row: any; store?: StoreLite; onOpen: () => void }) {
+  const status = row.approval_status || 'pending';
+  const ui = approvalChip(status);
+  const isPending = status === 'pending';
+  const isVideo = row.media_type === 'video';
+
+  return (
+    <button
+      onClick={onOpen}
+      className={`w-full text-left bg-[#0F0F0F] border rounded-xl overflow-hidden transition-all hover:bg-white/[0.04] hover:border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 ${
+        isPending ? 'border-amber-500/20' : 'border-white/5'
+      }`}
+    >
+      <div className="h-36 bg-black relative">
+        {isVideo
+          ? <video src={row.media_url} className="w-full h-full object-cover" muted autoPlay loop playsInline />
+          : <img src={row.media_url} className="w-full h-full object-cover" alt="Banner" />}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+        <span className={`absolute top-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded border ${ui.cls}`}>
+          {ui.txt}
+        </span>
+        <div className="absolute bottom-2 left-2 right-2">
+          <p className="text-white font-semibold truncate">Banner: {row.ui_position}</p>
+          <p className="text-white/50 text-[10px]">{store?.name || '—'}</p>
+        </div>
+      </div>
+      <div className="p-3 space-y-2">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold text-emerald-300 bg-emerald-500/10">DIAMANTE</span>
+          <span className="text-white/40 font-mono text-[10px]">Slot {row.slot_position || 1}</span>
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-white/40 border-t border-white/5 pt-2">
+          <span>{row.created_at ? new Date(row.created_at).toLocaleDateString('es-VE') : '—'}</span>
+          <span className="text-cyan-300 font-medium">{isPending ? 'Revisar →' : 'Ver detalle →'}</span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function BannerDetailModal({
+  row, store, rejectReason, setRejectReason,
+  approvalPosition, setApprovalPosition, approvalSlot, setApprovalSlot,
+  busy, onClose, onApprove, onReject,
+}: {
+  row: any;
+  store?: StoreLite;
+  rejectReason: string;
+  setRejectReason: (s: string) => void;
+  approvalPosition: string;
+  setApprovalPosition: (s: string) => void;
+  approvalSlot: string;
+  setApprovalSlot: (s: string) => void;
+  busy: boolean;
+  onClose: () => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const status = row.approval_status || 'pending';
+  const isPending = status === 'pending';
+  const isVideo = row.media_type === 'video';
+  const ui = approvalChip(status);
+  const positionValid = approvalPosition === 'top' || approvalPosition === 'bottom';
+
+  return (
+    <ModalShell title="Banner en revisión" subtitle={`${store?.name || '—'} · ${row.media_type?.toUpperCase()}`} idHint={row.id} busy={busy} onClose={onClose}>
+      <div className="px-6 py-5 space-y-4 text-sm">
+        <div className="relative w-full aspect-[80/192] max-h-[40vh] mx-auto bg-black border border-white/10 rounded-xl overflow-hidden flex items-center justify-center">
+          {isVideo
+            ? <video src={row.media_url} className="w-full h-full object-contain" controls autoPlay loop playsInline />
+            : <img src={row.media_url} className="w-full h-full object-contain" alt="Banner Preview" />}
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-white/5 pt-3 text-[13px]">
+          <div>
+            <p className="text-white/40 font-medium">Tienda</p>
+            <p className="text-white font-semibold">{store?.name || '—'}</p>
+          </div>
+          <div>
+            <p className="text-white/40 font-medium">Tipo</p>
+            <p className="text-white font-semibold uppercase">{row.media_type}</p>
+          </div>
+          <div>
+            <p className="text-white/40 font-medium">Estado actual</p>
+            <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded border mt-0.5 ${ui.cls}`}>
+              {ui.txt}
+            </span>
+          </div>
+          <div>
+            <p className="text-white/40 font-medium">Fechas</p>
+            <p className="text-white font-semibold text-[11px] font-mono">
+              {row.start_date ? row.start_date.split('T')[0] : '—'}
+              {row.end_date ? ` → ${row.end_date.split('T')[0]}` : ''}
+            </p>
+          </div>
+        </div>
+
+        {/* Asignación de posición y slot — editable para el admin */}
+        <div className="bg-cyan-500/[0.05] border border-cyan-500/20 rounded-lg p-3 space-y-3">
+          <p className="text-[11px] text-cyan-200/80 font-semibold uppercase tracking-wider">
+            Asignar posición en K2
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] text-white/40 uppercase tracking-wider mb-1">Posición</label>
+              <select
+                value={approvalPosition}
+                onChange={e => setApprovalPosition(e.target.value)}
+                className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+              >
+                <option value="top">top — franja superior</option>
+                <option value="bottom">bottom — franja inferior</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-white/40 uppercase tracking-wider mb-1">Slot #</label>
+              <input
+                type="number"
+                min="1"
+                max="22"
+                value={approvalSlot}
+                onChange={e => setApprovalSlot(e.target.value)}
+                className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+          </div>
+          {!positionValid && (
+            <p className="text-[10px] text-amber-300">
+              Solo "top" y "bottom" son renderizados por el K2. Otros valores no aparecerán en pantalla.
+            </p>
+          )}
+          <p className="text-[10px] text-white/35">
+            El banner aparecerá en el K2 en los próximos 3 minutos tras la aprobación (polling de caché).
+          </p>
+        </div>
+
+        {row.rejection_reason && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-200 text-xs">
+            <span className="font-bold">Motivo de rechazo:</span> {row.rejection_reason}
+          </div>
+        )}
+
+        {isPending ? (
+          <div className="border-t border-white/5 pt-4 space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-white/55 uppercase tracking-wider mb-1">
+                Motivo de rechazo (opcional)
+              </label>
+              <textarea
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                placeholder="Escribe la razón si vas a rechazar este banner..."
+                className="w-full h-16 bg-black border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onReject}
+                className="flex-1 py-2 text-xs font-semibold bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 rounded-lg transition-colors"
+              >
+                Rechazar banner
+              </button>
+              <button
+                type="button"
+                onClick={onApprove}
+                disabled={!positionValid}
+                className="flex-1 py-2 text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Aprobar banner
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2 text-xs font-semibold bg-white/5 hover:bg-white/10 text-white rounded-lg transition-colors"
+            >
+              Cerrar
+            </button>
+          </div>
+        )}
+      </div>
+    </ModalShell>
   );
 }

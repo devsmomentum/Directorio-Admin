@@ -48,13 +48,14 @@ const FLASH_PERIOD_LIMITS: Record<string, { max: number; windowDays: number; lab
 
 const CAMPAIGN_DURATION_SECONDS = 15;
 
-type FilterKind = 'all' | 'coupons' | 'campaigns';
-type FormKind = null | 'pick' | 'coupon' | 'campaign';
+type FilterKind = 'all' | 'coupons' | 'campaigns' | 'banners';
+type FormKind = null | 'pick' | 'coupon' | 'campaign' | 'banner';
 
 export default function ClientePromocionesPage() {
   const { selectedStore: store } = useClienteStore();
   const [coupons, setCoupons] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [banners, setBanners] = useState<any[]>([]);
   const [flashBrandIds, setFlashBrandIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
@@ -86,6 +87,16 @@ export default function ClientePromocionesPage() {
   // Si el video de campaña debe reproducirse con audio en el kiosco.
   const [aAudioEnabled, setAAudioEnabled] = useState(false);
 
+  // Banner form state
+  const [bEditingId, setBEditingId] = useState<string | null>(null);
+  const [bUiPosition, setBUiPosition] = useState<string>('home_hero');
+  const [bSlotPosition, setBSlotPosition] = useState<string>('1');
+  const [bMediaFile, setBMediaFile] = useState<File | null>(null);
+  const [bMediaUrl, setBMediaUrl] = useState<string>('');
+  const [bMediaType, setBMediaType] = useState<'image' | 'video'>('image');
+  const [bStartDate, setBStartDate] = useState<string>('');
+  const [bEndDate, setBEndDate] = useState<string>('');
+
   const [submitting, setSubmitting] = useState(false);
 
   // Modal de conflicto: una empresa solo puede tener UNA campaña activa a la vez.
@@ -111,6 +122,7 @@ export default function ClientePromocionesPage() {
 
   const canFlashCoupon = flashActive;
   const canCampaign = planActive && !!store?.plan_type && CAMPAIGN_CAPABLE.has(store.plan_type);
+  const canBanner = planActive && store?.plan_type === 'DIAMANTE';
   const canCreateCoupon = canFlashCoupon;
 
   const couponPlanType = useMemo(() => store?.flash_coupon_plan || '', [store]);
@@ -118,7 +130,7 @@ export default function ClientePromocionesPage() {
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
     setLoading(true);
-    const [mineCoupons, gallery, mineCampaigns] = await Promise.all([
+    const [mineCoupons, gallery, mineCampaigns, mineBanners] = await Promise.all([
       supabase.from('coupons').select('*')
         .eq('store_id', store.id)
         .order('created_at', { ascending: false })
@@ -131,10 +143,15 @@ export default function ClientePromocionesPage() {
         .eq('store_id', store.id)
         .order('created_at', { ascending: false })
         .limit(200),
+      supabase.from('banners').select('*')
+        .eq('store_id', store.id)
+        .order('created_at', { ascending: false })
+        .limit(200),
     ]);
     setCoupons(mineCoupons.data || []);
     setFlashBrandIds(new Set((gallery.data || []).map((c: any) => c.store_id).filter(Boolean)));
     setCampaigns(mineCampaigns.data || []);
+    setBanners(mineBanners.data || []);
     setLoading(false);
   };
 
@@ -167,11 +184,39 @@ export default function ClientePromocionesPage() {
     setAIsActive(true);
     setAAudioEnabled(false);
   };
+  const openCreateBanner = () => {
+    resetBannerForm();
+    setForm('banner');
+  };
+
+  const openEditBanner = (b: any) => {
+    setBEditingId(b.id);
+    setBUiPosition(b.ui_position);
+    setBSlotPosition(String(b.slot_position || '1'));
+    setBMediaUrl(b.media_url);
+    setBMediaType(b.media_type);
+    setBStartDate(b.start_date ? b.start_date.split('T')[0] : today);
+    setBEndDate(b.end_date ? b.end_date.split('T')[0] : (store?.contract_expiry_date || ''));
+    setForm('banner');
+  };
+
+  const resetBannerForm = () => {
+    setBEditingId(null);
+    setBUiPosition('home_hero');
+    setBSlotPosition('1');
+    setBMediaFile(null);
+    setBMediaUrl('');
+    setBMediaType('image');
+    setBStartDate(today);
+    setBEndDate(store?.contract_expiry_date || '');
+  };
+
   const closeForm = () => {
     if (submitting) return;
     setForm(null);
     resetCouponForm();
     resetCampaignForm();
+    resetBannerForm();
   };
 
   const openCreateCoupon = () => {
@@ -598,6 +643,143 @@ export default function ClientePromocionesPage() {
     fetchData();
   };
 
+  const handleBannerFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/');
+    if (file.size > 100 * 1024 * 1024) {
+      alert('El archivo debe pesar menos de 100 MB.');
+      e.target.value = ''; return;
+    }
+    if (isVideo) {
+      const check = await validateKioskVideo(file);
+      if (!check.ok) { alert(check.message); e.target.value = ''; return; }
+    }
+    setBMediaFile(file);
+    setBMediaType(isVideo ? 'video' : 'image');
+    setBMediaUrl(URL.createObjectURL(file));
+  };
+
+  const handleSaveBanner = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!store) return;
+    if (!bEditingId && !bMediaFile) { setFeedback({ type: 'err', msg: 'Sube un archivo para el banner.' }); return; }
+    if (!bEndDate) { setFeedback({ type: 'err', msg: 'Indica la fecha de fin del banner.' }); return; }
+    if (store.contract_expiry_date && bEndDate > store.contract_expiry_date) {
+      setFeedback({ type: 'err', msg: `El banner no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).` });
+      return;
+    }
+
+    setSubmitting(true); setFeedback(null);
+    try {
+      const previousMediaUrl = bEditingId
+        ? banners.find(b => b.id === bEditingId)?.media_url ?? null
+        : null;
+
+      let finalMediaUrl = bMediaUrl;
+      let finalMediaType = bMediaType;
+      if (bMediaFile) {
+        const ext = bMediaFile.name.split('.').pop();
+        const path = `slots/banner_${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from('publicidad').upload(path, bMediaFile, { upsert: true });
+        if (upErr) throw upErr;
+        const { data } = supabase.storage.from('publicidad').getPublicUrl(path);
+        finalMediaUrl = data.publicUrl;
+        finalMediaType = bMediaFile.type.startsWith('video/') ? 'video' : 'image';
+      }
+
+      // El slot/posición lo asigna el admin; el cliente solo envía el contenido y las fechas.
+      // En creación se mantiene el valor por defecto; en edición se preserva el valor que asignó el admin.
+      const payload: any = {
+        ui_position: bUiPosition,
+        slot_position: Number(bSlotPosition) || null,
+        media_url: finalMediaUrl,
+        media_type: finalMediaType,
+        start_date: bStartDate ? new Date(bStartDate).toISOString() : null,
+        end_date: new Date(bEndDate).toISOString(),
+        store_id: store.id,
+      };
+
+      if (bEditingId) {
+        const { data: updated, error } = await supabase.from('banners')
+          .update(payload)
+          .eq('id', bEditingId)
+          .select('id, is_active, approval_status')
+          .single();
+        if (error) throw error;
+
+        if (bMediaFile && previousMediaUrl && previousMediaUrl !== finalMediaUrl) {
+          await removePublicidadFile(previousMediaUrl);
+        }
+
+        const wentToReview = updated?.approval_status === 'pending';
+        setFeedback({
+          type: 'ok',
+          msg: wentToReview
+            ? 'Banner actualizado. Como cambiaste el archivo, quedó en revisión por el administrador.'
+            : 'Banner actualizado.',
+        });
+      } else {
+        payload.is_active = false;
+        payload.approval_status = 'pending';
+        const { error } = await supabase.from('banners').insert([payload]);
+        if (error) throw error;
+
+        setFeedback({ type: 'ok', msg: 'Banner enviado a revisión. El administrador asignará el slot y lo publicará al aprobarlo.' });
+      }
+
+      closeForm();
+      fetchData();
+    } catch (err: any) {
+      setFeedback({ type: 'err', msg: err.message || 'Error al guardar el banner.' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const deleteBanner = async (b: any) => {
+    if (!confirm(`¿Eliminar el banner de la posición "${b.ui_position}"?`)) return;
+    const { error } = await supabase.from('banners').delete().eq('id', b.id);
+    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    await removePublicidadFile(b.media_url);
+    setFeedback({ type: 'ok', msg: 'Banner eliminado.' });
+    fetchData();
+  };
+
+  const toggleBannerActive = async (b: any, next: boolean) => {
+    if (next && !planActive) {
+      setFeedback({ type: 'err', msg: 'Tu plan está vencido — renueva para volver a activar banners.' });
+      return;
+    }
+    setFeedback(null);
+    const { data: updated, error } = await supabase.from('banners')
+      .update({ is_active: next })
+      .eq('id', b.id)
+      .select('id, is_active, approval_status')
+      .single();
+    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    if (!updated) {
+      setFeedback({ type: 'err', msg: 'No se encontró el banner o no tienes permiso para cambiarlo.' });
+      return;
+    }
+    if (updated.is_active !== next) {
+      setFeedback({
+        type: 'err',
+        msg: next
+          ? 'No se pudo reactivar: tu plan venció o el banner no está aprobado.'
+          : 'No se pudo pausar el banner. Revisa permisos.',
+      });
+      fetchData();
+      return;
+    }
+    setFeedback({
+      type: 'ok',
+      msg: next ? 'Banner reactivado.' : 'Banner pausado.',
+    });
+    fetchData();
+  };
+
   if (!store) {
     return (
       <div className="max-w-2xl mx-auto mt-20 bg-amber-500/5 border border-amber-500/20 rounded-2xl p-8 text-center text-amber-300">
@@ -613,11 +795,12 @@ export default function ClientePromocionesPage() {
     );
   }
 
-  const noCapability = !canCreateCoupon && !canCampaign;
+  const noCapability = !canCreateCoupon && !canCampaign && !canBanner;
 
-  const items: Array<{ kind: 'coupon' | 'campaign'; data: any; created: string }> = [
+  const items: Array<{ kind: 'coupon' | 'campaign' | 'banner'; data: any; created: string }> = [
     ...coupons.map(c => ({ kind: 'coupon' as const, data: c, created: c.created_at })),
     ...campaigns.map(c => ({ kind: 'campaign' as const, data: c, created: c.created_at })),
+    ...banners.map(b => ({ kind: 'banner' as const, data: b, created: b.created_at })),
   ].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
 
   const sortedCampaigns = [...campaigns].sort((a, b) =>
@@ -626,11 +809,16 @@ export default function ClientePromocionesPage() {
   const sortedCoupons = [...coupons].sort((a, b) =>
     (b.created_at || '').localeCompare(a.created_at || '')
   );
+  const sortedBanners = [...banners].sort((a, b) =>
+    (b.created_at || '').localeCompare(a.created_at || '')
+  );
   const showCampaigns = filter === 'all' || filter === 'campaigns';
   const showCoupons = filter === 'all' || filter === 'coupons';
+  const showBanners = filter === 'all' || filter === 'banners';
   const nothingVisible =
     (showCampaigns ? sortedCampaigns.length : 0) +
-    (showCoupons ? sortedCoupons.length : 0) === 0;
+    (showCoupons ? sortedCoupons.length : 0) +
+    (showBanners ? sortedBanners.length : 0) === 0;
 
   const flashCount = coupons.filter(c => FLASH_PLANS.has(c.plan_type)
     && c.amount_available > 0
@@ -737,11 +925,12 @@ export default function ClientePromocionesPage() {
       )}
 
       <div className="flex items-center gap-2 flex-wrap">
-        {(['all', 'coupons', 'campaigns'] as FilterKind[]).map(k => {
+        {(['all', 'coupons', 'campaigns', 'banners'] as FilterKind[]).map(k => {
           const active = filter === k;
           const label = k === 'all' ? `Todos (${items.length})`
             : k === 'coupons' ? `Cupones (${coupons.length})`
-              : `Campañas (${campaigns.length})`;
+              : k === 'campaigns' ? `Campañas (${campaigns.length})`
+                : `Banners (${banners.length})`;
           return (
             <button key={k} onClick={() => setFilter(k)}
               className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${active
@@ -765,7 +954,7 @@ export default function ClientePromocionesPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button
                 onClick={() => { if (canCreateCoupon) openCreateCoupon(); }}
                 disabled={!canCreateCoupon}
@@ -776,7 +965,7 @@ export default function ClientePromocionesPage() {
                 <p className="text-[11px] text-white/50 mt-1 leading-snug">
                   {canCreateCoupon
                     ? 'Descuento con código que rota en la galería pública (1 cupón por tienda).'
-                    : 'Requiere el plan Cupones Flash activo. Contrátalo en la sección Planes.'}
+                    : 'Requiere el plan Cupones Flash activo.'}
                 </p>
               </button>
               <button
@@ -787,7 +976,18 @@ export default function ClientePromocionesPage() {
                 <div className="text-2xl mb-2">📺</div>
                 <p className="text-sm font-semibold text-white">Campaña</p>
                 <p className="text-[11px] text-white/50 mt-1 leading-snug">
-                  Video o imagen que rota en los kioscos según tu plan.
+                  {canCampaign ? 'Video o imagen que rota en los kioscos según tu plan.' : 'Requiere plan base activo.'}
+                </p>
+              </button>
+              <button
+                onClick={() => { if (canBanner) openCreateBanner(); }}
+                disabled={!canBanner}
+                className="text-left bg-[#0A0A0A] border border-white/10 hover:border-cyan-500/40 hover:bg-cyan-500/[0.04] disabled:opacity-40 disabled:cursor-not-allowed rounded-xl p-4 transition-colors"
+              >
+                <div className="text-2xl mb-2">🖼️</div>
+                <p className="text-sm font-semibold text-white">Banner</p>
+                <p className="text-[11px] text-white/50 mt-1 leading-snug">
+                  {canBanner ? 'Banner que rota en las pantallas (exclusivo Diamante).' : 'Requiere plan DIAMANTE activo.'}
                 </p>
               </button>
             </div>
@@ -1142,6 +1342,119 @@ export default function ClientePromocionesPage() {
         </div>
       )}
 
+      {/* Banner modal */}
+      {form === 'banner' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeForm} />
+          <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <span>🖼️</span>
+                <span>{bEditingId ? 'Editar Banner' : 'Proponer Nuevo Banner'}</span>
+              </h3>
+              <button onClick={closeForm} disabled={submitting} className="text-white/40 hover:text-white/80">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBanner} className="p-6 space-y-4">
+              <div className="bg-blue-500/[0.06] border border-blue-500/25 rounded-lg p-3 text-[11px] text-blue-100/90 leading-snug">
+                🖼️ Banner exclusivo plan Diamante. El administrador asignará la posición y el slot en pantalla al aprobarlo.
+                {bEditingId && bUiPosition && (
+                  <span className="block mt-1 text-white/50">
+                    Slot asignado: <span className="text-white/80 font-mono">{bUiPosition}{bSlotPosition && bSlotPosition !== '1' ? ` · #${bSlotPosition}` : ''}</span>
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">
+                  Archivo {bEditingId && <span className="normal-case tracking-normal text-white/30">(vacío = mantener)</span>}
+                </label>
+                <div className="flex gap-4 items-start">
+                  <div className="flex-1">
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={handleBannerFileChange}
+                      className="hidden"
+                      id="banner-file-input"
+                    />
+                    <label
+                      htmlFor="banner-file-input"
+                      className="flex flex-col items-center justify-center border-2 border-dashed border-white/10 hover:border-cyan-500/40 hover:bg-white/[0.02] transition-colors rounded-xl p-6 cursor-pointer text-center"
+                    >
+                      <svg className="w-8 h-8 text-white/30 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      <span className="text-xs text-white/60 font-medium">Seleccionar archivo</span>
+                      <span className="text-[10px] text-white/40 mt-1">PNG, JPG, GIF, MP4 · Máx 100 MB</span>
+                    </label>
+                  </div>
+                  {bMediaUrl && (
+                    <div className="w-24 aspect-[80/192] bg-black border border-white/10 rounded-lg overflow-hidden shrink-0 relative flex items-center justify-center">
+                      {bMediaType === 'video' ? (
+                        <video src={bMediaUrl} className="w-full h-full object-cover" muted autoPlay loop playsInline />
+                      ) : (
+                        <img src={bMediaUrl} alt="Preview" className="w-full h-full object-cover" />
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">Inicio</label>
+                  <input
+                    type="date"
+                    required
+                    value={bStartDate}
+                    min={today}
+                    max={store!.contract_expiry_date || undefined}
+                    onChange={(e) => setBStartDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">Fin</label>
+                  <input
+                    type="date"
+                    required
+                    value={bEndDate}
+                    min={bStartDate || today}
+                    max={store!.contract_expiry_date || undefined}
+                    onChange={(e) => setBEndDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+              {store!.contract_expiry_date && (
+                <p className="text-[10px] text-white/40 -mt-2">
+                  Tu plan vence el {store!.contract_expiry_date}. El banner no puede pasar de esa fecha.
+                </p>
+              )}
+
+              <div className="pt-4 border-t border-white/10 flex gap-2">
+                <button
+                  type="button"
+                  onClick={closeForm}
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2.5 text-sm text-white/60 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors disabled:opacity-40"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {submitting ? 'Guardando...' : bEditingId ? 'Guardar Cambios' : 'Enviar Propuesta'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Conflict modal: solo una campaña activa por empresa */}
       {conflict && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -1369,7 +1682,7 @@ export default function ClientePromocionesPage() {
       {nothingVisible ? (
         <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
           <p className="text-white/30 text-sm">
-            {items.length === 0 ? 'Aún no tienes promociones.' : 'No hay resultados para este filtro.'}
+            {items.length === 0 ? 'Aún no tienes promociones o banners.' : 'No hay resultados para este filtro.'}
           </p>
         </div>
       ) : (
@@ -1403,7 +1716,42 @@ export default function ClientePromocionesPage() {
             </section>
           )}
 
-          {showCampaigns && showCoupons && sortedCampaigns.length > 0 && sortedCoupons.length > 0 && (
+          {((showCampaigns && sortedCampaigns.length > 0 && showBanners && sortedBanners.length > 0) ||
+            (showCampaigns && sortedCampaigns.length > 0 && showCoupons && sortedCoupons.length > 0)) && (
+            <div className="border-t border-white/5" />
+          )}
+
+          {showBanners && sortedBanners.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🖼️</span>
+                  <h3 className="text-sm font-semibold text-white tracking-wide">
+                    Banners
+                  </h3>
+                  <span className="text-[10px] text-white/40 font-mono bg-white/5 px-1.5 py-0.5 rounded">
+                    {sortedBanners.length}
+                  </span>
+                </div>
+                <span className="text-[10px] text-white/30">Vertical · 80:192</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {sortedBanners.map(b => (
+                  <BannerCard
+                    key={`b-${b.id}`}
+                    b={b}
+                    onEdit={openEditBanner}
+                    onDelete={deleteBanner}
+                    onToggleActive={toggleBannerActive}
+                    today={today}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {((showBanners && sortedBanners.length > 0 && showCoupons && sortedCoupons.length > 0) ||
+            (showCampaigns && sortedCampaigns.length > 0 && !showBanners && showCoupons && sortedCoupons.length > 0)) && (
             <div className="border-t border-white/5" />
           )}
 
@@ -1640,6 +1988,105 @@ function CampaignCard({ c, onEdit, onDelete, onToggleActive, today }: { c: any; 
               Editar
             </button>
             <button onClick={() => onDelete(c)} className="flex-1 text-[11px] text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-md py-1.5">
+              Eliminar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BannerCard({
+  b,
+  onEdit,
+  onDelete,
+  onToggleActive,
+  today,
+}: {
+  b: any;
+  onEdit: (b: any) => void;
+  onDelete: (b: any) => void;
+  onToggleActive: (b: any, next: boolean) => void;
+  today: string;
+}) {
+  const active = b.is_active && (!b.end_date || b.end_date >= today);
+  const approval = APPROVAL_CHIP[b.approval_status || 'approved'] || APPROVAL_CHIP.approved;
+  const isApproved = (b.approval_status || 'approved') === 'approved';
+
+  return (
+    <div className="bg-[#0F0F0F] border border-white/5 rounded-xl overflow-hidden">
+      <div className="aspect-[80/192] max-h-[300px] bg-black flex items-center justify-center relative">
+        {b.media_type === 'video' && b.media_url ? (
+          <video
+            key={b.media_url}
+            src={b.media_url}
+            className="w-full h-full object-cover bg-black"
+            muted
+            loop
+            autoPlay
+            playsInline
+            controls
+            preload="metadata"
+          />
+        ) : b.media_url ? (
+          <img src={b.media_url} alt="Banner" className="w-full h-full object-cover" />
+        ) : (
+          <span className="text-white/20 text-xs">Sin media</span>
+        )}
+        <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-black/70 text-white border border-white/20 px-1.5 py-0.5 rounded">
+          🖼️ BANNER
+        </span>
+        <span className={`absolute top-2 right-2 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border ${approval.cls}`}>
+          {approval.label}
+        </span>
+      </div>
+      <div className="p-4 space-y-1.5">
+        {b.approval_status === 'rejected' && (
+          <div className="rounded-lg bg-red-500/15 border-2 border-red-500/50 px-3 py-2.5 shadow-[0_0_0_1px_rgba(248,113,113,0.15)]">
+            <div className="flex items-center gap-1.5 mb-1">
+              <svg className="w-3.5 h-3.5 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <p className="text-[11px] font-bold tracking-wider text-red-200 uppercase">Rechazado por el administrador</p>
+            </div>
+            {b.rejection_reason ? (
+              <p className="text-[12px] text-red-100 leading-snug">{b.rejection_reason}</p>
+            ) : (
+              <p className="text-[11px] text-red-300/70 italic">Sin motivo especificado.</p>
+            )}
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-white text-sm font-bold truncate">Posición: {b.ui_position}</h4>
+          <span className={`text-[9px] font-semibold px-2 py-0.5 rounded ${active ? 'text-emerald-300 bg-emerald-500/15' : 'text-white/40 bg-white/5'}`}>
+            {active ? 'ACTIVO' : 'INACTIVO'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] text-white/40 font-mono">{b.slot_position ? `Slot: ${b.slot_position}` : 'Slot: por asignar'}</span>
+          <span className="text-[10px] text-white/40 font-mono uppercase">{b.media_type}</span>
+        </div>
+        <p className="text-[10px] text-white/40 font-mono">
+          {b.start_date ? b.start_date.split('T')[0] : 'Inmediato'}{b.end_date ? ` → ${b.end_date.split('T')[0]}` : ' · sin fin'}
+        </p>
+        <div className="flex flex-col gap-1.5 pt-2">
+          {isApproved && (
+            <button
+              onClick={() => onToggleActive(b, !b.is_active)}
+              className={`w-full text-[11px] font-semibold rounded-md py-1.5 border ${b.is_active
+                ? 'text-white/70 bg-white/5 hover:bg-white/10 border-white/15'
+                : 'text-emerald-200 bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40'
+                }`}
+            >
+              {b.is_active ? 'Pausar' : 'Activar (sin re-aprobación)'}
+            </button>
+          )}
+          <div className="flex gap-1.5">
+            <button onClick={() => onEdit(b)} className="flex-1 text-[11px] text-white/70 bg-white/5 hover:bg-white/10 rounded-md py-1.5">
+              Editar
+            </button>
+            <button onClick={() => onDelete(b)} className="flex-1 text-[11px] text-red-400 bg-red-500/10 hover:bg-red-500/20 rounded-md py-1.5">
               Eliminar
             </button>
           </div>

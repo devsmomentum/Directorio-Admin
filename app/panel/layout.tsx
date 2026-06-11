@@ -63,7 +63,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     if (authorized !== true) return;
     let cancelled = false;
     const load = async () => {
-      const [reqRes, txRes, campRes, coupRes, notifRes] = await Promise.all([
+      const [reqRes, txRes, campRes, coupRes, bannerRes, notifRes] = await Promise.all([
         supabase.from('plan_requests')
           .select('id', { count: 'exact', head: true })
           .eq('status', 'pending'),
@@ -77,13 +77,16 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
         supabase.from('coupons')
           .select('id', { count: 'exact', head: true })
           .eq('approval_status', 'pending'),
+        supabase.from('banners')
+          .select('id', { count: 'exact', head: true })
+          .eq('approval_status', 'pending'),
         supabase.from('admin_notifications')
           .select('id', { count: 'exact', head: true })
           .is('read_at', null),
       ]);
       if (cancelled) return;
       setPendingCount(
-        (reqRes.count ?? 0) + (txRes.count ?? 0) + (campRes.count ?? 0) + (coupRes.count ?? 0)
+        (reqRes.count ?? 0) + (txRes.count ?? 0) + (campRes.count ?? 0) + (coupRes.count ?? 0) + (bannerRes.count ?? 0)
       );
       setUnreadNotifications(notifRes.count ?? 0);
     };
