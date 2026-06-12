@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { validateKioskVideo } from '../../../lib/videoValidation';
 import Pagination, { usePagination } from '../../components/Pagination';
+import K2BannerPreview from '../../components/K2BannerPreview';
 
 const BANNER_W = 80;
 const BANNER_H = 192;
@@ -442,7 +443,7 @@ export default function BannersAdminPage() {
                     </label>
                     <input type="file" accept="image/*,video/*" onChange={handleFileChange}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white/70 file:text-xs" />
-                    <p className="text-[10px] text-white/20 mt-1">Imagen máx 2 MB · Video máx 15 MB · Recomendado <span className="text-white/40">1080 × 192 px (5.625:1)</span> — el slot del kiosco recorta a esa franja con <code className="text-white/30">cover</code>.</p>
+                    <p className="text-[10px] text-white/20 mt-1">Imagen máx 2 MB · Video máx 15 MB · Recomendado <span className="text-white/40">1080 × 192 px (5.625:1)</span> — el video recorta a la franja con <code className="text-white/30">cover</code>; la imagen se muestra completa y deja bordes negros si no es 5.625:1.</p>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button type="button" onClick={resetForm}
@@ -459,16 +460,24 @@ export default function BannersAdminPage() {
 
                 {/* Live preview */}
                 <div className="flex flex-col items-center gap-2 shrink-0">
-                  <p className="text-[9px] text-white/30 uppercase tracking-widest font-medium">Vista kiosco</p>
+                  <p className="text-[9px] text-white/30 uppercase tracking-widest font-medium">Vista K2 Pro</p>
                   {mediaPreview ? (
-                    <KioskPreview src={mediaPreview} type={mediaType} inactive={!isActive} scale={SCALE} />
+                    <K2BannerPreview
+                      src={mediaPreview}
+                      type={mediaType}
+                      position={uiPosition === 'bottom' ? 'bottom' : 'top'}
+                      previewWidth={160}
+                    />
                   ) : (
                     <div className="flex flex-col items-center gap-1">
-                      <div className="border border-dashed border-white/10 rounded-sm bg-white/[0.02] flex items-center justify-center"
-                        style={{ width: BANNER_W * SCALE, height: BANNER_H * SCALE }}>
-                        <span className="text-white/15 text-[9px] text-center px-2 leading-relaxed">Selecciona<br />un archivo</span>
+                      <div
+                        className="border border-dashed border-white/10 rounded-xl bg-white/[0.02] flex flex-col items-center justify-center gap-1"
+                        style={{ width: 160, height: Math.round(160 * (1920 / 1080)) }}
+                      >
+                        <svg className="w-5 h-5 text-white/10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        <span className="text-white/15 text-[8px] text-center leading-relaxed">Selecciona<br />un archivo</span>
+                        <span className="text-[7px] text-white/10 font-mono mt-1">1080×1920</span>
                       </div>
-                      <span className="text-[8px] text-white/20 font-mono">{BANNER_W}×{BANNER_H}px</span>
                     </div>
                   )}
                 </div>

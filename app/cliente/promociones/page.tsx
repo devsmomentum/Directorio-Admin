@@ -6,6 +6,7 @@ import { supabase } from '../../../lib/supabase';
 import { removePublicidadFile } from '../../../lib/storage';
 import { validateKioskVideo } from '../../../lib/videoValidation';
 import { useClienteStore } from '../store-context';
+import K2BannerPreview from '../../components/K2BannerPreview';
 
 const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
@@ -117,6 +118,7 @@ export default function ClientePromocionesPage() {
   const [bMediaType, setBMediaType] = useState<'image' | 'video'>('image');
   const [bStartDate, setBStartDate] = useState<string>('');
   const [bEndDate, setBEndDate] = useState<string>('');
+  const [bPreviewPosition, setBPreviewPosition] = useState<'top' | 'bottom'>('top');
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -1517,35 +1519,73 @@ export default function ClientePromocionesPage() {
                 <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">
                   Archivo {bEditingId && <span className="normal-case tracking-normal text-white/30">(vacío = mantener)</span>}
                 </label>
-                <div className="flex gap-4 items-start">
-                  <div className="flex-1">
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      onChange={handleBannerFileChange}
-                      className="hidden"
-                      id="banner-file-input"
-                    />
-                    <label
-                      htmlFor="banner-file-input"
-                      className="flex flex-col items-center justify-center border-2 border-dashed border-white/10 hover:border-cyan-500/40 hover:bg-white/[0.02] transition-colors rounded-xl p-6 cursor-pointer text-center"
-                    >
-                      <svg className="w-8 h-8 text-white/30 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                      <span className="text-xs text-white/60 font-medium">Seleccionar archivo</span>
-                      <span className="text-[10px] text-white/40 mt-1">PNG, JPG, GIF, MP4 · Máx 100 MB</span>
-                    </label>
-                  </div>
-                  {bMediaUrl && (
-                    <div className="w-24 aspect-[80/192] bg-black border border-white/10 rounded-lg overflow-hidden shrink-0 relative flex items-center justify-center">
-                      {bMediaType === 'video' ? (
-                        <video src={bMediaUrl} className="w-full h-full object-cover" muted autoPlay loop playsInline />
-                      ) : (
-                        <img src={bMediaUrl} alt="Preview" className="w-full h-full object-cover" />
-                      )}
-                    </div>
-                  )}
-                </div>
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  onChange={handleBannerFileChange}
+                  className="hidden"
+                  id="banner-file-input"
+                />
+                <label
+                  htmlFor="banner-file-input"
+                  className="flex flex-col items-center justify-center border-2 border-dashed border-white/10 hover:border-cyan-500/40 hover:bg-white/[0.02] transition-colors rounded-xl p-6 cursor-pointer text-center"
+                >
+                  <svg className="w-8 h-8 text-white/30 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  <span className="text-xs text-white/60 font-medium">Seleccionar archivo</span>
+                  <span className="text-[10px] text-white/40 mt-1">PNG, JPG, GIF, MP4 · Máx 100 MB</span>
+                </label>
               </div>
+
+              {bMediaUrl && (
+                <div className="flex flex-col items-center gap-3 pt-1">
+                  <p className="text-[10px] text-white/40 uppercase tracking-wider font-semibold self-start">
+                    Previsualización en K2 Pro
+                  </p>
+                  <div className="flex items-start gap-4">
+                    <K2BannerPreview
+                      src={bMediaUrl}
+                      type={bMediaType}
+                      position={bPreviewPosition}
+                      previewWidth={140}
+                    />
+                    <div className="flex flex-col gap-2 pt-1">
+                      <p className="text-[10px] text-white/50 leading-snug">
+                        El admin asignará la posición. Previsualiza cómo se vería:
+                      </p>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setBPreviewPosition('top')}
+                          className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-colors ${
+                            bPreviewPosition === 'top'
+                              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300'
+                              : 'bg-white/5 border-white/10 text-white/40 hover:border-white/20'
+                          }`}
+                        >
+                          ▲ Top
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBPreviewPosition('bottom')}
+                          className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-colors ${
+                            bPreviewPosition === 'bottom'
+                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                              : 'bg-white/5 border-white/10 text-white/40 hover:border-white/20'
+                          }`}
+                        >
+                          ▼ Bottom
+                        </button>
+                      </div>
+                      <p className="text-[9px] text-white/25 leading-snug">
+                        Franja de 10% del alto de pantalla.<br />
+                        Resolución nativa: 1080 × 192 px.<br />
+                        Si tu imagen no es 1080 × 192 (5.625:1) se verá
+                        con bordes negros, tal como en este preview.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>

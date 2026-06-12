@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
+import K2BannerPreview from '../../components/K2BannerPreview';
 
 const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
@@ -1118,10 +1119,18 @@ function BannerDetailModal({
   return (
     <ModalShell title="Banner en revisión" subtitle={`${store?.name || '—'} · ${row.media_type?.toUpperCase()}`} idHint={row.id} busy={busy} onClose={onClose}>
       <div className="px-6 py-5 space-y-4 text-sm">
-        <div className="relative w-full aspect-[80/192] max-h-[40vh] mx-auto bg-black border border-white/10 rounded-xl overflow-hidden flex items-center justify-center">
-          {isVideo
-            ? <video src={row.media_url} className="w-full h-full object-contain" controls autoPlay loop playsInline />
-            : <img src={row.media_url} className="w-full h-full object-contain" alt="Banner Preview" />}
+        <div className="flex items-start gap-4">
+          <K2BannerPreview
+            src={row.media_url}
+            type={isVideo ? 'video' : 'image'}
+            position={approvalPosition === 'bottom' ? 'bottom' : 'top'}
+            previewWidth={140}
+          />
+          <div className="flex-1 bg-black border border-white/10 rounded-xl overflow-hidden" style={{ minHeight: 140 }}>
+            {isVideo
+              ? <video src={row.media_url} className="w-full h-full object-contain max-h-52" controls autoPlay loop playsInline />
+              : <img src={row.media_url} className="w-full object-contain max-h-52" alt="Banner Preview" />}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-white/5 pt-3 text-[13px]">
