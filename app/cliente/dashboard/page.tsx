@@ -100,7 +100,7 @@ async function fetchStoreMetrics(storeId: string, startDay: string | null): Prom
   const campIds = campaigns.map(c => c.id);
 
   let impQ = supabase.from('ad_impressions_daily')
-    .select('campaign_id, kiosk_id, day, count')
+    .select('campaign_id, kiosk_id, day, count, impressions_valid, full_views')
     .order('day', { ascending: false });
   impQ = campIds.length
     ? impQ.in('campaign_id', campIds)
@@ -127,13 +127,19 @@ async function fetchStoreMetrics(storeId: string, startDay: string | null): Prom
   };
 }
 
+// Lectura tolerante de los agregados diarios. Las filas anteriores a la
+// migración 034 solo traen `count`; las nuevas traen impressions_valid (vistas
+// >= 5 s) y full_views (vistas completas).
+const validOf = (d: any) => (d.impressions_valid ?? d.count) || 0;
+const fullOf = (d: any) => d.full_views || 0;
+
 // Constructores de filas CSV (sin columna de tienda; se antepone para el export general).
 function buildImpressionRows(campaigns: any[], impressions: any[]): unknown[][] {
   const byCamp: Record<string, string> = {};
   campaigns.forEach(c => { byCamp[c.id] = c.brand_name; });
   return impressions.slice()
     .sort((a, b) => (a.day < b.day ? 1 : -1))
-    .map(d => [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id || '', d.count ?? 0]);
+    .map(d => [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id || '', validOf(d), fullOf(d)]);
 }
 
 function buildSearchRows(searchRows: any[]): unknown[][] {
@@ -152,7 +158,8 @@ function buildCouponStatRows(couponRows: any[]): unknown[][] {
 }
 
 function summaryMetrics(data: StoreMetrics) {
-  const totalImpressions = data.impressions.reduce((s, d) => s + (d.count || 0), 0);
+  const totalImpressions = data.impressions.reduce((s, d) => s + validOf(d), 0);
+  const totalFullViews = data.impressions.reduce((s, d) => s + fullOf(d), 0);
   const storeClicks = data.searchRows
     .filter(r => r.search_term === '(directo)' || r.search_term === '(mapa)')
     .reduce((s, r) => s + (r.search_count || 0), 0);
@@ -165,6 +172,7 @@ function summaryMetrics(data: StoreMetrics) {
   data.impressions.forEach(d => { if (d.kiosk_id) kioskSet.add(d.kiosk_id); });
   return {
     impresiones: totalImpressions,
+    visualizaciones_completas: totalFullViews,
     clicks_directorio: storeClicks,
     veces_buscada: searchClicks,
     flash_mostrados: flashShown,
@@ -176,8 +184,8 @@ function summaryMetrics(data: StoreMetrics) {
 }
 
 const SUMMARY_COLUMNS = [
-  'impresiones', 'clicks_directorio', 'veces_buscada', 'flash_mostrados',
-  'flash_canjeados', 'kioscos_unicos', 'campanias', 'cupones',
+  'impresiones', 'visualizaciones_completas', 'clicks_directorio', 'veces_buscada',
+  'flash_mostrados', 'flash_canjeados', 'kioscos_unicos', 'campanias', 'cupones',
 ] as const;
 
 export default function ClienteDashboardPage() {
@@ -235,7 +243,10 @@ export default function ClienteDashboardPage() {
   }, [range, store]);
 
   const totalImpressions = useMemo(() =>
-    impressions.reduce((s, d) => s + (d.count || 0), 0), [impressions]);
+    impressions.reduce((s, d) => s + validOf(d), 0), [impressions]);
+
+  const totalFullViews = useMemo(() =>
+    impressions.reduce((s, d) => s + fullOf(d), 0), [impressions]);
 
   const storeClicks = useMemo(() =>
     searchRows
@@ -358,7 +369,7 @@ export default function ClienteDashboardPage() {
     const rows = buildImpressionRows(campaigns, impressions);
     if (!rows.length) { alert('Sin impresiones de campaña en el rango seleccionado.'); return; }
     downloadCSV(`metricas_${slugify(store!.name)}_impresiones_${stamp}.csv`,
-      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones'], rows);
+      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas'], rows);
   };
 
   const exportSelBusquedas = () => {
@@ -419,7 +430,7 @@ export default function ClienteDashboardPage() {
       if (!rows.length) { alert('Sin datos para exportar en el rango seleccionado.'); return; }
 
       const header = kind === 'impresiones'
-        ? ['tienda', 'fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones']
+        ? ['tienda', 'fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas']
         : kind === 'busquedas'
           ? ['tienda', 'fecha', 'tipo', 'termino', 'cantidad']
           : ['tienda', 'fecha', 'mostrados', 'canjeados'];
@@ -806,8 +817,10 @@ export default function ClienteDashboardPage() {
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Tile label="Impresiones" value={totalImpressions.toLocaleString('es-VE')} accent="text-orange-400"
-          sub={`Reproducciones en K2 · ${RANGE_LABELS[range].toLowerCase()}`} />
+        <Tile label="Impresiones (>5s)" value={totalImpressions.toLocaleString('es-VE')} accent="text-orange-400"
+          sub={`Vistas válidas en K2 · ${RANGE_LABELS[range].toLowerCase()}`} />
+        <Tile label="Visualizaciones completas" value={totalFullViews.toLocaleString('es-VE')} accent="text-emerald-400"
+          sub={`Vieron el spot completo · ${RANGE_LABELS[range].toLowerCase()}`} />
         <Tile label="Clicks en directorio" value={storeClicks.toLocaleString('es-VE')} accent="text-violet-400"
           sub="click + tap sobre tu tienda" />
         <Tile label="Veces buscada" value={searchClicks.toLocaleString('es-VE')} accent="text-sky-400"
@@ -894,14 +907,15 @@ export default function ClienteDashboardPage() {
                   <th className="px-3 py-2 font-medium">Plan</th>
                   <th className="px-3 py-2 font-medium">Vigencia</th>
                   <th className="px-3 py-2 font-medium">Estado</th>
-                  <th className="px-3 py-2 font-medium text-right">Impresiones</th>
+                  <th className="px-3 py-2 font-medium text-right">Impresiones (&gt;5s)</th>
+                  <th className="px-3 py-2 font-medium text-right">Vistas completas</th>
                 </tr>
               </thead>
               <tbody>
                 {campaigns.map(c => {
-                  const imp = impressions
-                    .filter(d => d.campaign_id === c.id)
-                    .reduce((s, d) => s + (d.count || 0), 0);
+                  const rows = impressions.filter(d => d.campaign_id === c.id);
+                  const imp = rows.reduce((s, d) => s + validOf(d), 0);
+                  const full = rows.reduce((s, d) => s + fullOf(d), 0);
                   const live = c.is_active && (!c.end_date || c.end_date >= today);
                   return (
                     <tr key={c.id} className="border-b border-white/[0.03]">
@@ -918,6 +932,7 @@ export default function ClienteDashboardPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-white/70">{imp.toLocaleString('es-VE')}</td>
+                      <td className="px-3 py-2 text-right font-mono text-emerald-400/80">{full.toLocaleString('es-VE')}</td>
                     </tr>
                   );
                 })}

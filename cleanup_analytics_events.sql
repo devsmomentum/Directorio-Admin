@@ -58,9 +58,26 @@ inserted AS (
 SELECT COUNT(*) AS impresiones_video_migradas FROM inserted;
 
 -- Reconstruir agregado diario (idempotente)
+-- ⚠️ ADVERTENCIA: este rebuild reconstruye el diario SOLO con lo que quede en
+-- la tabla cruda `ad_impressions`. El cron `purge-raw-analytics` la purga con
+-- retención de 1 día (ver migración 031), así que correr esto en producción
+-- BORRA el histórico diario más viejo que la retención. Úsalo solo como
+-- herramienta de recuperación cuando entiendas esa pérdida.
+--
+-- Desde la migración 034 el diario tiene tres contadores: `count` (legacy,
+-- = impresiones válidas), `impressions_valid` y `full_views`. Reconstruimos
+-- los tres desde la cruda: cada fila cruda = 1 impresión válida; `is_full_view`
+-- marca las vistas completas.
 TRUNCATE public.ad_impressions_daily;
-INSERT INTO public.ad_impressions_daily (campaign_id, kiosk_id, day, count)
-SELECT campaign_id, kiosk_id, occurred_at::date, COUNT(*)
+INSERT INTO public.ad_impressions_daily
+  (campaign_id, kiosk_id, day, count, impressions_valid, full_views)
+SELECT
+  campaign_id,
+  kiosk_id,
+  occurred_at::date,
+  COUNT(*),
+  COUNT(*),
+  COUNT(*) FILTER (WHERE is_full_view)
 FROM public.ad_impressions
 GROUP BY campaign_id, kiosk_id, occurred_at::date;
 

@@ -48,14 +48,32 @@ const FLASH_PERIOD_LIMITS: Record<string, { max: number; windowDays: number; lab
 
 const CAMPAIGN_DURATION_SECONDS = 15;
 
+// Lectura tolerante de los agregados diarios (mismo criterio que el dashboard):
+// las filas previas a la migración 034 solo traen `count`; las nuevas traen
+// impressions_valid (vistas >= 5 s) y full_views (vistas completas).
+const validOf = (d: any) => (d.impressions_valid ?? d.count) || 0;
+const fullOf = (d: any) => d.full_views || 0;
+// Resta días a una fecha 'YYYY-MM-DD' en UTC (comparaciones por string del agregado).
+const dayMinus = (iso: string, n: number) => {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().split('T')[0];
+};
+
 type FilterKind = 'all' | 'coupons' | 'campaigns' | 'banners';
 type FormKind = null | 'pick' | 'coupon' | 'campaign' | 'banner';
 
 export default function ClientePromocionesPage() {
   const { selectedStore: store } = useClienteStore();
+  // Las métricas de campañas solo las ve el dueño de la tienda (no vendedores/anunciantes).
+  const isOwner = store?.store_role === 'owner';
   const [coupons, setCoupons] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [banners, setBanners] = useState<any[]>([]);
+  // Agregados diarios de impresiones por campaña (solo dueño). Campaña cuya
+  // tarjeta de métricas está abierta en el modal de solo lectura.
+  const [impressions, setImpressions] = useState<any[]>([]);
+  const [metricsFor, setMetricsFor] = useState<any | null>(null);
   const [flashBrandIds, setFlashBrandIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
@@ -148,10 +166,23 @@ export default function ClientePromocionesPage() {
         .order('created_at', { ascending: false })
         .limit(200),
     ]);
+    const camps = mineCampaigns.data || [];
     setCoupons(mineCoupons.data || []);
     setFlashBrandIds(new Set((gallery.data || []).map((c: any) => c.store_id).filter(Boolean)));
-    setCampaigns(mineCampaigns.data || []);
+    setCampaigns(camps);
     setBanners(mineBanners.data || []);
+
+    // Métricas de visualización por campaña: solo el dueño las ve. Leemos el
+    // agregado diario (RLS lo deja leer; filtramos por nuestras campañas) y lo
+    // procesamos en cliente para Hoy / 7 d / 30 d / total + desglose por kiosco.
+    if (isOwner && camps.length) {
+      const { data: imp } = await supabase.from('ad_impressions_daily')
+        .select('campaign_id, kiosk_id, day, count, impressions_valid, full_views')
+        .in('campaign_id', camps.map((c: any) => c.id));
+      setImpressions(imp || []);
+    } else {
+      setImpressions([]);
+    }
     setLoading(false);
   };
 
@@ -1709,6 +1740,7 @@ export default function ClientePromocionesPage() {
                     onEdit={openEditCampaign}
                     onDelete={deleteCampaign}
                     onToggleActive={toggleCampaignActive}
+                    onShowMetrics={isOwner ? setMetricsFor : undefined}
                     today={today}
                   />
                 ))}
@@ -1784,6 +1816,133 @@ export default function ClientePromocionesPage() {
           )}
         </div>
       )}
+
+      {/* Métricas de campaña (solo lectura, solo dueño) */}
+      {metricsFor && (() => {
+        const rows = impressions.filter(d => d.campaign_id === metricsFor.id);
+        const d7 = dayMinus(today, 6);
+        const d30 = dayMinus(today, 29);
+        let valid = 0, full = 0, vToday = 0, v7 = 0, v30 = 0, f30 = 0;
+        const byKiosk = new Map<string, { valid: number; full: number }>();
+        rows.forEach(r => {
+          const v = validOf(r), f = fullOf(r);
+          valid += v; full += f;
+          if (r.day === today) vToday += v;
+          if (r.day >= d7) v7 += v;
+          if (r.day >= d30) { v30 += v; f30 += f; }
+          if (r.kiosk_id) {
+            const cur = byKiosk.get(r.kiosk_id) || { valid: 0, full: 0 };
+            cur.valid += v; cur.full += f;
+            byKiosk.set(r.kiosk_id, cur);
+          }
+        });
+        const kiosks = Array.from(byKiosk.entries()).sort((a, b) => b[1].valid - a[1].valid);
+        const completionRate = valid > 0 ? Math.round((full / valid) * 100) : 0;
+        const stat = (label: string, value: number) => (
+          <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-3">
+            <p className="text-[10px] text-white/40 uppercase tracking-wider">{label}</p>
+            <p className="text-xl font-bold font-mono text-white mt-0.5">{value.toLocaleString('es-VE')}</p>
+          </div>
+        );
+        return (
+          <div className="fixed inset-0 z-[65] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setMetricsFor(null)} />
+            <div className="relative bg-[#0E0E0E] border border-cyan-500/30 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[92vh] overflow-y-auto">
+              <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <span>📊</span>
+                  Métricas · {metricsFor.brand_name}
+                </h3>
+                <button onClick={() => setMetricsFor(null)} className="text-white/40 hover:text-white/80">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <div className="px-6 py-5 space-y-5">
+                <p className="text-[11px] text-white/45 leading-snug">
+                  Impresiones válidas (el slot se vio al menos 5 s) y visualizaciones completas
+                  (el slot de {CAMPAIGN_DURATION_SECONDS} s se reprodujo entero) registradas en los kioscos.
+                </p>
+
+                <div>
+                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Impresiones (&gt; 5 s)</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {stat('Hoy', vToday)}
+                    {stat('Últimos 7 días', v7)}
+                    {stat('Últimos 30 días', v30)}
+                    {stat('Total', valid)}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Visualizaciones completas</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-3">
+                      <p className="text-[10px] text-white/40 uppercase tracking-wider">Últimos 30 días</p>
+                      <p className="text-xl font-bold font-mono text-emerald-300 mt-0.5">{f30.toLocaleString('es-VE')}</p>
+                    </div>
+                    <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-3">
+                      <p className="text-[10px] text-white/40 uppercase tracking-wider">Total</p>
+                      <p className="text-xl font-bold font-mono text-emerald-300 mt-0.5">{full.toLocaleString('es-VE')}</p>
+                    </div>
+                    <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-3">
+                      <p className="text-[10px] text-white/40 uppercase tracking-wider">% Completas</p>
+                      <p className="text-xl font-bold font-mono text-emerald-300 mt-0.5">{completionRate}%</p>
+                    </div>
+                    <div className="bg-[#0A0A0A] border border-white/10 rounded-lg p-3">
+                      <p className="text-[10px] text-white/40 uppercase tracking-wider">Kioscos</p>
+                      <p className="text-xl font-bold font-mono text-white mt-0.5">{kiosks.length.toLocaleString('es-VE')}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {kiosks.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Desglose por kiosco</p>
+                    <div className="bg-[#0A0A0A] border border-white/10 rounded-lg overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-white/5 text-white/30 uppercase text-[10px] tracking-wider">
+                            <th className="px-3 py-2 font-medium">Kiosco</th>
+                            <th className="px-3 py-2 font-medium text-right">Impresiones</th>
+                            <th className="px-3 py-2 font-medium text-right">Vistas completas</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {kiosks.map(([kioskId, m]) => (
+                            <tr key={kioskId} className="border-b border-white/[0.03]">
+                              <td className="px-3 py-2 text-white/70 font-mono">{kioskId}</td>
+                              <td className="px-3 py-2 text-right font-mono text-white/70">{m.valid.toLocaleString('es-VE')}</td>
+                              <td className="px-3 py-2 text-right font-mono text-emerald-400/80">{m.full.toLocaleString('es-VE')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {valid === 0 && (
+                  <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 text-center text-white/30 text-xs">
+                    Esta campaña aún no registra impresiones en los kioscos.
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <Link href="/cliente/dashboard" className="text-[11px] text-cyan-400 hover:underline">
+                    Ver analíticas completas →
+                  </Link>
+                  <button
+                    onClick={() => setMetricsFor(null)}
+                    className="px-4 py-2 text-xs font-semibold text-white/70 bg-white/5 hover:bg-white/10 rounded-lg"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Confirm dialog in-app (reemplaza window.confirm) */}
       {confirmDialog && (
@@ -1907,7 +2066,7 @@ function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) =
   );
 }
 
-function CampaignCard({ c, onEdit, onDelete, onToggleActive, today }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; onToggleActive: (c: any, next: boolean) => void; today: string }) {
+function CampaignCard({ c, onEdit, onDelete, onToggleActive, onShowMetrics, today }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; onToggleActive: (c: any, next: boolean) => void; onShowMetrics?: (c: any) => void; today: string }) {
   const active = c.is_active && (!c.end_date || c.end_date >= today);
   const approval = APPROVAL_CHIP[c.approval_status || 'approved'] || APPROVAL_CHIP.approved;
   // Solo una campaña aprobada puede pausarse/reactivarse directo (sin volver a
@@ -1972,6 +2131,14 @@ function CampaignCard({ c, onEdit, onDelete, onToggleActive, today }: { c: any; 
           {c.start_date}{c.end_date ? ` → ${c.end_date}` : ' · sin fin'}
         </p>
         <div className="flex flex-col gap-1.5 pt-2">
+          {onShowMetrics && (
+            <button
+              onClick={() => onShowMetrics(c)}
+              className="w-full text-[11px] font-semibold rounded-md py-1.5 border text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 flex items-center justify-center gap-1.5"
+            >
+              📊 Ver métricas
+            </button>
+          )}
           {isApproved && (
             <button
               onClick={() => onToggleActive(c, !c.is_active)}
