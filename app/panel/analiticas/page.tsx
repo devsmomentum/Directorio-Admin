@@ -64,6 +64,8 @@ type ImpressionDaily = {
   kiosk_id: string;
   day: string;
   count: number;
+  impressions_valid?: number;
+  full_views?: number;
 };
 
 type RankItem = { name: string; count: number; location?: string };
@@ -132,7 +134,7 @@ export default function AnalyticsDashboard() {
           .select('campaign_id, brand_name, start_date, end_date, is_active, today, last_7d, last_30d, total'),
         supabase
           .from('ad_impressions_daily')
-          .select('campaign_id, kiosk_id, day, count')
+          .select('campaign_id, kiosk_id, day, count, impressions_valid, full_views')
           .order('day', { ascending: false })
           .limit(10000),
       ]);
@@ -258,17 +260,31 @@ export default function AnalyticsDashboard() {
 
   // ── Impresiones de campañas (filtradas por período + kiosko) ────────────────
   const impressionsByCampaign = useMemo(() => {
-    const map = new Map<string, { total: number; today: number; daily: Record<string, number> }>();
+    const map = new Map<string, {
+      total: number;
+      today: number;
+      daily: Record<string, number>;
+      dailyFull: Record<string, number>;
+      dailyPartial: Record<string, number>;
+    }>();
     const todayKey = new Date().toLocaleDateString('en-CA');
     const startStr = periodStart ? periodStart.toLocaleDateString('en-CA') : null;
 
     impressionDaily.forEach(d => {
       if (selectedKioskId !== 'all' && d.kiosk_id !== selectedKioskId) return;
       if (startStr && d.day < startStr) return;
-      const entry = map.get(d.campaign_id) || { total: 0, today: 0, daily: {} };
-      entry.total += d.count;
-      entry.daily[d.day] = (entry.daily[d.day] || 0) + d.count;
-      if (d.day === todayKey) entry.today += d.count;
+      const entry = map.get(d.campaign_id) || { total: 0, today: 0, daily: {}, dailyFull: {}, dailyPartial: {} };
+      
+      const valid = (d.impressions_valid ?? d.count) || 0;
+      const full = d.full_views || 0;
+      const partial = Math.max(0, valid - full);
+
+      entry.total += valid;
+      entry.daily[d.day] = (entry.daily[d.day] || 0) + valid;
+      entry.dailyFull[d.day] = (entry.dailyFull[d.day] || 0) + full;
+      entry.dailyPartial[d.day] = (entry.dailyPartial[d.day] || 0) + partial;
+
+      if (d.day === todayKey) entry.today += valid;
       map.set(d.campaign_id, entry);
     });
 
@@ -379,14 +395,17 @@ export default function AnalyticsDashboard() {
       .filter(({ stats }) => (stats?.total || 0) > 0)
       .sort((a, b) => (b.stats?.total || 0) - (a.stats?.total || 0))
       .forEach(({ c, stats }) => {
-        Object.entries(stats!.daily)
+        if (!stats) return;
+        Object.entries(stats.daily)
           .sort((a, b) => a[0].localeCompare(b[0]))
-          .forEach(([day, count]) => {
-            rows.push([`"${c.brand_name}"`, day, String(count)]);
+          .forEach(([day, validCount]) => {
+            const fullCount = stats.dailyFull[day] || 0;
+            const partialCount = stats.dailyPartial[day] || 0;
+            rows.push([`"${c.brand_name}"`, day, String(validCount), String(fullCount), String(partialCount)]);
           });
       });
     if (!rows.length) return alert('Sin impresiones registradas para exportar.');
-    exportCSV(['Campana', 'Fecha', 'Impresiones'], rows, `Impresiones_${new Date().toISOString().split('T')[0]}.csv`);
+    exportCSV(['Campana', 'Fecha', 'Impresiones Validas', 'Vistas Completas', 'Vistas Parciales'], rows, `Impresiones_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
 

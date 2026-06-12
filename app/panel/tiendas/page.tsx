@@ -1623,7 +1623,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         // 2) Impresiones diarias para las campañas de la tienda (data K2)
         let impQuery = supabase
           .from('ad_impressions_daily')
-          .select('campaign_id, kiosk_id, day, count')
+          .select('campaign_id, kiosk_id, day, count, impressions_valid, full_views')
           .order('day', { ascending: false });
         if (campaignIds.length) impQuery = impQuery.in('campaign_id', campaignIds);
         else impQuery = impQuery.eq('campaign_id', '00000000-0000-0000-0000-000000000000'); // ninguna
@@ -1692,8 +1692,16 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     [couponStats]);
 
   const campaignImpressionsTotal = useMemo(() =>
-    impressionsDaily.reduce((s, d) => s + (d.count || 0), 0),
+    impressionsDaily.reduce((s, d) => s + (((d.impressions_valid ?? d.count) || 0)), 0),
     [impressionsDaily]);
+
+  const campaignFullViewsTotal = useMemo(() =>
+    impressionsDaily.reduce((s, d) => s + (d.full_views || 0), 0),
+    [impressionsDaily]);
+
+  const campaignPartialViewsTotal = useMemo(() =>
+    Math.max(0, campaignImpressionsTotal - campaignFullViewsTotal),
+    [campaignImpressionsTotal, campaignFullViewsTotal]);
 
   const storeClicks = useMemo(() =>
     searchRows
@@ -1769,8 +1777,9 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     const impByCampaign: Record<string, number> = {};
     const impByKiosk: Record<string, number> = {};
     for (const d of impressionsDaily) {
-      impByCampaign[d.campaign_id] = (impByCampaign[d.campaign_id] || 0) + (d.count || 0);
-      if (d.kiosk_id) impByKiosk[d.kiosk_id] = (impByKiosk[d.kiosk_id] || 0) + (d.count || 0);
+      const valid = (d.impressions_valid ?? d.count) || 0;
+      impByCampaign[d.campaign_id] = (impByCampaign[d.campaign_id] || 0) + valid;
+      if (d.kiosk_id) impByKiosk[d.kiosk_id] = (impByKiosk[d.kiosk_id] || 0) + valid;
     }
 
     const flashByCoupon: Record<string, number> = {};
@@ -1830,7 +1839,9 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         ['eventos_promedio_por_dia', avgPerDay ? avgPerDay.toFixed(2) : '0'],
         ['eventos_primer_evento_iso', first || ''],
         ['eventos_ultimo_evento_iso', last || ''],
-        ['campania_impresiones', campaignImpressionsTotal],
+        ['campania_impresiones_validas', campaignImpressionsTotal],
+        ['campania_vistas_completas', campaignFullViewsTotal],
+        ['campania_vistas_parciales', campaignPartialViewsTotal],
         ['flash_coupon_apariciones', flashShownCount],
         ['clicks_directorio', storeClicks],
         ['veces_buscada', searchClickCount],
@@ -1859,9 +1870,14 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
     const rows = impressionsDaily
       .slice()
       .sort((a, b) => (a.day < b.day ? 1 : -1))
-      .map(d => [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id, d.count]);
+      .map(d => {
+        const valid = (d.impressions_valid ?? d.count) || 0;
+        const full = d.full_views || 0;
+        const partial = Math.max(0, valid - full);
+        return [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id, valid, full, partial];
+      });
     downloadCSV(`K2_${slug}_impresiones_diarias_${stamp}.csv`,
-      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones'],
+      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas', 'vistas_parciales'],
       rows);
   };
 

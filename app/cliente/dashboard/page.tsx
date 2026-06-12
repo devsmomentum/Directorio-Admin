@@ -139,7 +139,11 @@ function buildImpressionRows(campaigns: any[], impressions: any[]): unknown[][] 
   campaigns.forEach(c => { byCamp[c.id] = c.brand_name; });
   return impressions.slice()
     .sort((a, b) => (a.day < b.day ? 1 : -1))
-    .map(d => [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id || '', validOf(d), fullOf(d)]);
+    .map(d => {
+      const valid = validOf(d);
+      const full = fullOf(d);
+      return [d.day, byCamp[d.campaign_id] || d.campaign_id, d.campaign_id, d.kiosk_id || '', valid, full, Math.max(0, valid - full)];
+    });
 }
 
 function buildSearchRows(searchRows: any[]): unknown[][] {
@@ -173,6 +177,7 @@ function summaryMetrics(data: StoreMetrics) {
   return {
     impresiones: totalImpressions,
     visualizaciones_completas: totalFullViews,
+    visualizaciones_parciales: Math.max(0, totalImpressions - totalFullViews),
     clicks_directorio: storeClicks,
     veces_buscada: searchClicks,
     flash_mostrados: flashShown,
@@ -184,7 +189,7 @@ function summaryMetrics(data: StoreMetrics) {
 }
 
 const SUMMARY_COLUMNS = [
-  'impresiones', 'visualizaciones_completas', 'clicks_directorio', 'veces_buscada',
+  'impresiones', 'visualizaciones_completas', 'visualizaciones_parciales', 'clicks_directorio', 'veces_buscada',
   'flash_mostrados', 'flash_canjeados', 'kioscos_unicos', 'campanias', 'cupones',
 ] as const;
 
@@ -369,7 +374,7 @@ export default function ClienteDashboardPage() {
     const rows = buildImpressionRows(campaigns, impressions);
     if (!rows.length) { alert('Sin impresiones de campaña en el rango seleccionado.'); return; }
     downloadCSV(`metricas_${slugify(store!.name)}_impresiones_${stamp}.csv`,
-      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas'], rows);
+      ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas', 'vistas_parciales'], rows);
   };
 
   const exportSelBusquedas = () => {
@@ -430,7 +435,7 @@ export default function ClienteDashboardPage() {
       if (!rows.length) { alert('Sin datos para exportar en el rango seleccionado.'); return; }
 
       const header = kind === 'impresiones'
-        ? ['tienda', 'fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas']
+        ? ['tienda', 'fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas', 'vistas_parciales']
         : kind === 'busquedas'
           ? ['tienda', 'fecha', 'tipo', 'termino', 'cantidad']
           : ['tienda', 'fecha', 'mostrados', 'canjeados'];
