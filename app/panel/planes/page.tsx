@@ -46,6 +46,9 @@ export default function PlanesCRUD() {
   const [loopEligible, setLoopEligible] = useState(false);
   const [hasFixedBanner, setHasFixedBanner] = useState(false);
 
+  // Reglas de cupones Flash
+  const [couponStockCap, setCouponStockCap] = useState('20');
+
   useEffect(() => {
     fetchPlans();
   }, []);
@@ -83,6 +86,7 @@ export default function PlanesCRUD() {
     setPriorityLevel('99');
     setLoopEligible(false);
     setHasFixedBanner(false);
+    setCouponStockCap('20');
     setShowForm(false);
   };
 
@@ -102,6 +106,7 @@ export default function PlanesCRUD() {
     setPriorityLevel(String(plan.priority_level ?? 99));
     setLoopEligible(plan.loop_eligible ?? false);
     setHasFixedBanner(plan.has_fixed_banner ?? false);
+    setCouponStockCap(String(plan.coupon_stock_cap ?? 20));
     setShowForm(true);
   };
 
@@ -128,6 +133,7 @@ export default function PlanesCRUD() {
       priority_level: parseInt(priorityLevel) || 99,
       loop_eligible: loopEligible,
       has_fixed_banner: hasFixedBanner,
+      coupon_stock_cap: parseInt(couponStockCap) || 20,
     };
 
     try {
@@ -349,6 +355,23 @@ export default function PlanesCRUD() {
                   ))}
                 </div>
               </div>
+              {/* ── Reglas de Cupones Flash ── */}
+              {(planKey.includes('FLASH') || appliesTo.includes('coupons')) && (
+                <div className="bg-pink-500/[0.04] border border-pink-500/15 rounded-lg p-3 space-y-3">
+                  <p className="text-[10px] text-pink-300/60 uppercase tracking-widest font-medium">Reglas de Cupones Flash</p>
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tope de stock total</label>
+                    <input
+                      type="number" min="1" max="500" value={couponStockCap}
+                      onChange={(e) => setCouponStockCap(e.target.value)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
+                      placeholder="20"
+                    />
+                    <p className="text-[10px] text-white/20 mt-1">Máx. de unidades de stock (disponible + canjeado) por tienda. Default 20.</p>
+                  </div>
+                </div>
+              )}
+
               {/* ── Reglas del loop (Directorios) ── */}
               <div className="bg-white/[0.03] border border-white/5 rounded-lg p-3 space-y-3">
                 <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Reglas del loop (Directorios)</p>

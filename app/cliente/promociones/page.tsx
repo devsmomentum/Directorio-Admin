@@ -75,6 +75,9 @@ export default function ClientePromocionesPage() {
   const [impressions, setImpressions] = useState<any[]>([]);
   const [metricsFor, setMetricsFor] = useState<any | null>(null);
   const [flashBrandIds, setFlashBrandIds] = useState<Set<string>>(new Set());
+  const [couponLeadsMap, setCouponLeadsMap] = useState<Record<string, number>>({});
+  const [couponRedeemedMap, setCouponRedeemedMap] = useState<Record<string, number>>({});
+  const [flashPlanStockCap, setFlashPlanStockCap] = useState<number>(COUPON_STOCK_CAP);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [filter, setFilter] = useState<FilterKind>('all');
@@ -122,6 +125,12 @@ export default function ClientePromocionesPage() {
   const [qStartDate, setQStartDate] = useState('');
   const [qEndDate, setQEndDate] = useState('');
 
+  // Modal de reactivación: reactivar una campaña VENCIDA exige un nuevo rango de
+  // fechas (no re-aprobación; eso solo lo dispara cambiar video o texto).
+  const [reactivate, setReactivate] = useState<any | null>(null);
+  const [rStartDate, setRStartDate] = useState('');
+  const [rEndDate, setREndDate] = useState('');
+
   // Modal de confirmación in-app (reemplaza window.confirm para acciones destructivas).
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
@@ -148,7 +157,7 @@ export default function ClientePromocionesPage() {
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
     setLoading(true);
-    const [mineCoupons, gallery, mineCampaigns, mineBanners] = await Promise.all([
+    const [mineCoupons, gallery, mineCampaigns, mineBanners, flashPlan, storeLeads] = await Promise.all([
       supabase.from('coupons').select('*')
         .eq('store_id', store.id)
         .order('created_at', { ascending: false })
@@ -165,12 +174,33 @@ export default function ClientePromocionesPage() {
         .eq('store_id', store.id)
         .order('created_at', { ascending: false })
         .limit(200),
+      store.flash_coupon_plan
+        ? supabase.from('plans').select('coupon_stock_cap').eq('plan_key', store.flash_coupon_plan).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase.from('coupon_leads').select('coupon_id, status').eq('store_id', store.id),
     ]);
     const camps = mineCampaigns.data || [];
+    const leadsRaw = storeLeads.data || [];
+    // Mapa coupon_id → total de leads (para sumar al stock disponible en el cap)
+    const leadsMap: Record<string, number> = {};
+    // Mapa coupon_id → cantidad realmente canjeada
+    const redeemedMap: Record<string, number> = {};
+    for (const l of leadsRaw) {
+      if (l.coupon_id) {
+        leadsMap[l.coupon_id] = (leadsMap[l.coupon_id] || 0) + 1;
+        if (l.status === 'CANJEADO') {
+          redeemedMap[l.coupon_id] = (redeemedMap[l.coupon_id] || 0) + 1;
+        }
+      }
+    }
     setCoupons(mineCoupons.data || []);
+    setCouponLeadsMap(leadsMap);
+    setCouponRedeemedMap(redeemedMap);
     setFlashBrandIds(new Set((gallery.data || []).map((c: any) => c.store_id).filter(Boolean)));
     setCampaigns(camps);
     setBanners(mineBanners.data || []);
+    const planCap = (flashPlan as any)?.data?.coupon_stock_cap;
+    setFlashPlanStockCap(planCap ?? COUPON_STOCK_CAP);
 
     // Métricas de visualización por campaña: solo el dueño las ve. Leemos el
     // agregado diario (RLS lo deja leer; filtramos por nuestras campañas) y lo
@@ -299,7 +329,13 @@ export default function ClientePromocionesPage() {
   const handleMedia = async (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 50 * 1024 * 1024) { alert('El archivo debe pesar menos de 50 MB.'); e.target.value = ''; return; }
+    const isVideo = f.type.startsWith('video/');
+    const limitBytes = isVideo ? 120 * 1024 * 1024 : 50 * 1024 * 1024;
+    if (f.size > limitBytes) {
+      alert(`El archivo debe pesar menos de ${isVideo ? '120 MB' : '50 MB'}.`);
+      e.target.value = '';
+      return;
+    }
     // Los videos 4K / HEVC / Level alto no los levanta el decoder del kiosco K2:
     // los bloqueamos aquí para que el cliente no descubra el fallo en el equipo.
     if (f.type.startsWith('video/')) {
@@ -342,20 +378,20 @@ export default function ClientePromocionesPage() {
       setFeedback({ type: 'err', msg: 'Ingresa un stock mayor a 0.' });
       return;
     }
-    // Tope de inventario por tienda: la suma del stock vigente no puede pasar de
-    // COUPON_STOCK_CAP. Excluimos el cupón en edición para no contarlo dos veces.
+    // Tope de inventario por tienda: disponible + canjeados no puede pasar de
+    // flashPlanStockCap. Excluimos el cupón en edición para no contarlo dos veces.
     // (El trigger del servidor es la barrera definitiva.)
     const usedExcludingThis = coupons
       .filter(c => c.id !== cEditingId
         && FLASH_PLANS.has(c.plan_type)
         && c.approval_status !== 'rejected'
         && (!c.end_date || c.end_date >= new Date().toISOString()))
-      .reduce((s, c) => s + (Number(c.amount_available) || 0), 0);
-    if (usedExcludingThis + stockNum > COUPON_STOCK_CAP) {
-      const left = Math.max(0, COUPON_STOCK_CAP - usedExcludingThis);
+      .reduce((s, c) => s + (Number(c.amount_available) || 0) + (couponLeadsMap[c.id] || 0), 0);
+    if (usedExcludingThis + stockNum > flashPlanStockCap) {
+      const left = Math.max(0, flashPlanStockCap - usedExcludingThis);
       setFeedback({
         type: 'err',
-        msg: `Superas el tope de ${COUPON_STOCK_CAP} cupones de tu tienda. Ya tienes ${usedExcludingThis} en stock vigente; puedes publicar hasta ${left} más.`,
+        msg: `Superas el tope de ${flashPlanStockCap} cupones de tu tienda. Ya tienes ${usedExcludingThis} en stock vigente (incluye canjeados); puedes publicar hasta ${left} más.`,
       });
       return;
     }
@@ -457,6 +493,12 @@ export default function ClientePromocionesPage() {
         return;
       }
     }
+    // Reactivar (dejar activa) una campaña con la fecha de fin ya vencida no la
+    // pondría en el loop. Exigimos un fin futuro al reactivarla desde edición.
+    if (aIsActive && aEndDate && aEndDate < today) {
+      setFeedback({ type: 'err', msg: 'El rango de fechas ya venció. Indica una fecha de fin futura para reactivar la campaña.' });
+      return;
+    }
 
     // Una empresa solo puede tener una campaña activa a la vez.
     // En creación, si ya hay activa, abrimos el modal de elección.
@@ -516,7 +558,9 @@ export default function ClientePromocionesPage() {
         if (updated && updated.is_active !== aIsActive) {
           throw new Error(
             aIsActive
-              ? 'No se pudo activar la campaña: tu plan venció o ya tienes otra activa.'
+              ? (planActive
+                  ? 'No se pudo activar la campaña: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
+                  : 'No se pudo activar la campaña: tu plan está vencido. Renueva para volver a activar campañas.')
               : 'No se pudo desactivar la campaña. Revisa permisos.'
           );
         }
@@ -641,6 +685,15 @@ export default function ClientePromocionesPage() {
       setFeedback({ type: 'err', msg: 'Tu plan está vencido — renueva para volver a activar campañas.' });
       return;
     }
+    // Reactivar una campaña ya vencida (end_date pasada) no tiene sentido con su
+    // rango viejo: no sonaría en el loop. Pedimos un nuevo rango de fechas. Esto
+    // NO la manda a revisión (solo cambiar video/texto lo hace).
+    if (next && c.end_date && c.end_date < today) {
+      setRStartDate(today);
+      setREndDate('');
+      setReactivate(c);
+      return;
+    }
     setFeedback(null);
     // Pedimos el row de vuelta: el guard puede revertir la transición sin
     // lanzar error (plan vencido / ya hay otra activa). Si is_active no quedó
@@ -659,7 +712,9 @@ export default function ClientePromocionesPage() {
       setFeedback({
         type: 'err',
         msg: next
-          ? 'No se pudo reactivar: tu plan venció o ya tienes otra campaña activa. Pausa la otra primero.'
+          ? (planActive
+              ? 'No se pudo reactivar: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
+              : 'No se pudo reactivar: tu plan está vencido. Renueva para volver a activar campañas.')
           : 'No se pudo pausar la campaña. Revisa permisos.',
       });
       fetchData();
@@ -671,6 +726,42 @@ export default function ClientePromocionesPage() {
         ? 'Campaña reactivada — volvió al loop sin pasar de nuevo por revisión.'
         : 'Campaña pausada. Se liberó tu slot en el loop.',
     });
+    fetchData();
+  };
+
+  // Reactiva una campaña vencida con un rango de fechas NUEVO. Toca solo fechas +
+  // is_active (nunca media/texto), así el trigger guard_campaigns_owner_update
+  // conserva approval_status='approved' y vuelve al loop sin revisión del admin.
+  const reactivateWithDates = async () => {
+    if (!reactivate || !store) return;
+    if (!rEndDate) { setFeedback({ type: 'err', msg: 'Indica la nueva fecha de fin de la campaña.' }); return; }
+    if (rStartDate && rEndDate < rStartDate) { setFeedback({ type: 'err', msg: 'La fecha de fin no puede ser anterior al inicio.' }); return; }
+    if (rEndDate < today) { setFeedback({ type: 'err', msg: 'La fecha de fin debe ser futura para que la campaña vuelva al loop.' }); return; }
+    if (store.contract_expiry_date && rEndDate > store.contract_expiry_date) {
+      setFeedback({ type: 'err', msg: `La campaña no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).` });
+      return;
+    }
+    setSubmitting(true); setFeedback(null);
+    const { data: updated, error } = await supabase.from('ad_campaigns')
+      .update({ start_date: rStartDate || today, end_date: rEndDate, is_active: true })
+      .eq('id', reactivate.id)
+      .select('id, is_active, approval_status')
+      .single();
+    setSubmitting(false);
+    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    if (!updated || !updated.is_active) {
+      setFeedback({
+        type: 'err',
+        msg: planActive
+          ? 'No se pudo reactivar: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
+          : 'No se pudo reactivar: tu plan está vencido. Renueva para volver a activar campañas.',
+      });
+      setReactivate(null);
+      fetchData();
+      return;
+    }
+    setFeedback({ type: 'ok', msg: 'Campaña reactivada con su nuevo rango de fechas — volvió al loop sin pasar de nuevo por revisión.' });
+    setReactivate(null);
     fetchData();
   };
 
@@ -855,16 +946,15 @@ export default function ClientePromocionesPage() {
     && c.amount_available > 0
     && (!c.end_date || c.end_date >= new Date().toISOString())).length;
 
-  // Inventario de cupones consumido (suma de stock vigente) y cuánto queda del
-  // tope de 20. Mismo criterio que el trigger del servidor: no cuenta los
-  // rechazados ni los vencidos.
+  // Inventario consumido: disponible + canjeados (coupon_leads). Mismo criterio
+  // que el trigger: excluye rechazados y vencidos.
   const nowIsoStock = new Date().toISOString();
   const couponStockUsed = coupons
     .filter(c => FLASH_PLANS.has(c.plan_type)
       && c.approval_status !== 'rejected'
       && (!c.end_date || c.end_date >= nowIsoStock))
-    .reduce((s, c) => s + (Number(c.amount_available) || 0), 0);
-  const couponStockRemaining = Math.max(0, COUPON_STOCK_CAP - couponStockUsed);
+    .reduce((s, c) => s + (Number(c.amount_available) || 0) + (couponLeadsMap[c.id] || 0), 0);
+  const couponStockRemaining = Math.max(0, flashPlanStockCap - couponStockUsed);
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -927,22 +1017,22 @@ export default function ClientePromocionesPage() {
             </div>
           </div>
 
-          {/* Presupuesto de inventario: la SUMA del stock vigente ≤ 20. */}
+          {/* Presupuesto de inventario: la SUMA del stock vigente ≤ flashPlanStockCap. */}
           <div className="mt-3 pt-3 border-t border-pink-500/15">
             <div className="flex items-center justify-between text-xs mb-1.5">
               <span className="text-white/60">Inventario de cupones (stock total)</span>
-              <span className="font-mono font-bold text-pink-200">{couponStockUsed}/{COUPON_STOCK_CAP}</span>
+              <span className="font-mono font-bold text-pink-200">{couponStockUsed}/{flashPlanStockCap}</span>
             </div>
             <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${couponStockRemaining === 0 ? 'bg-red-400' : 'bg-pink-400'}`}
-                style={{ width: `${Math.min(100, (couponStockUsed / COUPON_STOCK_CAP) * 100)}%` }}
+                style={{ width: `${Math.min(100, (couponStockUsed / flashPlanStockCap) * 100)}%` }}
               />
             </div>
             <p className="mt-1.5 text-[11px] text-white/50">
               {couponStockRemaining > 0
                 ? <>Te quedan <strong className="text-pink-200">{couponStockRemaining}</strong> unidades de stock para publicar (puedes repartirlas en varios cupones).</>
-                : <>Alcanzaste el tope de {COUPON_STOCK_CAP}. Reduce el stock de un cupón, o espera a que venza/se canjee, para publicar más.</>}
+                : <>Alcanzaste el tope de {flashPlanStockCap}. Reduce el stock de un cupón, o espera a que venza/se canjee, para publicar más.</>}
             </p>
           </div>
         </div>
@@ -1091,6 +1181,26 @@ export default function ClientePromocionesPage() {
                     className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
                 </div>
               </div>
+              {cStartDate && cEndDate && (() => {
+                const diffDays = Math.round(
+                  (new Date(cEndDate + 'T00:00:00Z').getTime() - new Date(cStartDate + 'T00:00:00Z').getTime()) / 86400000
+                );
+                const activeDays = Math.max(1, diffDays);
+                const endFormatted = new Date(cEndDate + 'T00:00:00Z').toLocaleDateString('es-VE', {
+                  day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+                });
+                return (
+                  <div className="bg-pink-500/[0.05] border border-pink-500/15 rounded-lg px-3 py-2 -mt-2">
+                    <p className="text-[10px] text-pink-200/80 leading-snug">
+                      ⏱ <strong className="text-pink-200">{activeDays} {activeDays === 1 ? 'día' : 'días'} activo{activeDays !== 1 ? 's' : ''}</strong>
+                      {diffDays === 0
+                        ? ' — inicio y fin el mismo día. Durará todo el día porque el corte automático ya corrió hoy.'
+                        : null}
+                      {' '}· Se desactiva el <strong className="text-pink-200">{endFormatted}</strong> a las <strong className="text-pink-200">12:05 a.m.</strong> (hora Venezuela).
+                    </p>
+                  </div>
+                );
+              })()}
               {store!.flash_coupon_expiry_date && (
                 <p className="text-[10px] text-white/40 -mt-2">
                   Tu plan Cupones Flash vence el {store!.flash_coupon_expiry_date}. El cupón no puede pasar de esa fecha.
@@ -1165,7 +1275,7 @@ export default function ClientePromocionesPage() {
                 </label>
                 <input type="file" accept="video/*,image/*" onChange={handleMedia}
                   className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-white/10 file:text-white/60" />
-                <p className="text-[10px] text-white/20 mt-1">Video MP4/WebM o imagen JPG/PNG · Máx 50 MB · Recomendado <span className="text-white/40">1080 × 1920 px (9:16 vertical)</span>. El kiosco lo muestra a pantalla completa con <code className="text-white/30">cover</code>.</p>
+                <p className="text-[10px] text-white/20 mt-1">Video MP4/WebM (máx 120 MB) o imagen JPG/PNG (máx 50 MB) · Recomendado <span className="text-white/40">1080 × 1920 px (9:16 vertical)</span>. El kiosco lo muestra a pantalla completa con <code className="text-white/30">cover</code>.</p>
 
                 {aMediaUrl && (
                   <div className="mt-3 flex items-start gap-3">
@@ -1293,8 +1403,13 @@ export default function ClientePromocionesPage() {
               )}
 
               {aEditingId && (() => {
+                // Solo ocupa el slot una campaña activa que además siga DENTRO de
+                // su ventana (end_date no vencida). Una campaña con is_active=true
+                // pero ya vencida NO está sonando en el loop y no debe bloquear la
+                // activación de otra — mismo criterio que findActiveCampaign() y que
+                // las vistas del kiosco (active_ads_live / kiosk_active_campaigns).
                 const hasOtherActive = campaigns.some(c =>
-                  c.id !== aEditingId && c.is_active
+                  c.id !== aEditingId && c.is_active && (!c.end_date || c.end_date >= today)
                 );
                 const canActivate = planActive && !hasOtherActive;
                 const currentlyActive = aIsActive;
@@ -1708,6 +1823,63 @@ export default function ClientePromocionesPage() {
         </div>
       )}
 
+      {/* Modal: reactivar campaña vencida con un rango de fechas nuevo */}
+      {reactivate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => { if (!submitting) setReactivate(null); }} />
+          <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Reactivar campaña</h3>
+              <button onClick={() => { if (!submitting) setReactivate(null); }} className="text-white/40 hover:text-white/80">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <p className="text-sm text-white font-semibold">{reactivate.brand_name}</p>
+                <p className="text-[11px] text-white/50 mt-1 leading-snug">
+                  Su rango anterior venció ({reactivate.end_date}). Indica un nuevo rango para volver al loop.
+                  No pasa de nuevo por revisión del administrador: solo cambiar el video o el texto requiere aprobación.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio</label>
+                  <input type="date" value={rStartDate} min={today}
+                    max={store?.contract_expiry_date || undefined}
+                    onChange={(e) => setRStartDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fin</label>
+                  <input type="date" value={rEndDate} min={rStartDate || today}
+                    max={store?.contract_expiry_date || undefined}
+                    onChange={(e) => setREndDate(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                </div>
+              </div>
+              {store?.contract_expiry_date && (
+                <p className="text-[10px] text-white/40">
+                  Tu plan vence el {store.contract_expiry_date}. La campaña no puede pasar de esa fecha.
+                </p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => setReactivate(null)} disabled={submitting}
+                  className="flex-1 px-4 py-2.5 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg">
+                  Cancelar
+                </button>
+                <button type="button" onClick={reactivateWithDates}
+                  disabled={submitting || !rEndDate}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">
+                  {submitting ? 'Reactivando…' : 'Reactivar en el loop'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Grids separados por tipo: cada uno conserva su aspect ratio sin que
           CSS Grid estire filas mixtas (cupón 4:3 vs campaña 9:16). */}
       {nothingVisible ? (
@@ -1809,6 +1981,7 @@ export default function ClientePromocionesPage() {
                     onEdit={openEditCoupon}
                     onDelete={deleteCoupon}
                     today={today}
+                    redeemedCount={couponRedeemedMap[c.id] || 0}
                   />
                 ))}
               </div>
@@ -1998,7 +2171,7 @@ export default function ClientePromocionesPage() {
   );
 }
 
-function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; today: string }) {
+function CouponCard({ c, onEdit, onDelete, today, redeemedCount }: { c: any; onEdit: (c: any) => void; onDelete: (c: any) => void; today: string; redeemedCount: number }) {
   const isFlash = FLASH_PLANS.has(c.plan_type);
   const active = c.amount_available > 0 && (!c.end_date || c.end_date >= new Date().toISOString());
   const approval = APPROVAL_CHIP[c.approval_status || 'approved'] || APPROVAL_CHIP.approved;
@@ -2045,14 +2218,30 @@ function CouponCard({ c, onEdit, onDelete, today }: { c: any; onEdit: (c: any) =
           <span className={`text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded ${PLAN_COLORS[c.plan_type] || 'text-white/40 bg-white/5'}`}>
             {PLAN_LABELS[c.plan_type] || c.plan_type}
           </span>
-          <span className={`text-[10px] font-mono ${active ? 'text-emerald-300' : 'text-white/30'}`}>
-            {active ? `${c.amount_available} disp.` : 'AGOTADO/VENCIDO'}
-          </span>
+          {!active && (
+            <span className="text-[10px] font-mono text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded">
+              AGOTADO/VENCIDO
+            </span>
+          )}
         </div>
         <p className="text-[11px] text-emerald-300 font-mono font-semibold">
           {Number(c.discount_percent ?? 0)}% OFF · vence {c.end_date?.split('T')[0] || '—'}
         </p>
         <p className="text-[10px] text-white/30 font-mono break-all">{c.code}</p>
+        <div className="grid grid-cols-2 gap-2 pt-2 pb-1 border-t border-white/5 text-[11px] font-mono">
+          <div>
+            <span className="text-white/40 block uppercase text-[9px] tracking-wider">Quedan</span>
+            <span className={active ? 'text-emerald-300 font-bold' : 'text-white/30 font-bold'}>
+              {c.amount_available} uds.
+            </span>
+          </div>
+          <div>
+            <span className="text-white/40 block uppercase text-[9px] tracking-wider">Canjeados</span>
+            <span className="text-pink-300 font-bold">
+              {redeemedCount} uds.
+            </span>
+          </div>
+        </div>
         <div className="flex gap-1.5 pt-2">
           <button onClick={() => onEdit(c)} className="flex-1 text-[11px] text-white/70 bg-white/5 hover:bg-white/10 rounded-md py-1.5">
             Editar
