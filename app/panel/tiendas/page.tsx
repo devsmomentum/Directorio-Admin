@@ -88,6 +88,26 @@ async function openPrivateDoc(path: string) {
   window.open(data.signedUrl, '_blank');
 }
 
+// Igual que openPrivateDoc pero fuerza la descarga con un nombre amigable
+async function downloadPrivateDoc(path: string, filename: string) {
+  const { data, error } = await supabase.storage
+    .from('documentos')
+    .createSignedUrl(path, 60, { download: filename });
+  if (error || !data) { alert('No se pudo descargar el documento.'); return; }
+  const a = document.createElement('a');
+  a.href = data.signedUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// Extensión (con punto) de un path de storage, p.ej. ".pdf"
+function fileExt(path: string): string {
+  const m = String(path || '').match(/\.[a-z0-9]+$/i);
+  return m ? m[0] : '';
+}
+
 // Normaliza el logo_url para tolerar tres formas históricas que conviven en BD:
 //   1. URL pública completa (https://…/storage/v1/object/public/publicidad/logos/x.png) → usar tal cual
 //   2. Path crudo dentro del bucket (logos/x.png) → resolver con getPublicUrl
@@ -1594,6 +1614,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
           supabase
             .from('coupons')
             .select('id, title, plan_type, code, amount_available, discount_percent, category, start_date, end_date, campaign_id, created_at')
+            .eq('store_id', store.id)
             .order('created_at', { ascending: false }),
           supabase
             .from('user_stores')
@@ -1611,7 +1632,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         if (linkRes?.data?.user_id) {
           const { data: u } = await supabase
             .from('users')
-            .select('id, email, full_name, cedula_numero, telefono_personal')
+            .select('id, email, full_name, cedula_numero, telefono_personal, cedula_url')
             .eq('id', linkRes.data.user_id)
             .maybeSingle();
           if (!cancelled) setLinkedUser(u);
@@ -2173,6 +2194,34 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                 </table>
               </div>
             )}
+          </div>
+
+          {/* Documentos de la empresa */}
+          <div>
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Documentos de la empresa</p>
+            <div className="bg-white/[0.02] border border-white/5 rounded-lg divide-y divide-white/[0.04]">
+              {[
+                { label: 'Contrato', path: store.contract_url, key: 'contrato' },
+                { label: 'Registro mercantil', path: store.mercantil_url, key: 'mercantil' },
+                { label: 'Cédula del dueño', path: linkedUser?.cedula_url, key: 'cedula' },
+              ].map(doc => (
+                <div key={doc.key} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <svg className="w-4 h-4 text-white/30 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <span className="text-xs text-white/80 truncate">{doc.label}</span>
+                    <span className={`text-[10px] shrink-0 ${doc.path ? 'text-emerald-400' : 'text-white/25'}`}>
+                      {doc.path ? 'cargado' : 'no cargado'}
+                    </span>
+                  </div>
+                  {doc.path && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button onClick={() => openPrivateDoc(doc.path)} className="text-[10px] px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 text-white/70 transition-colors">Ver</button>
+                      <button onClick={() => downloadPrivateDoc(doc.path, `${slug}_${doc.key}${fileExt(doc.path)}`)} className="text-[10px] px-2 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors">Descargar</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* CRM / Docs resumen */}

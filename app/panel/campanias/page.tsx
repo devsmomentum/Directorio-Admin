@@ -63,7 +63,7 @@ const PLAN_LABELS: Record<string, string> = {
   PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
 };
 
-interface Store { id: string; name: string; }
+interface Store { id: string; name: string; contract_expiry_date: string | null; plan_type: string | null; }
 
 interface Campaign {
   id: string;
@@ -80,6 +80,7 @@ interface Campaign {
   slot_limit_group: string | null;
   target_frequency_seconds: number | null;
   store_id: string | null;
+  admin_managed: boolean;
   stores?: { name: string; contract_expiry_date: string | null };
 }
 
@@ -97,16 +98,23 @@ function CampaniasAdminInner() {
   const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
+  const [storeFilter, setStoreFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'paused' | 'expired'>('all');
   const [isSaving, setIsSaving] = useState(false);
 
   // Kill-switch state
   const [killSwitchCandidates, setKillSwitchCandidates] = useState<Campaign[]>([]);
   const [applyingKillSwitch, setApplyingKillSwitch] = useState(false);
 
+  // Reactivación de campañas vencidas (flujo admin: pide nueva fecha de fin)
+  const [reactivateTarget, setReactivateTarget] = useState<Campaign | null>(null);
+  const [reactivateEnd, setReactivateEnd] = useState<string>('');
+  const [savingReactivate, setSavingReactivate] = useState(false);
+
   // Form Fields
   const [editingId, setEditingId] = useState<string | null>(null);
   const [brandName, setBrandName] = useState('');
-  const [planType, setPlanType] = useState<string>('ORO');
+  const [planType, setPlanType] = useState<string>('');
   const [description, setDescription] = useState('');
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState<string>('');
@@ -115,6 +123,7 @@ function CampaniasAdminInner() {
   const [slotLimitGroup, setSlotLimitGroup] = useState<string>('');
   const [durationSeconds, setDurationSeconds] = useState<number>(CAMPAIGN_DURATION_SECONDS);
   const [isActive, setIsActive] = useState<boolean>(true);
+  const [adminManaged, setAdminManaged] = useState<boolean>(true);
 
   // Duración "general" definida en el plan (plans.video_seconds). Sirve como
   // valor por defecto al elegir un plan; la campaña puede sobreescribirla.
@@ -134,7 +143,7 @@ function CampaniasAdminInner() {
     setRefreshing(true);
     const [campRes, storesRes, plansRes] = await Promise.all([
       supabase.from('ad_campaigns').select('*, stores(name, contract_expiry_date)').order('created_at', { ascending: false }).limit(200),
-      supabase.from('stores').select('id, name').order('name').limit(500),
+      supabase.from('stores').select('id, name, contract_expiry_date, plan_type').order('name').limit(500),
       supabase.from('plans').select('plan_key, video_seconds').limit(200)
     ]);
     if (campRes.data) {
@@ -145,7 +154,7 @@ function CampaniasAdminInner() {
       const overdue = data.filter(c => {
         if (!c.is_active) return false;
         const expiredEnd = c.end_date && c.end_date < today;
-        const expiredPlan = c.stores?.contract_expiry_date && c.stores.contract_expiry_date < today;
+        const expiredPlan = !c.admin_managed && c.stores?.contract_expiry_date && c.stores.contract_expiry_date < today;
         return expiredEnd || expiredPlan;
       });
       setKillSwitchCandidates(overdue);
@@ -164,7 +173,7 @@ function CampaniasAdminInner() {
       c.is_active &&
       loopPlans.has(c.plan_type) &&
       (!c.end_date || c.end_date >= today) &&
-      (!c.stores?.contract_expiry_date || c.stores.contract_expiry_date >= today)
+      (!c.stores?.contract_expiry_date || c.stores.contract_expiry_date >= today || c.admin_managed)
     );
     const byPlan = live.reduce<Record<string, number>>((acc, c) => {
       acc[c.plan_type] = (acc[c.plan_type] || 0) + 1;
@@ -187,10 +196,10 @@ function CampaniasAdminInner() {
 
   const resetForm = () => {
     setEditingId(null);
-    setBrandName(''); setPlanType('ORO'); setDescription('');
+    setBrandName(''); setPlanType(''); setDescription('');
     setStartDate(new Date().toISOString().split('T')[0]);
     setEndDate(''); setStoreId(''); setPriorityLevel(1);
-    setSlotLimitGroup(''); setDurationSeconds(planVideoSeconds('ORO')); setIsActive(true);
+    setSlotLimitGroup(''); setDurationSeconds(planVideoSeconds('ORO')); setIsActive(true); setAdminManaged(true);
     setMediaFile(null); setMediaPreview(''); setMediaType('image');
     setShowForm(false);
   };
@@ -208,22 +217,36 @@ function CampaniasAdminInner() {
       const q = search.toLowerCase();
       result = result.filter(c =>
         c.brand_name.toLowerCase().includes(q) ||
-        c.plan_type.toLowerCase().includes(q) ||
+        (c.plan_type || '').toLowerCase().includes(q) ||
         (c.stores?.name || '').toLowerCase().includes(q)
       );
+    }
+    if (storeFilter) {
+      result = result.filter(c => c.store_id === storeFilter);
+    }
+    if (statusFilter !== 'all') {
+      result = result.filter(c => {
+        const isExpired = !!c.end_date && new Date(c.end_date) < new Date();
+        const planExpired = !c.admin_managed && !!c.stores?.contract_expiry_date && new Date(c.stores.contract_expiry_date) < new Date();
+        const inactive = isExpired || planExpired;
+        if (statusFilter === 'expired') return inactive;
+        if (statusFilter === 'active') return c.is_active && !inactive;
+        if (statusFilter === 'paused') return !c.is_active && !inactive;
+        return true;
+      });
     }
     if (highlightExpiring) {
       result = [...result].sort((a, b) => urgencyRank(a) - urgencyRank(b));
     }
     return result;
-  }, [campaigns, search, highlightExpiring]);
+  }, [campaigns, search, storeFilter, statusFilter, highlightExpiring]);
 
   const pg = usePagination(filtered);
 
   const handleEdit = (c: Campaign) => {
     setEditingId(c.id);
     setBrandName(c.brand_name);
-    setPlanType((PLAN_TYPES as readonly string[]).includes(c.plan_type) ? c.plan_type : 'ORO');
+    setPlanType(stores.find(s => s.id === c.store_id)?.plan_type || '');
     setDescription(c.description || '');
     setStartDate(c.start_date || '');
     setEndDate(c.end_date || '');
@@ -232,6 +255,7 @@ function CampaniasAdminInner() {
     setSlotLimitGroup(c.slot_limit_group || '');
     setDurationSeconds(c.duration_seconds || CAMPAIGN_DURATION_SECONDS);
     setIsActive(c.is_active);
+    setAdminManaged(!!c.admin_managed);
     setMediaPreview(c.media_url);
     setMediaType(c.media_type as 'image' | 'video');
     setMediaFile(null);
@@ -285,44 +309,27 @@ function CampaniasAdminInner() {
     e.preventDefault();
     if (!editingId && !mediaFile) { alert('Debes subir un archivo multimedia.'); return; }
 
-    // Validación de capacidad: bloquear si el plan está saturado
-    const cap = PLAN_MAX_BRANDS[planType];
-    if (cap != null && isActive) {
-      const today = new Date().toISOString().split('T')[0];
-      const currentActive = campaigns.filter(c =>
-        c.id !== editingId &&
-        c.plan_type === planType &&
-        c.is_active &&
-        (!c.end_date || c.end_date >= today) &&
-        (!c.stores?.contract_expiry_date || c.stores.contract_expiry_date >= today)
-      ).length;
-      if (currentActive >= cap) {
-        alert(
-          `Límite alcanzado: ${currentActive}/${cap} marcas activas con plan ${PLAN_LABELS[planType] || planType}.\n\n` +
-          `Para añadir esta campaña, libera un slot pausando o dejando vencer otra marca con el mismo plan.`
-        );
+    // Tope de end_date por el plan de la tienda (si está vigente): igual que el portal cliente.
+    const today = new Date().toISOString().split('T')[0];
+    const selStore = stores.find(s => s.id === storeId);
+    const planExpiry = selStore?.contract_expiry_date ?? null;
+    if (storeId && planExpiry && planExpiry >= today) {
+      if (!endDate) { alert('Indica la fecha de fin: esta tienda tiene un plan vigente.'); return; }
+      if (endDate > planExpiry) {
+        alert(`La campaña no puede pasar de la vigencia del plan de la tienda (${planExpiry}).`);
         return;
       }
     }
 
-    // Validación de unicidad: una sola campaña activa por tienda
-    // Solo aplica a campañas nuevas; para ediciones el toggle maneja el swap.
-    let campaignToDeactivate: Campaign | null = null;
-    if (!editingId && isActive && storeId) {
-      const today = new Date().toISOString().split('T')[0];
-      const conflict = campaigns.find(c =>
-        c.store_id === storeId &&
-        c.is_active &&
+    // Cap por tienda: hasta 5 campañas activas (la BD lo refuerza). El admin apila.
+    if (isActive && storeId) {
+      const activeInStore = campaigns.filter(c =>
+        c.id !== editingId && c.store_id === storeId && c.is_active &&
         (!c.end_date || c.end_date >= today)
-      );
-      if (conflict) {
-        const ok = confirm(
-          `Esta tienda ya tiene la campaña "${conflict.brand_name}" activa.\n\n` +
-          `Al crear esta campaña como activa, "${conflict.brand_name}" quedará desactivada.\n\n` +
-          `¿Confirmar?`
-        );
-        if (!ok) return;
-        campaignToDeactivate = conflict;
+      ).length;
+      if (activeInStore >= 5) {
+        alert('Esta tienda ya tiene 5 campañas activas (máximo). Pausa una antes de activar otra.');
+        return;
       }
     }
 
@@ -346,7 +353,7 @@ function CampaniasAdminInner() {
 
       const payload: any = {
         brand_name: brandName,
-        plan_type: planType,
+        plan_type: planType || null,
         media_url: finalUrl,
         media_type: mediaType,
         duration_seconds: durationSeconds || CAMPAIGN_DURATION_SECONDS,
@@ -358,6 +365,7 @@ function CampaniasAdminInner() {
         slot_limit_group: slotLimitGroup || null,
         target_frequency_seconds: PLAN_FREQUENCY_SECONDS[planType] || null,
         store_id: storeId || null,
+        admin_managed: adminManaged,
       };
 
       let campId: string | null = editingId;
@@ -385,23 +393,6 @@ function CampaniasAdminInner() {
             entity_id: campId,
             entity_name: payload.brand_name,
             details: payload
-          });
-        }
-      }
-
-      // Desactivar la campaña anterior de la tienda si el admin confirmó el swap
-      if (campaignToDeactivate) {
-        const { error: dErr } = await supabase
-          .from('ad_campaigns')
-          .update({ is_active: false })
-          .eq('id', campaignToDeactivate.id);
-        if (!dErr) {
-          await logAdminAction({
-            action_type: 'DESACTIVAR',
-            entity_type: 'campaña',
-            entity_id: campaignToDeactivate.id,
-            entity_name: campaignToDeactivate.brand_name,
-            details: { is_active: false, reason: `Reemplazada por "${brandName}"` }
           });
         }
       }
@@ -443,38 +434,6 @@ function CampaniasAdminInner() {
     if (current) {
       if (!confirm('¿Deseas pausar esta campaña?')) return;
       if (!confirm('¿Confirmas pausar la campaña?')) return;
-    } else {
-      // Activating: enforce one-active-per-store rule
-      if (camp?.store_id) {
-        const today = new Date().toISOString().split('T')[0];
-        const conflict = campaigns.find(c =>
-          c.id !== id &&
-          c.store_id === camp.store_id &&
-          c.is_active &&
-          (!c.end_date || c.end_date >= today)
-        );
-        if (conflict) {
-          const ok = confirm(
-            `Esta tienda ya tiene la campaña "${conflict.brand_name}" activa.\n\n` +
-            `Activar "${campName}" desactivará "${conflict.brand_name}" automáticamente.\n\n` +
-            `¿Confirmar el cambio?`
-          );
-          if (!ok) return;
-          const { error: dErr } = await supabase
-            .from('ad_campaigns')
-            .update({ is_active: false })
-            .eq('id', conflict.id);
-          if (dErr) { alert('Error al desactivar campaña anterior: ' + dErr.message); return; }
-          await logAdminAction({
-            action_type: 'DESACTIVAR',
-            entity_type: 'campaña',
-            entity_id: conflict.id,
-            entity_name: conflict.brand_name,
-            details: { is_active: false, reason: `Reemplazada por "${campName}"` }
-          });
-          setCampaigns(prev => prev.map(c => c.id === conflict.id ? { ...c, is_active: false } : c));
-        }
-      }
     }
 
     // Pedimos el row de vuelta: así detectamos tanto un error explícito como
@@ -513,6 +472,53 @@ function CampaniasAdminInner() {
         ? { ...c, is_active: !current, start_date: (updated.start_date as string) ?? c.start_date }
         : c
     ));
+  };
+
+  const openReactivate = (c: Campaign) => {
+    setReactivateTarget(c);
+    setReactivateEnd('');
+  };
+
+  const confirmReactivate = async () => {
+    const c = reactivateTarget;
+    if (!c) return;
+    const today = new Date().toISOString().split('T')[0];
+    if (!reactivateEnd) { alert('Indica la nueva fecha de fin de la campaña.'); return; }
+    if (reactivateEnd < today) { alert('La fecha de fin debe ser hoy o futura.'); return; }
+
+    setSavingReactivate(true);
+    // Reactivar como gestionada por admin: queda exenta del plan vencido y
+    // suena hasta la nueva fecha de fin. Si el inicio quedó en el pasado, se
+    // adelanta a hoy para reflejar el nuevo ciclo.
+    const payload: Record<string, unknown> = {
+      is_active: true,
+      end_date: reactivateEnd,
+      admin_managed: true,
+    };
+    if (c.start_date && c.start_date < today) payload.start_date = today;
+
+    const { data: updated, error } = await supabase
+      .from('ad_campaigns')
+      .update(payload)
+      .eq('id', c.id)
+      .select('id, is_active, end_date')
+      .single();
+    setSavingReactivate(false);
+
+    if (error) { alert('Error: ' + error.message); return; }
+    if (!updated || !updated.is_active) {
+      alert('No se pudo reactivar la campaña. Revisa el tope de 5 campañas activas por tienda.');
+      fetchData(); setReactivateTarget(null); return;
+    }
+    await logAdminAction({
+      action_type: 'ACTIVAR',
+      entity_type: 'campaña',
+      entity_id: c.id,
+      entity_name: c.brand_name,
+      details: { is_active: true, end_date: reactivateEnd, admin_managed: true, reason: 'Reactivación admin' },
+    });
+    setReactivateTarget(null);
+    fetchData();
   };
 
   const handleApplyKillSwitch = async () => {
@@ -677,10 +683,22 @@ function CampaniasAdminInner() {
             </div>
           )}
 
-          {/* Search */}
-          <div className="relative">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por marca o plan..." className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10" />
+          {/* Search + filtros */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por título, plan o tienda..." className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10" />
+            </div>
+            <select value={storeFilter} onChange={e => setStoreFilter(e.target.value)} className="bg-[#111] border border-white/5 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-white/10 sm:w-52">
+              <option value="">Todas las tiendas</option>
+              {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as typeof statusFilter)} className="bg-[#111] border border-white/5 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-white/10 sm:w-40">
+              <option value="all">Todos los estados</option>
+              <option value="active">Activas</option>
+              <option value="paused">Pausadas</option>
+              <option value="expired">Vencidas</option>
+            </select>
           </div>
 
           {/* Highlight expiring banner */}
@@ -705,9 +723,19 @@ function CampaniasAdminInner() {
               {pg.paginated.map((c) => {
                 const isVideo = c.media_type === 'video';
                 const isExpired = !!c.end_date && new Date(c.end_date) < new Date();
-                const planExpired = !!c.stores?.contract_expiry_date && new Date(c.stores.contract_expiry_date) < new Date();
+                const planExpired = !c.admin_managed && !!c.stores?.contract_expiry_date && new Date(c.stores.contract_expiry_date) < new Date();
                 const isInactive = isExpired || planExpired;
                 const isActiveState = c.is_active && !isInactive;
+
+                // Badge de plan: heredado de la tienda. Vencido → "Plan vencido";
+                // sin plan (campaña admin sin plan / plan_type null) → "Sin plan".
+                const storePlanExpired = !!c.stores?.contract_expiry_date && new Date(c.stores.contract_expiry_date) < new Date();
+                const planBadgeLabel = c.plan_type == null
+                  ? 'Sin plan'
+                  : storePlanExpired ? 'Plan vencido' : (PLAN_LABELS[c.plan_type] || c.plan_type);
+                const planBadgeClass = c.plan_type == null
+                  ? 'text-white/40 border-white/15'
+                  : storePlanExpired ? 'text-red-400 border-red-500/40 bg-red-500/10' : (PLAN_COLORS[c.plan_type] || 'text-white border-white');
 
                 const statusLabel = planExpired
                   ? 'Plan vencido'
@@ -755,8 +783,8 @@ function CampaniasAdminInner() {
                           />}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
                       <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${PLAN_COLORS[c.plan_type] || 'text-white border-white'}`}>
-                          {PLAN_LABELS[c.plan_type] || c.plan_type}
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${planBadgeClass}`}>
+                          {planBadgeLabel}
                         </span>
                         {daysLeft !== null && daysLeft >= 0 && daysLeft <= 7 && (
                           <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${urgency === 'critical' ? 'text-red-400 bg-red-500/20 border-red-500/40' : 'text-amber-400 bg-amber-500/15 border-amber-400/30'}`}>
@@ -783,13 +811,23 @@ function CampaniasAdminInner() {
                       </div>
 
                       <div className="pt-3 border-t border-white/5 flex items-center justify-between">
-                        <button
-                          onClick={() => handleToggleActive(c.id, c.is_active)}
-                          className={`text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${statusClasses}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
-                          {statusLabel}
-                        </button>
+                        {isInactive ? (
+                          <button
+                            onClick={() => openReactivate(c)}
+                            className="text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            Reactivar ({statusLabel})
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleToggleActive(c.id, c.is_active)}
+                            className={`text-[10px] flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors ${statusClasses}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${dotClasses}`} />
+                            {statusLabel}
+                          </button>
+                        )}
 
                         <div className="flex gap-1">
                           <button onClick={() => handleEdit(c)} className="p-1.5 rounded-md text-white/30 hover:text-white hover:bg-white/10 transition-colors">
@@ -825,12 +863,16 @@ function CampaniasAdminInner() {
             <form onSubmit={handleSave} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Marca / Anunciante</label>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Título de la publicidad</label>
                   <input type="text" required value={brandName} onChange={e => setBrandName(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
                 </div>
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tienda Vinculada</label>
-                  <select value={storeId} onChange={e => setStoreId(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none">
+                  <select value={storeId} onChange={e => {
+                    const val = e.target.value; setStoreId(val);
+                    const p = stores.find(s => s.id === val)?.plan_type || '';
+                    setPlanType(p); setDurationSeconds(planVideoSeconds(p));
+                  }} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none">
                     <option value="">Ninguna</option>
                     {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
@@ -840,54 +882,14 @@ function CampaniasAdminInner() {
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descripción Interna</label>
                 <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Plan de pauta</label>
-                  <select required value={planType} onChange={e => { setPlanType(e.target.value); setDurationSeconds(planVideoSeconds(e.target.value)); }} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none">
-                    {PLAN_TYPES.map(p => {
-                      const cap = PLAN_MAX_BRANDS[p];
-                      const used = (loopStatus.byPlan[p] || 0);
-                      const label = PLAN_LABELS[p] || p;
-                      const tag = cap != null ? ` — ${used}/${cap}` : '';
-                      return <option key={p} value={p}>{label}{tag}</option>;
-                    })}
-                  </select>
-                  {(() => {
-                    const cap = PLAN_MAX_BRANDS[planType];
-                    if (cap == null) return null;
-                    const used = (loopStatus.byPlan[planType] || 0) - (editingId && campaigns.find(c => c.id === editingId)?.plan_type === planType ? 1 : 0);
-                    const remaining = cap - used;
-                    return (
-                      <p className={`text-[10px] mt-1 ${remaining <= 0 ? 'text-red-400' : remaining <= 2 ? 'text-amber-400' : 'text-white/30'}`}>
-                        {remaining <= 0
-                          ? `Plan saturado (${used}/${cap}) — no podrás guardar`
-                          : `Disponibles: ${remaining}/${cap}`}
-                      </p>
-                    );
-                  })()}
-                </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Prioridad (1 = Mayor)</label>
-                  <input type="number" min="1" value={priorityLevel} onChange={e => setPriorityLevel(parseInt(e.target.value) || 1)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Grupo Limitación Slot</label>
-                  <input type="text" value={slotLimitGroup} onChange={e => setSlotLimitGroup(e.target.value)} placeholder="Ej: FOOD_COURT" className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Duración del video (seg)</label>
-                  <input
-                    type="number" min="1" max="120"
-                    value={durationSeconds}
-                    onChange={e => setDurationSeconds(parseInt(e.target.value) || CAMPAIGN_DURATION_SECONDS)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none"
-                  />
-                  <p className="text-[10px] text-white/30 mt-1">
-                    Default del plan: {planVideoSeconds(planType)}s · cambia el tiempo del loop
-                  </p>
-                </div>
+              <div>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Duración del video (seg)</label>
+                <input
+                  type="number" min="1" max="120"
+                  value={durationSeconds}
+                  onChange={e => setDurationSeconds(parseInt(e.target.value) || CAMPAIGN_DURATION_SECONDS)}
+                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -896,7 +898,13 @@ function CampaniasAdminInner() {
                 </div>
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fin Campaña (Fecha de Corte)</label>
-                  <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
+                  <input type="date" required min={startDate || undefined}
+                    max={(() => {
+                      const exp = stores.find(s => s.id === storeId)?.contract_expiry_date;
+                      const t = new Date().toISOString().split('T')[0];
+                      return exp && exp >= t ? exp : undefined;   // sin plan vigente → sin tope
+                    })()}
+                    value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none" />
                 </div>
               </div>
               <div>
@@ -927,6 +935,52 @@ function CampaniasAdminInner() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: reactivar campaña vencida (flujo admin) */}
+      {reactivateTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setReactivateTarget(null)} />
+          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-md shadow-2xl">
+            <h3 className="text-sm font-semibold text-white mb-1">Reactivar campaña</h3>
+            <p className="text-xs text-white/50 mb-4">
+              «{reactivateTarget.brand_name}» — {reactivateTarget.stores?.name || 'sin tienda'}
+            </p>
+            {(() => {
+              const t = new Date().toISOString().split('T')[0];
+              const planExp = !!reactivateTarget.stores?.contract_expiry_date && reactivateTarget.stores.contract_expiry_date < t;
+              const camExp = !!reactivateTarget.end_date && reactivateTarget.end_date < t;
+              const msg = planExp
+                ? '⚠ El plan de esta tienda está vencido. Al reactivarla, la campaña sonará en el loop exenta del plan (gestionada por admin) hasta la fecha de fin que indiques.'
+                : camExp
+                ? '⚠ Esta campaña está vencida. Indica una nueva fecha de fin para que vuelva al loop.'
+                : null;
+              return msg ? (
+                <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2 mb-4">{msg}</p>
+              ) : null;
+            })()}
+            <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Nueva fecha de fin</label>
+            <input
+              type="date"
+              required
+              min={new Date().toISOString().split('T')[0]}
+              max={(() => {
+                const exp = reactivateTarget.stores?.contract_expiry_date;
+                const t = new Date().toISOString().split('T')[0];
+                return exp && exp >= t ? exp : undefined;   // plan vigente → tope; vencido → sin tope
+              })()}
+              value={reactivateEnd}
+              onChange={e => setReactivateEnd(e.target.value)}
+              className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500/50 outline-none"
+            />
+            <div className="flex gap-2 pt-4">
+              <button type="button" onClick={() => setReactivateTarget(null)} className="flex-1 py-2 text-sm bg-white/5 hover:bg-white/10 text-white/50 rounded-lg transition-colors">Cancelar</button>
+              <button type="button" disabled={savingReactivate} onClick={confirmReactivate} className="flex-1 py-2 text-sm bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-lg disabled:opacity-50 transition-colors">
+                {savingReactivate ? 'Reactivando...' : 'Reactivar'}
+              </button>
+            </div>
           </div>
         </div>
       )}
