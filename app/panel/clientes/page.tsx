@@ -109,6 +109,26 @@ async function openPrivateDoc(path: string) {
   window.open(data.signedUrl, '_blank');
 }
 
+// Igual que openPrivateDoc pero fuerza la descarga con un nombre amigable
+async function downloadPrivateDoc(path: string, filename: string) {
+  const { data, error } = await supabase.storage
+    .from('documentos')
+    .createSignedUrl(path, 60, { download: filename });
+  if (error || !data?.signedUrl) { alert('No se pudo descargar el documento.'); return; }
+  const a = document.createElement('a');
+  a.href = data.signedUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// Extensión (con punto) de un path de storage, p.ej. ".pdf"
+function fileExt(path: string): string {
+  const m = String(path || '').match(/\.[a-z0-9]+$/i);
+  return m ? m[0] : '';
+}
+
 type StoreLite = { id: string; name: string };
 
 export default function ClientesPage() {
@@ -892,13 +912,22 @@ export default function ClientesPage() {
                       className="flex-1 bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white/70 file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-pink-500/10 file:text-pink-400 hover:file:bg-pink-500/20"
                     />
                     {cedulaUrl && (
-                      <button
-                        type="button"
-                        onClick={() => openPrivateDoc(cedulaUrl)}
-                        className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/70 text-xs rounded-lg transition-colors whitespace-nowrap"
-                      >
-                        Ver actual
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => openPrivateDoc(cedulaUrl)}
+                          className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/70 text-xs rounded-lg transition-colors whitespace-nowrap"
+                        >
+                          Ver actual
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadPrivateDoc(cedulaUrl, `cedula${fileExt(cedulaUrl)}`)}
+                          className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs rounded-lg transition-colors whitespace-nowrap"
+                        >
+                          Descargar
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>

@@ -207,6 +207,7 @@ export default function TiendasCRUD() {
   const [search, setSearch] = useState('');
   const [detailStore, setDetailStore] = useState<any | null>(null);
   const [usersByStore, setUsersByStore] = useState<Record<string, any>>({});
+  const [contractCountByStore, setContractCountByStore] = useState<Record<string, number>>({});
 
   // Basic info
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -241,8 +242,14 @@ export default function TiendasCRUD() {
   const [clientSearch, setClientSearch] = useState('');
 
   // Documents
+  // Los contratos son un historial (varios por tienda → tabla store_contracts).
+  // Aquí, en el formulario, se puede subir UN contrato al crear/editar la tienda
+  // (se inserta como una fila más en el historial). La gestión completa (ver
+  // todos, eliminar) está en el detalle de la tienda (StoreDetailModal).
   const [contractFile, setContractFile] = useState<File | null>(null);
-  const [contractUrl, setContractUrl] = useState('');
+  const [contractTitle, setContractTitle] = useState('Contrato');
+  const [contractExpiry, setContractExpiry] = useState('');
+  // El registro mercantil sigue siendo un archivo único reemplazable aquí.
   const [mercantilFile, setMercantilFile] = useState<File | null>(null);
   const [mercantilUrl, setMercantilUrl] = useState('');
   // El vencimiento del contrato ya no es manual: se calcula en
@@ -356,7 +363,7 @@ export default function TiendasCRUD() {
 
   const fetchData = async () => {
     setRefreshing(true);
-    const [catsRes, storesRes, linksRes, usersRes, plansRes, mallsRes, capRes] = await Promise.all([
+    const [catsRes, storesRes, linksRes, usersRes, plansRes, mallsRes, capRes, contractsRes] = await Promise.all([
       supabase.from('categories').select('*').order('name', { ascending: true }).limit(200),
       supabase.from('stores').select('*, categories(id, name, icon)').order('created_at', { ascending: false }).limit(500),
       supabase.from('user_stores').select('user_id, store_id'),
@@ -364,6 +371,7 @@ export default function TiendasCRUD() {
       supabase.from('plans').select('plan_key, max_brands, duration_days').limit(200),
       supabase.from('malls').select('id, name, code').order('name', { ascending: true }),
       supabase.rpc('plan_capacity_intervals'),
+      supabase.from('store_contracts').select('store_id'),
     ]);
     if (catsRes.data) setCategoriesList(catsRes.data);
     if (mallsRes.data) setMalls(mallsRes.data);
@@ -386,6 +394,14 @@ export default function TiendasCRUD() {
       if (u) storeToUser[link.store_id] = u;
     }
     setUsersByStore(storeToUser);
+
+    // Conteo de contratos por tienda (para el badge "C" de la lista).
+    const contractCounts: Record<string, number> = {};
+    for (const row of (contractsRes.data || [])) {
+      contractCounts[row.store_id] = (contractCounts[row.store_id] || 0) + 1;
+    }
+    setContractCountByStore(contractCounts);
+
     if (storesRes.data) setStores(storesRes.data);
 
     // Mapa clave→max_brands desde la BD. Si la tabla `plans` no existe o falla,
@@ -463,7 +479,7 @@ export default function TiendasCRUD() {
 
   const handleContractChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) { setContractFile(null); return; }
     if (validateDoc(file)) setContractFile(file);
     else e.target.value = '';
   };
@@ -528,16 +544,11 @@ export default function TiendasCRUD() {
     setSubmitting(true);
     try {
       let finalLogoUrl = logoPreview || '';
-      let finalContractUrl = contractUrl;
       let finalMercantilUrl = mercantilUrl;
 
       if (logoFile) {
         const ext = logoFile.name.split('.').pop();
         finalLogoUrl = await uploadLogo(logoFile, `logos/logo_${Date.now()}.${ext}`);
-      }
-      if (contractFile) {
-        const ext = contractFile.name.split('.').pop();
-        finalContractUrl = await uploadPrivateDoc(contractFile, `contratos/contrato_${Date.now()}.${ext}`);
       }
       if (mercantilFile) {
         const ext = mercantilFile.name.split('.').pop();
@@ -561,8 +572,8 @@ export default function TiendasCRUD() {
         rif: rif || null,
         contact_email: contactEmail || null,
         contact_phone: contactPhone || null,
-        // Sin plan no hay contrato: no se sube contrato ni se calcula vencimiento.
-        contract_url: planType ? (finalContractUrl || null) : null,
+        // El/los contrato(s) se gestionan aparte (store_contracts) desde el
+        // detalle de la tienda; aquí no se toca `contract_url`.
         mercantil_url: finalMercantilUrl || null,
         // El vencimiento del contrato se calcula automáticamente según la
         // duración del plan (no es manual). Sin plan = sin vencimiento.
@@ -627,6 +638,28 @@ export default function TiendasCRUD() {
         }
       }
 
+      // Contrato adjunto en el formulario: se sube e inserta en el historial
+      // (store_contracts). Sirve para cargar el contrato al CREAR la tienda
+      // sin tener que abrir el detalle después.
+      if (storeId && contractFile) {
+        const ext = contractFile.name.split('.').pop();
+        const path = await uploadPrivateDoc(contractFile, `contratos/${storeId}/${Date.now()}.${ext}`);
+        const { data: auth } = await supabase.auth.getUser();
+        const { error: contractErr } = await supabase.from('store_contracts').insert({
+          store_id: storeId,
+          title: contractTitle.trim() || 'Contrato',
+          file_path: path,
+          expiry_date: contractExpiry || null,
+          uploaded_by: auth?.user?.id ?? null,
+        });
+        if (contractErr) throw contractErr;
+        await logAdminAction({
+          action_type: 'CREAR', entity_type: 'contrato_tienda', entity_id: storeId,
+          entity_name: `${storeData.name} · ${contractTitle.trim() || 'Contrato'}`,
+          details: { title: contractTitle.trim() || 'Contrato', file_path: path, expiry_date: contractExpiry || null },
+        });
+      }
+
       resetForm();
       fetchData();
     } catch (err: any) {
@@ -650,8 +683,7 @@ export default function TiendasCRUD() {
     setRif(store.rif || '');
     setContactEmail(store.contact_email || '');
     setContactPhone(store.contact_phone || '');
-    setContractUrl(store.contract_url || '');
-    setContractFile(null);
+    setContractFile(null); setContractTitle('Contrato'); setContractExpiry('');
     setMercantilUrl(store.mercantil_url || '');
     setMercantilFile(null);
     setFlashCouponPlan(store.flash_coupon_plan || '');
@@ -704,7 +736,7 @@ export default function TiendasCRUD() {
     setDescription(''); setPlanType(''); setLogoFile(null); setLogoPreview('');
     setRif('');
     setContactEmail(''); setContactPhone('');
-    setContractFile(null); setContractUrl('');
+    setContractFile(null); setContractTitle('Contrato'); setContractExpiry('');
     setMercantilFile(null); setMercantilUrl('');
     setFlashCouponPlan('');
     setFlashCouponExpiryDate('');
@@ -1099,36 +1131,44 @@ export default function TiendasCRUD() {
               <div className="border-t border-white/5 pt-5 space-y-4">
                 <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Documentacion Legal</p>
 
-                {/* Contrato — solo si la tienda tiene un plan asignado */}
-                {planType && (
+                {/* Contrato — se puede subir al crear/editar la tienda. Se guarda
+                    como una fila más del historial (store_contracts). La gestión
+                    completa (ver todos / eliminar) está en el detalle de la tienda. */}
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                    Contrato de Cesion de Espacios
-                    {editingId && contractUrl && <span className="normal-case tracking-normal text-green-400/70 ml-2">(ya cargado)</span>}
+                    {editingId ? 'Añadir contrato' : 'Contrato'}
                   </label>
-                  <div className="flex items-center gap-3">
-                    {contractUrl && !contractFile && (
-                      <button
-                        type="button"
-                        onClick={() => openPrivateDoc(contractUrl)}
-                        className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 px-2.5 py-1.5 rounded-md shrink-0 transition-colors"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                        Ver doc
-                      </button>
-                    )}
-                    <div className="flex-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={contractTitle}
+                      onChange={e => setContractTitle(e.target.value)}
+                      placeholder="Título (ej. Contrato 2026)"
+                      className="bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 placeholder:text-white/25"
+                    />
+                    <div>
                       <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={handleContractChange}
-                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
+                        type="date"
+                        value={contractExpiry}
+                        onChange={e => setContractExpiry(e.target.value)}
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white/60"
                       />
-                      <p className="text-[10px] text-white/20 mt-1">PDF, JPG o PNG — Max 25MB</p>
+                      <p className="text-[10px] text-white/20 mt-0.5">Vencimiento (opcional)</p>
                     </div>
                   </div>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={handleContractChange}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
+                  />
+                  <p className="text-[10px] text-white/20 mt-1">
+                    PDF, JPG o PNG — Máx 25MB.{' '}
+                    {editingId
+                      ? 'Se añade al historial sin reemplazar los contratos existentes.'
+                      : 'Opcional. Puedes añadir más contratos luego desde el detalle de la tienda.'}
+                  </p>
                 </div>
-                )}
 
                 {/* Registro Mercantil */}
                 <div>
@@ -1427,12 +1467,12 @@ export default function TiendasCRUD() {
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-1.5">
-                      {/* Contrato */}
+                      {/* Contratos (historial) */}
                       <span
-                        title={store.contract_url ? 'Contrato cargado' : 'Sin contrato'}
-                        className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${store.contract_url ? 'bg-green-500/15 text-green-400' : 'bg-white/5 text-white/15'}`}
+                        title={contractCountByStore[store.id] ? `${contractCountByStore[store.id]} contrato(s) cargado(s)` : 'Sin contratos'}
+                        className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold ${contractCountByStore[store.id] ? 'bg-green-500/15 text-green-400' : 'bg-white/5 text-white/15'}`}
                       >
-                        C
+                        {contractCountByStore[store.id] ? contractCountByStore[store.id] : 'C'}
                       </span>
                       {/* Mercantil */}
                       <span
@@ -1458,11 +1498,16 @@ export default function TiendasCRUD() {
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex flex-col items-start gap-1">
+                      {store.is_ally && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider text-emerald-300 bg-emerald-500/15" title="Marca aliada (campañas + flash sin pagar plan)">
+                          🤝 ALIADO
+                        </span>
+                      )}
                       {store.plan_type ? (
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold tracking-wider ${PLAN_COLORS[store.plan_type] || 'text-white/40 bg-white/5'}`}>
                           {PLAN_LABELS[store.plan_type] || store.plan_type}
                         </span>
-                      ) : !store.flash_coupon_plan ? (
+                      ) : !store.flash_coupon_plan && !store.is_ally ? (
                         <span className="text-white/15 text-xs">—</span>
                       ) : null}
                       {store.flash_coupon_plan && (() => {
@@ -1594,6 +1639,125 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   const [searchRows, setSearchRows] = useState<any[]>([]);
   const [couponStats, setCouponStats] = useState<any[]>([]);
   const [linkedUser, setLinkedUser] = useState<any>(null);
+
+  // ── Documentos: contratos (historial), mercantil y cédula ────────────────
+  const [contracts, setContracts] = useState<any[]>([]);
+  const [showAddContract, setShowAddContract] = useState(false);
+  const [newContractFile, setNewContractFile] = useState<File | null>(null);
+  const [newContractTitle, setNewContractTitle] = useState('');
+  const [newContractExpiry, setNewContractExpiry] = useState('');
+  const [newContractNotes, setNewContractNotes] = useState('');
+  const [savingContract, setSavingContract] = useState(false);
+  // Espejos locales para reflejar reemplazos sin refrescar todo el modal.
+  const [mercantilUrlLocal, setMercantilUrlLocal] = useState<string | null>(store.mercantil_url || null);
+  const [cedulaUrlLocal, setCedulaUrlLocal] = useState<string | null>(null);
+  const [uploadingMercantil, setUploadingMercantil] = useState(false);
+  const [uploadingCedula, setUploadingCedula] = useState(false);
+
+  const loadContracts = async () => {
+    const { data } = await supabase
+      .from('store_contracts')
+      .select('id, title, file_path, expiry_date, notes, created_at')
+      .eq('store_id', store.id)
+      .order('created_at', { ascending: false });
+    setContracts(data || []);
+  };
+
+  useEffect(() => { loadContracts(); /* eslint-disable-next-line */ }, [store.id]);
+  useEffect(() => { setCedulaUrlLocal(linkedUser?.cedula_url ?? null); }, [linkedUser]);
+
+  const handleAddContract = async () => {
+    if (!newContractFile || !newContractTitle.trim()) {
+      alert('El archivo y el título del contrato son obligatorios.');
+      return;
+    }
+    if (newContractFile.size > 25 * 1024 * 1024) { alert('El documento debe pesar menos de 25 MB.'); return; }
+    setSavingContract(true);
+    try {
+      const ext = newContractFile.name.split('.').pop();
+      const path = await uploadPrivateDoc(newContractFile, `contratos/${store.id}/${Date.now()}.${ext}`);
+      const { data: auth } = await supabase.auth.getUser();
+      const { error } = await supabase.from('store_contracts').insert({
+        store_id: store.id,
+        title: newContractTitle.trim(),
+        file_path: path,
+        expiry_date: newContractExpiry || null,
+        notes: newContractNotes.trim() || null,
+        uploaded_by: auth?.user?.id ?? null,
+      });
+      if (error) throw error;
+      await logAdminAction({
+        action_type: 'CREAR', entity_type: 'contrato_tienda', entity_id: store.id,
+        entity_name: `${store.name} · ${newContractTitle.trim()}`,
+        details: { title: newContractTitle.trim(), file_path: path, expiry_date: newContractExpiry || null },
+      });
+      setNewContractFile(null); setNewContractTitle(''); setNewContractExpiry(''); setNewContractNotes('');
+      setShowAddContract(false);
+      await loadContracts();
+    } catch (err: any) {
+      alert('Error al subir el contrato: ' + err.message);
+    } finally {
+      setSavingContract(false);
+    }
+  };
+
+  const handleDeleteContract = async (c: any) => {
+    if (!confirm(`¿Eliminar el contrato "${c.title}" del historial de esta tienda?`)) return;
+    const { error } = await supabase.from('store_contracts').delete().eq('id', c.id);
+    if (error) { alert('Error al eliminar: ' + error.message); return; }
+    await logAdminAction({
+      action_type: 'ELIMINAR', entity_type: 'contrato_tienda', entity_id: store.id,
+      entity_name: `${store.name} · ${c.title}`,
+    });
+    await loadContracts();
+  };
+
+  const handleReplaceMercantil = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { alert('El documento debe pesar menos de 25 MB.'); e.target.value = ''; return; }
+    setUploadingMercantil(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = await uploadPrivateDoc(file, `mercantil/${store.id}_${Date.now()}.${ext}`);
+      const { error } = await supabase.from('stores').update({ mercantil_url: path }).eq('id', store.id);
+      if (error) throw error;
+      setMercantilUrlLocal(path);
+      await logAdminAction({
+        action_type: 'EDITAR', entity_type: 'tienda', entity_id: store.id,
+        entity_name: store.name, details: { mercantil_url: path },
+      });
+    } catch (err: any) {
+      alert('Error al subir el registro mercantil: ' + err.message);
+    } finally {
+      setUploadingMercantil(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleReplaceCedula = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!linkedUser?.id) { alert('No hay cliente dueño vinculado a esta tienda.'); e.target.value = ''; return; }
+    if (file.size > 25 * 1024 * 1024) { alert('El documento debe pesar menos de 25 MB.'); e.target.value = ''; return; }
+    setUploadingCedula(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = await uploadPrivateDoc(file, `cedulas/${linkedUser.id}_${Date.now()}.${ext}`);
+      const { error } = await supabase.from('users').update({ cedula_url: path }).eq('id', linkedUser.id);
+      if (error) throw error;
+      setCedulaUrlLocal(path);
+      await logAdminAction({
+        action_type: 'EDITAR', entity_type: 'cliente', entity_id: linkedUser.id,
+        entity_name: linkedUser.full_name || linkedUser.email || linkedUser.id, details: { cedula_url: path },
+      });
+    } catch (err: any) {
+      alert('Error al subir la cédula: ' + err.message);
+    } finally {
+      setUploadingCedula(false);
+      e.target.value = '';
+    }
+  };
 
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
   const rangeStart = useMemo(() => rangeStartISO(range), [range]);
@@ -1980,6 +2144,11 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
               <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Detalle de tienda · Data K2</p>
               <h3 className="text-base font-semibold text-white truncate">{store.name}</h3>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {store.is_ally && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider text-emerald-300 bg-emerald-500/15" title="Marca aliada · gestiónala en la sección Aliados">
+                    🤝 ALIADO
+                  </span>
+                )}
                 {store.plan_type && (
                   <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider ${PLAN_COLORS[store.plan_type] || 'text-white/40 bg-white/5'}`}>
                     {PLAN_LABELS[store.plan_type] || store.plan_type}
@@ -2196,14 +2365,112 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
             )}
           </div>
 
-          {/* Documentos de la empresa */}
+          {/* Contratos (historial) — solo el admin sube/edita; el cliente solo ve */}
           <div>
-            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Documentos de la empresa</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">Contratos</p>
+              <button
+                onClick={() => setShowAddContract(v => !v)}
+                className="text-[10px] px-2.5 py-1 rounded-md bg-pink-500/15 hover:bg-pink-500/25 text-pink-300 border border-pink-500/30 transition-colors"
+              >
+                {showAddContract ? 'Cancelar' : '+ Añadir contrato'}
+              </button>
+            </div>
+
+            {showAddContract && (
+              <div className="bg-white/[0.03] border border-white/10 rounded-lg p-3 mb-2 space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Título (ej. Contrato 2026, Adenda IA)"
+                    value={newContractTitle}
+                    onChange={e => setNewContractTitle(e.target.value)}
+                    className="bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 placeholder:text-white/25"
+                  />
+                  <div>
+                    <input
+                      type="date"
+                      value={newContractExpiry}
+                      onChange={e => setNewContractExpiry(e.target.value)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white/60"
+                    />
+                    <p className="text-[10px] text-white/20 mt-0.5">Vencimiento (opcional)</p>
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Notas (opcional)"
+                  value={newContractNotes}
+                  onChange={e => setNewContractNotes(e.target.value)}
+                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 placeholder:text-white/25"
+                />
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={e => setNewContractFile(e.target.files?.[0] ?? null)}
+                  className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-white/10 file:text-white/60"
+                />
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-white/20">PDF, JPG o PNG — Máx 25MB</p>
+                  <button
+                    onClick={handleAddContract}
+                    disabled={savingContract}
+                    className="text-xs px-3 py-1.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-colors disabled:opacity-40"
+                  >
+                    {savingContract ? 'Guardando…' : 'Guardar contrato'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white/[0.02] border border-white/5 rounded-lg divide-y divide-white/[0.04]">
+              {contracts.length === 0 ? (
+                <p className="text-xs text-white/25 italic px-3 py-3">Sin contratos cargados.</p>
+              ) : contracts.map(c => {
+                const exp = c.expiry_date as string | null;
+                const vencido = !!exp && exp < today;
+                const diffDays = exp ? (new Date(exp).getTime() - Date.now()) / 86400000 : null;
+                const porVencer = diffDays != null && diffDays >= 0 && diffDays <= 30;
+                return (
+                  <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <svg className="w-4 h-4 text-white/30 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-white/80 truncate">{c.title}</span>
+                          {exp && (
+                            <span className={`text-[10px] shrink-0 px-1.5 py-0.5 rounded ${vencido ? 'bg-red-500/15 text-red-400' : porVencer ? 'bg-amber-500/15 text-amber-400' : 'bg-white/5 text-white/40'}`}>
+                              {vencido ? 'vencido' : porVencer ? `vence ${exp}` : `vence ${exp}`}
+                            </span>
+                          )}
+                        </div>
+                        {c.notes && <p className="text-[10px] text-white/30 truncate">{c.notes}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button onClick={() => openPrivateDoc(c.file_path)} className="text-[10px] px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 text-white/70 transition-colors">Ver</button>
+                      <button onClick={() => downloadPrivateDoc(c.file_path, `${slug}_${slugify(c.title)}${fileExt(c.file_path)}`)} className="text-[10px] px-2 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors">Descargar</button>
+                      <button onClick={() => handleDeleteContract(c)} className="text-[10px] px-2 py-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors">Eliminar</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Otros documentos — archivo único reemplazable (mercantil y cédula) */}
+          <div>
+            <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Otros documentos</p>
             <div className="bg-white/[0.02] border border-white/5 rounded-lg divide-y divide-white/[0.04]">
               {[
-                { label: 'Contrato', path: store.contract_url, key: 'contrato' },
-                { label: 'Registro mercantil', path: store.mercantil_url, key: 'mercantil' },
-                { label: 'Cédula del dueño', path: linkedUser?.cedula_url, key: 'cedula' },
+                {
+                  label: 'Registro mercantil', key: 'mercantil', path: mercantilUrlLocal,
+                  onUpload: handleReplaceMercantil, uploading: uploadingMercantil, disabled: false,
+                },
+                {
+                  label: 'Cédula del dueño', key: 'cedula', path: cedulaUrlLocal,
+                  onUpload: handleReplaceCedula, uploading: uploadingCedula, disabled: !linkedUser?.id,
+                },
               ].map(doc => (
                 <div key={doc.key} className="flex items-center justify-between gap-3 px-3 py-2.5">
                   <div className="flex items-center gap-2 min-w-0">
@@ -2213,15 +2480,30 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
                       {doc.path ? 'cargado' : 'no cargado'}
                     </span>
                   </div>
-                  {doc.path && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button onClick={() => openPrivateDoc(doc.path)} className="text-[10px] px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 text-white/70 transition-colors">Ver</button>
-                      <button onClick={() => downloadPrivateDoc(doc.path, `${slug}_${doc.key}${fileExt(doc.path)}`)} className="text-[10px] px-2 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors">Descargar</button>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {doc.path && (
+                      <>
+                        <button onClick={() => openPrivateDoc(doc.path!)} className="text-[10px] px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 text-white/70 transition-colors">Ver</button>
+                        <button onClick={() => downloadPrivateDoc(doc.path!, `${slug}_${doc.key}${fileExt(doc.path!)}`)} className="text-[10px] px-2 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors">Descargar</button>
+                      </>
+                    )}
+                    <label className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${doc.disabled ? 'bg-white/5 text-white/20 border-white/5 cursor-not-allowed' : 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border-cyan-500/25 cursor-pointer'}`}>
+                      {doc.uploading ? 'Subiendo…' : doc.path ? 'Reemplazar' : 'Subir'}
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        disabled={doc.disabled || doc.uploading}
+                        onChange={doc.onUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
               ))}
             </div>
+            {!linkedUser?.id && (
+              <p className="text-[10px] text-white/25 mt-1">La cédula se gestiona cuando hay un cliente dueño vinculado.</p>
+            )}
           </div>
 
           {/* CRM / Docs resumen */}
@@ -2242,9 +2524,9 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
             <div className="bg-white/[0.02] border border-white/5 rounded-lg p-4 space-y-1.5">
               <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Datos Tienda</p>
               <p className="text-xs">
-                <span className={store.contract_url ? 'text-emerald-400' : 'text-white/20'}>● Contrato</span>{' '}
-                <span className={store.mercantil_url ? 'text-emerald-400' : 'text-white/20'} >● Mercantil</span>{' '}
-                <span className={linkedUser?.cedula_url ? 'text-emerald-400' : 'text-white/20'}>● Cédula</span>
+                <span className={contracts.length ? 'text-emerald-400' : 'text-white/20'}>● {contracts.length || 'Sin'} contrato{contracts.length === 1 ? '' : 's'}</span>{' '}
+                <span className={mercantilUrlLocal ? 'text-emerald-400' : 'text-white/20'} >● Mercantil</span>{' '}
+                <span className={cedulaUrlLocal ? 'text-emerald-400' : 'text-white/20'}>● Cédula</span>
               </p>
               <p className="text-xs text-white/50">RIF: <span className="font-mono">{store.rif || '—'}</span></p>
               <p className="text-xs text-white/50">Correo: <span className="font-mono">{store.contact_email || '—'}</span></p>

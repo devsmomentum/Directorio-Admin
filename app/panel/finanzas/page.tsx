@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 
 // ── Types ────────────────────────────────────────────────────────────────────
-type Store = { id: string; name: string; plan_type: string | null };
+type Store = { id: string; name: string; plan_type: string | null; is_ally?: boolean; ally_revenue_pct?: number; ally_revenue_base?: 'gross' | 'net' };
 
 type PlanPayment = {
   id: string;
@@ -27,15 +27,21 @@ type Expense = {
   expense_date: string;
 };
 
+// Tramo de vigencia de un % de aliado. Intervalo semiabierto [from, to).
+type Share = {
+  id: string;
+  store_id: string;
+  pct: number;
+  base: 'gross' | 'net';
+  effective_from: string;
+  effective_to: string | null;
+};
+
 // ── Constants ────────────────────────────────────────────────────────────────
 const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PROMO_FLASH'];
 const PAYMENT_METHODS = ['Bancamiga Bs', 'Bancamiga USD', 'Efectivo', 'Binance', 'Otro'];
 const EXPENSE_CATEGORIES = ['Abogada', 'Alcaldía', 'Seguro', 'Mantenimiento', 'Marketing', 'Personal', 'Otro'];
 
-const MORNA_PCT = 36;
-const SUNMI_PCT = 36;
-const ANAVI_PCT = 16;
-const MILLENNIUM_PCT = 12;
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 const iso = (d: Date) => d.toISOString().split('T')[0];
@@ -50,6 +56,8 @@ const lastOfMonth = () => { const d = new Date(); d.setMonth(d.getMonth() + 1); 
 const shortMonth = () => new Date().toLocaleString('es', { month: 'short' }).replace('.', '');
 
 const fmt = (n: number) => `$${n.toFixed(2)}`;
+// % del aliado en el período: el valor si fue constante, o 'var.' si cambió a mitad.
+const pctTxt = (p: number | null) => (p == null ? 'var.' : `${p}%`);
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function FinanzasPage() {
@@ -58,6 +66,7 @@ export default function FinanzasPage() {
   const [saving, setSaving] = useState(false);
 
   const [stores, setStores] = useState<Store[]>([]);
+  const [shares, setShares] = useState<Share[]>([]);
   const [payments, setPayments] = useState<PlanPayment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
@@ -85,8 +94,8 @@ export default function FinanzasPage() {
 
   const fetchData = async () => {
     setLoading(true);
-    const [{ data: storeData }, { data: payData }, { data: expData }] = await Promise.all([
-      supabase.from('stores').select('id, name, plan_type').order('name'),
+    const [{ data: storeData }, { data: payData }, { data: expData }, { data: shareData }] = await Promise.all([
+      supabase.from('stores').select('id, name, plan_type, is_ally, ally_revenue_pct, ally_revenue_base').order('name'),
       supabase
         .from('transactions')
         .select('id, store_id, item_name, period, amount_usd, payment_method, payment_date, status, notes, created_at')
@@ -94,10 +103,12 @@ export default function FinanzasPage() {
         .order('payment_date', { ascending: false })
         .limit(500),
       supabase.from('operational_expenses').select('*').order('expense_date', { ascending: false }).limit(500),
+      supabase.from('ally_revenue_shares').select('id, store_id, pct, base, effective_from, effective_to'),
     ]);
     setStores((storeData as Store[]) || []);
     setPayments((payData as PlanPayment[]) || []);
     setExpenses((expData as Expense[]) || []);
+    setShares((shareData as Share[]) || []);
     setLoading(false);
   };
 
@@ -116,7 +127,24 @@ export default function FinanzasPage() {
   );
 
   // ── Revenue distribution ──────────────────────────────────────────────────
+  // La distribución se alimenta EXCLUSIVAMENTE de las marcas aliadas y sus
+  // porcentajes con VIGENCIA (tabla ally_revenue_shares, asignados por el admin).
+  // Cada % aplica sobre el BRUTO (base 'gross', como hacía Anavi) o sobre LO DEMÁS
+  // (base 'net': lo que queda tras los % sobre bruto y los gastos).
+  //
+  // PRORRATEO: si un % cambia o entra un aliado a mitad del período, partimos
+  // [dateStart, dateEnd] en sub-tramos donde la config es constante, calculamos
+  // el bruto y los gastos de CADA sub-tramo con la config vigente en él, y sumamos
+  // por aliado. Así un cambio aplica solo desde su fecha (no retroactivamente) y
+  // un aliado nuevo solo cobra desde que entró.
   const dist = useMemo(() => {
+    const dayAfter = (isoDate: string) => {
+      const d = new Date(isoDate + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 1);
+      return d.toISOString().split('T')[0];
+    };
+    const dateOf = (p: PlanPayment) => p.payment_date || p.created_at.split('T')[0];
+
     const gross = periodPayments
       .filter(p => p.status === 'completed')
       .reduce((s, p) => s + Number(p.amount_usd), 0);
@@ -124,15 +152,86 @@ export default function FinanzasPage() {
       .filter(p => p.status !== 'completed')
       .reduce((s, p) => s + Number(p.amount_usd), 0);
     const totalExpenses = periodExpenses.reduce((s, e) => s + Number(e.amount_usd), 0);
-    // Anavi (gestión) cobra sobre los ingresos brutos: los gastos no le afectan.
-    const anavi = gross * (ANAVI_PCT / 100);
-    // El resto reparte sobre el neto, ya descontados Anavi y los gastos.
-    const distributable = gross - anavi - totalExpenses;
-    const morna = distributable * (MORNA_PCT / 100);
-    const sunmi = distributable * (SUNMI_PCT / 100);
-    const millennium = distributable * (MILLENNIUM_PCT / 100);
-    return { gross, pending, totalExpenses, distributable, morna, sunmi, anavi, millennium };
-  }, [periodPayments, periodExpenses]);
+
+    const nameById = new Map(stores.map(s => [s.id, s.name]));
+    const endExclusive = dayAfter(dateEnd);
+
+    // Fronteras: inicios/fines de tramo que caen dentro del rango → días donde la
+    // config cambia. Entre dos fronteras consecutivas la config es constante.
+    const bounds = new Set<string>([dateStart, endExclusive]);
+    for (const sh of shares) {
+      if (sh.effective_from > dateStart && sh.effective_from <= dateEnd) bounds.add(sh.effective_from);
+      if (sh.effective_to && sh.effective_to > dateStart && sh.effective_to <= dateEnd) bounds.add(sh.effective_to);
+    }
+    const sorted = [...bounds].filter(d => d >= dateStart && d <= endExclusive).sort();
+
+    // Acumuladores por aliado (clave store_id+base; pct puede variar entre tramos).
+    type Acc = { name: string; base: 'gross' | 'net'; amount: number; pcts: Set<number> };
+    const grossAcc = new Map<string, Acc>();
+    const netAcc = new Map<string, Acc>();
+    let distributable = 0;
+    let netAllyTotal = 0;
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const a = sorted[i];
+      const b = sorted[i + 1]; // exclusivo
+      if (a >= b) continue;
+
+      const grossSub = periodPayments
+        .filter(p => p.status === 'completed' && dateOf(p) >= a && dateOf(p) < b)
+        .reduce((s, p) => s + Number(p.amount_usd), 0);
+      const expSub = periodExpenses
+        .filter(e => e.expense_date >= a && e.expense_date < b)
+        .reduce((s, e) => s + Number(e.amount_usd), 0);
+
+      // Tramos vigentes el día `a` (config constante en [a,b)).
+      const active = shares.filter(sh =>
+        Number(sh.pct) > 0 &&
+        sh.effective_from <= a &&
+        (sh.effective_to === null || sh.effective_to > a),
+      );
+
+      let grossTakenSub = 0;
+      for (const sh of active.filter(s => s.base === 'gross')) {
+        const amt = grossSub * (Number(sh.pct) / 100);
+        grossTakenSub += amt;
+        const key = sh.store_id;
+        const acc = grossAcc.get(key) ?? { name: nameById.get(sh.store_id) || '—', base: 'gross', amount: 0, pcts: new Set() };
+        acc.amount += amt; acc.pcts.add(Number(sh.pct)); grossAcc.set(key, acc);
+      }
+
+      const distSub = grossSub - grossTakenSub - expSub;
+      distributable += distSub;
+
+      for (const sh of active.filter(s => s.base === 'net')) {
+        const amt = distSub * (Number(sh.pct) / 100);
+        netAllyTotal += amt;
+        const key = sh.store_id;
+        const acc = netAcc.get(key) ?? { name: nameById.get(sh.store_id) || '—', base: 'net', amount: 0, pcts: new Set() };
+        acc.amount += amt; acc.pcts.add(Number(sh.pct)); netAcc.set(key, acc);
+      }
+    }
+
+    // pct mostrado: el valor si fue constante en el período, o null si varió.
+    const toRow = (acc: Acc) => ({
+      name: acc.name,
+      base: acc.base,
+      pct: acc.pcts.size === 1 ? [...acc.pcts][0] : null,
+      amount: acc.amount,
+    });
+    const grossAllies = [...grossAcc.values()].map(toRow).sort((x, y) => y.amount - x.amount);
+    const netAllies = [...netAcc.values()].map(toRow).sort((x, y) => y.amount - x.amount);
+    const grossAllyTotal = grossAllies.reduce((s, a) => s + a.amount, 0);
+    const remainder = distributable - netAllyTotal;
+
+    return {
+      gross, pending, totalExpenses,
+      grossAllies, grossAllyTotal,
+      distributable,
+      netAllies, netAllyTotal,
+      remainder,
+    };
+  }, [periodPayments, periodExpenses, stores, shares, dateStart, dateEnd]);
 
   // ── Store helpers ──────────────────────────────────────────────────────────
   const storeById = useMemo(() => new Map(stores.map(s => [s.id, s])), [stores]);
@@ -242,12 +341,11 @@ export default function FinanzasPage() {
     const rows: string[][] = [
       ['Ingresos cobrados (pagos completados)', '', fmt(dist.gross)],
       ['Pagos pendientes (no incluidos)', '', fmt(dist.pending)],
-      [`− ${ANAVI_PCT}% Anavi (gestión, sobre bruto)`, fmt(dist.anavi), ''],
+      ...dist.grossAllies.map(a => [`− ${pctTxt(a.pct)} ${a.name} (aliado, sobre bruto)`, fmt(a.amount), '']),
       ['− Gastos operativos registrados', fmt(dist.totalExpenses), ''],
-      ['Ganancia distribuible (neto)', '', fmt(dist.distributable)],
-      [`− ${MORNA_PCT}% Morna`, fmt(dist.morna), ''],
-      [`− ${SUNMI_PCT}% Sunmi`, fmt(dist.sunmi), ''],
-      [`− ${MILLENNIUM_PCT}% Millennium`, fmt(dist.millennium), ''],
+      ['Lo demás (tras % sobre bruto y gastos)', '', fmt(dist.distributable)],
+      ...dist.netAllies.map(a => [`− ${pctTxt(a.pct)} ${a.name} (aliado, sobre lo demás)`, fmt(a.amount), '']),
+      ['Sobrante sin asignar', '', fmt(dist.remainder)],
       ['', '', ''],
       ['INGRESOS DETALLADOS', '', '', '', ''],
       ['Tienda', 'Plan', 'Período', 'Monto', 'Método', 'Fecha', 'Estado'],
@@ -328,53 +426,45 @@ export default function FinanzasPage() {
       {/* ===== DISTRIBUCIÓN ===== */}
       {activeTab === 'distribucion' && (
         <div className="space-y-4">
-          {/* Porcentajes (fijos) */}
-          <div className="bg-[#111] border border-white/5 rounded-xl p-5">
-            <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Porcentajes de distribución (Anavi sobre bruto · resto sobre neto)</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: 'Morna (neto)', pct: MORNA_PCT, color: 'text-pink-400' },
-                { label: 'Sunmi (neto)', pct: SUNMI_PCT, color: 'text-cyan-400' },
-                { label: 'Anavi (gestión · bruto)', pct: ANAVI_PCT, color: 'text-purple-400' },
-                { label: 'Millennium (neto)', pct: MILLENNIUM_PCT, color: 'text-yellow-400' },
-              ].map(({ label, pct, color }) => (
-                <div key={label} className="bg-white/5 rounded-lg p-3">
-                  <p className="text-[10px] text-white/30 mb-1.5">{label}</p>
-                  <p className={`text-lg font-bold ${color}`}>{pct}%</p>
-                </div>
-              ))}
+          {(dist.grossAllies.length + dist.netAllies.length) === 0 && (
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 text-xs text-amber-200/90">
+              No hay marcas aliadas con porcentaje asignado. Los porcentajes se configuran en
+              <span className="font-semibold"> Aliados</span> (cada aliado define su % y si aplica sobre el bruto o sobre lo demás).
             </div>
-          </div>
+          )}
 
-          {/* Waterfall */}
+          {/* Waterfall — alimentado solo por los aliados */}
           <div className="bg-[#111] border border-white/5 rounded-xl p-5">
             <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Distribución del período</h3>
             <div className="space-y-0.5">
               <WRow label="Ingresos cobrados" sub={`${periodPayments.filter(p => p.status === 'completed').length} pagos completados`} amount={dist.gross} color="text-white" isTotal />
               {dist.pending > 0 && <WRow label="Pagos pendientes (excluidos)" amount={dist.pending} color="text-white/20" indent />}
-              <WRow label={`− ${ANAVI_PCT}% Anavi (gestión · sobre bruto)`} amount={-dist.anavi} color="text-purple-400" indent />
+              {dist.grossAllies.map(a => (
+                <WRow key={`g-${a.name}`} label={`− ${pctTxt(a.pct)} ${a.name} (aliado · sobre bruto)`} amount={-a.amount} color="text-purple-300" indent />
+              ))}
               <WRow label={`− Gastos operativos (${periodExpenses.length} registros)`} amount={-dist.totalExpenses} color="text-red-400" indent />
-              <WRow label="Ganancia distribuible (neto)" amount={dist.distributable} color={dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400'} isTotal borderTop />
-              <WRow label={`− ${MORNA_PCT}% Morna`} amount={-dist.morna} color="text-pink-400" indent />
-              <WRow label={`− ${SUNMI_PCT}% Sunmi`} amount={-dist.sunmi} color="text-cyan-400" indent />
-              <WRow label={`− ${MILLENNIUM_PCT}% Millennium`} amount={-dist.millennium} color="text-yellow-400" indent />
+              <WRow label="Lo demás (a repartir)" amount={dist.distributable} color={dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400'} isTotal borderTop />
+              {dist.netAllies.map(a => (
+                <WRow key={`n-${a.name}`} label={`− ${pctTxt(a.pct)} ${a.name} (aliado · sobre lo demás)`} amount={-a.amount} color="text-emerald-400" indent />
+              ))}
+              <WRow label="Sobrante sin asignar" amount={dist.remainder} color={dist.remainder >= 0 ? 'text-white/60' : 'text-red-400'} isTotal borderTop />
             </div>
           </div>
 
-          {/* Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: 'Para Morna (36% neto)', value: fmt(dist.morna), color: 'text-pink-400' },
-              { label: 'Para Sunmi (36% neto)', value: fmt(dist.sunmi), color: 'text-cyan-400' },
-              { label: 'Para Anavi (16% bruto)', value: fmt(dist.anavi), color: 'text-purple-400' },
-              { label: 'Para Millennium (12% neto)', value: fmt(dist.millennium), color: 'text-yellow-400' },
-            ].map(s => (
-              <div key={s.label} className="bg-[#111] border border-white/5 rounded-xl p-4">
-                <p className="text-[10px] text-white/25 uppercase tracking-wider mb-1">{s.label}</p>
-                <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
-              </div>
-            ))}
-          </div>
+          {/* Cards por aliado */}
+          {(dist.grossAllies.length + dist.netAllies.length) > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                ...dist.grossAllies.map(a => ({ label: `${a.name} (${pctTxt(a.pct)} · sobre bruto)`, value: fmt(a.amount), color: 'text-purple-300' })),
+                ...dist.netAllies.map(a => ({ label: `${a.name} (${pctTxt(a.pct)} · sobre lo demás)`, value: fmt(a.amount), color: 'text-emerald-400' })),
+              ].map(s => (
+                <div key={s.label} className="bg-[#111] border border-white/5 rounded-xl p-4">
+                  <p className="text-[10px] text-white/25 uppercase tracking-wider mb-1">{s.label}</p>
+                  <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -533,12 +623,11 @@ export default function FinanzasPage() {
                 {[
                   { label: 'Ingresos cobrados', value: dist.gross, color: 'text-white', bold: false },
                   { label: 'Pagos pendientes (excluidos del cálculo)', value: dist.pending, color: 'text-yellow-400', bold: false },
-                  { label: `− ${ANAVI_PCT}% Anavi (gestión, sobre bruto)`, value: -dist.anavi, color: 'text-purple-400', bold: false },
+                  ...dist.grossAllies.map(a => ({ label: `− ${pctTxt(a.pct)} ${a.name} (aliado, sobre bruto)`, value: -a.amount, color: 'text-purple-300', bold: false })),
                   { label: '− Gastos operativos registrados', value: -dist.totalExpenses, color: 'text-red-400', bold: false },
-                  { label: 'Ganancia distribuible (neto)', value: dist.distributable, color: dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400', bold: true },
-                  { label: `− ${MORNA_PCT}% Morna`, value: -dist.morna, color: 'text-pink-400', bold: false },
-                  { label: `− ${SUNMI_PCT}% Sunmi`, value: -dist.sunmi, color: 'text-cyan-400', bold: false },
-                  { label: `− ${MILLENNIUM_PCT}% Millennium`, value: -dist.millennium, color: 'text-yellow-400', bold: false },
+                  { label: 'Lo demás (a repartir)', value: dist.distributable, color: dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400', bold: true },
+                  ...dist.netAllies.map(a => ({ label: `− ${pctTxt(a.pct)} ${a.name} (aliado, sobre lo demás)`, value: -a.amount, color: 'text-emerald-400', bold: false })),
+                  { label: 'Sobrante sin asignar', value: dist.remainder, color: dist.remainder >= 0 ? 'text-white/60' : 'text-red-400', bold: true },
                 ].map((row, i) => (
                   <tr key={i} className={row.bold ? 'bg-white/3' : ''}>
                     <td className={`py-2.5 pr-6 text-xs ${row.bold ? 'font-semibold text-white/60' : 'text-white/40'}`}>{row.label}</td>

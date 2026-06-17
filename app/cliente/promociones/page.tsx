@@ -149,12 +149,23 @@ export default function ClientePromocionesPage() {
   const flashActive = !!store?.flash_coupon_plan
     && (!store.flash_coupon_expiry_date || store.flash_coupon_expiry_date >= today);
 
-  const canFlashCoupon = flashActive;
-  const canCampaign = planActive && !!store?.plan_type && CAMPAIGN_CAPABLE.has(store.plan_type);
+  // Tienda aliada: campañas + cupones flash sin pagar plan. El estatus es
+  // permanente (no usa contract_expiry_date) y el cap de campañas lo fija el
+  // admin (ally_campaign_limit). La barrera real es RLS + triggers.
+  const isAlly = !!store?.is_ally;
+  const allyFlash = isAlly && !!store?.ally_flash_enabled;
+  const allyCampaignLimit = isAlly ? Math.max(1, store?.ally_campaign_limit ?? 1) : 1;
+
+  const canFlashCoupon = allyFlash || flashActive;
+  const canCampaign = isAlly || (planActive && !!store?.plan_type && CAMPAIGN_CAPABLE.has(store.plan_type));
   const canBanner = planActive && store?.plan_type === 'DIAMANTE';
   const canCreateCoupon = canFlashCoupon;
 
-  const couponPlanType = useMemo(() => store?.flash_coupon_plan || '', [store]);
+  // Aliado sin addon flash de pago usa la semántica generosa (SEMANAL).
+  const couponPlanType = useMemo(
+    () => store?.flash_coupon_plan || (allyFlash ? 'FLASH_COUPON_SEMANAL' : ''),
+    [store, allyFlash],
+  );
 
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
@@ -502,13 +513,18 @@ export default function ClientePromocionesPage() {
       return;
     }
 
-    // Una empresa solo puede tener una campaña activa a la vez.
-    // En creación, si ya hay activa, abrimos el modal de elección.
+    // Tope de campañas activas: 1 para tiendas normales, ally_campaign_limit
+    // para aliados. Si ya se alcanzó el tope, abrimos el modal de elección.
     if (!aEditingId) {
-      const active = findActiveCampaign();
-      if (active) {
-        setConflict({ active, step: 'choose' });
-        return;
+      const activeCount = campaigns.filter(
+        c => c.is_active && (!c.end_date || c.end_date >= today),
+      ).length;
+      if (activeCount >= allyCampaignLimit) {
+        const active = findActiveCampaign();
+        if (active) {
+          setConflict({ active, step: 'choose' });
+          return;
+        }
       }
     }
 
@@ -560,8 +576,8 @@ export default function ClientePromocionesPage() {
         if (updated && updated.is_active !== aIsActive) {
           throw new Error(
             aIsActive
-              ? (planActive
-                  ? 'No se pudo activar la campaña: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
+              ? (planActive || isAlly
+                  ? `No se pudo activar la campaña: alcanzaste el tope de ${allyCampaignLimit} campaña(s) activa(s). Pausa una primero.`
                   : 'No se pudo activar la campaña: tu plan está vencido. Renueva para volver a activar campañas.')
               : 'No se pudo desactivar la campaña. Revisa permisos.'
           );
@@ -629,7 +645,8 @@ export default function ClientePromocionesPage() {
           duration_seconds: CAMPAIGN_DURATION_SECONDS,
           start_date: startDate,
           end_date: endDate,
-          plan_type: store.plan_type,
+          // El aliado no tiene plan_type pago; sus campañas suenan como Oro.
+          plan_type: store.plan_type ?? (isAlly ? 'ORO' : null),
           store_id: store.id,
           is_active: false,
           approval_status: 'pending',
@@ -993,23 +1010,35 @@ export default function ClientePromocionesPage() {
         </div>
       )}
 
-      {flashActive && (
+      {isAlly && (
+        <div className="bg-emerald-500/[0.06] border border-emerald-500/25 rounded-xl p-4">
+          <p className="text-emerald-200 text-sm font-semibold">
+            🤝 Marca Aliada · campañas{allyFlash ? ' + cupones flash' : ''} sin costo
+          </p>
+          <p className="text-white/50 text-xs mt-0.5">
+            Puedes tener hasta <strong className="text-emerald-200">{allyCampaignLimit}</strong> campaña(s)
+            activa(s) a la vez. Acceso de aliado, sin vencimiento.
+          </p>
+        </div>
+      )}
+
+      {(flashActive || allyFlash) && (
         <div className="bg-pink-500/[0.06] border border-pink-500/25 rounded-xl p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <p className="text-pink-200 text-sm font-semibold">
-                ⚡ Plan Cupones Flash activo · {PLAN_LABELS[store!.flash_coupon_plan!]}
+                ⚡ {isAlly ? 'Cupones Flash · Marca Aliada' : `Plan Cupones Flash activo · ${PLAN_LABELS[store!.flash_coupon_plan!]}`}
               </p>
-              {store!.flash_coupon_expiry_date && (
+              {!isAlly && store!.flash_coupon_expiry_date && (
                 <p className="text-white/50 text-xs mt-0.5">Vence {store!.flash_coupon_expiry_date}.</p>
               )}
             </div>
             <div className="text-right">
               <p className="text-[10px] text-white/40 uppercase">Tus cupones activos</p>
               <p className="text-pink-300 font-mono text-xl font-bold">{flashCount}</p>
-              {FLASH_PERIOD_LIMITS[store!.flash_coupon_plan!] && (() => {
-                const lim = FLASH_PERIOD_LIMITS[store!.flash_coupon_plan!];
-                const issued = flashIssuedInWindow(store!.flash_coupon_plan!);
+              {couponPlanType && FLASH_PERIOD_LIMITS[couponPlanType] && (() => {
+                const lim = FLASH_PERIOD_LIMITS[couponPlanType];
+                const issued = flashIssuedInWindow(couponPlanType);
                 return (
                   <p className="text-[10px] text-white/40">
                     {issued}/{lim.max} por {lim.label}

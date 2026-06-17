@@ -11,16 +11,19 @@ export type AuditActionType =
   | 'VINCULAR'
   | 'DESVINCULAR';
 
-export type AuditEntityType = 
-  | 'tienda' 
-  | 'campaña' 
-  | 'banner' 
-  | 'cupón' 
-  | 'kiosco' 
-  | 'categoría' 
-  | 'plan' 
-  | 'servicio' 
-  | 'gasto_operativo' 
+export type AuditEntityType =
+  | 'tienda'
+  | 'aliado'
+  | 'contrato_tienda'
+  | 'cliente'
+  | 'campaña'
+  | 'banner'
+  | 'cupón'
+  | 'kiosco'
+  | 'categoría'
+  | 'plan'
+  | 'servicio'
+  | 'gasto_operativo'
   | 'pago'
   | 'solicitud';
 

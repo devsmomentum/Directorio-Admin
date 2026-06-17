@@ -16,6 +16,12 @@ export type ClienteStore = {
   contract_expiry_date: string | null;
   flash_coupon_plan: string | null;
   flash_coupon_expiry_date: string | null;
+  /** Tienda aliada: campañas + cupones flash sin pagar plan, con cap definido por el admin. */
+  is_ally: boolean;
+  /** Tope de campañas activas para la tienda aliada (lo fija el admin). */
+  ally_campaign_limit: number;
+  /** Si el aliado puede publicar cupones flash. */
+  ally_flash_enabled: boolean;
   description?: string | null;
   categories?: { id: string; name: string; icon: string } | null;
 };
