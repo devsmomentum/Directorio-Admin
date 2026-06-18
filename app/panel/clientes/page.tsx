@@ -138,6 +138,8 @@ export default function ClientesPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
+  // Cliente cuyo detalle (solo lectura) se muestra al hacer clic en su nombre.
+  const [detailClient, setDetailClient] = useState<ClientRow | null>(null);
 
   // form state
   const [showForm, setShowForm] = useState(false);
@@ -203,6 +205,7 @@ export default function ClientesPage() {
     setFullName(''); setDocTipo('V'); setCedula(''); setTelefono('');
     setCedulaFile(null); setCedulaUrl('');
     setPickedStoreIds([]);
+    setStoreSearch('');
     setFormError(null);
     setShowForm(true);
   };
@@ -648,8 +651,15 @@ export default function ClientesPage() {
               <tbody>
                 {filtered.map(c => (
                   <tr key={c.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] group">
-                    <td className="px-5 py-3.5 text-white/85">
-                      {c.full_name || <span className="text-white/30 italic">Sin nombre</span>}
+                    <td className="px-5 py-3.5">
+                      <button
+                        type="button"
+                        onClick={() => setDetailClient(c)}
+                        title="Ver información del cliente"
+                        className="text-white/85 hover:text-pink-400 transition-colors text-left font-medium"
+                      >
+                        {c.full_name || <span className="text-white/30 italic">Sin nombre</span>}
+                      </button>
                     </td>
                     <td className="px-5 py-3.5 text-white/60 text-xs font-mono">{c.email}</td>
                     <td className="px-5 py-3.5 text-white/50 text-xs font-mono">{c.cedula_numero ? `${c.doc_tipo || 'V'}-${c.cedula_numero}` : '—'}</td>
@@ -730,9 +740,14 @@ export default function ClientesPage() {
                 {/* Header: nombre + acciones */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-white/90 truncate">
+                    <button
+                      type="button"
+                      onClick={() => setDetailClient(c)}
+                      title="Ver información del cliente"
+                      className="text-sm font-medium text-white/90 hover:text-pink-400 transition-colors truncate text-left block max-w-full"
+                    >
                       {c.full_name || <span className="italic text-white/30">Sin nombre</span>}
-                    </p>
+                    </button>
                     <p className="text-xs text-white/40 font-mono truncate mt-0.5">{c.email}</p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
@@ -936,20 +951,32 @@ export default function ClientesPage() {
 
               </div>
 
-              {/* Tiendas vinculadas */}
+              {/* Tiendas vinculadas — siempre disponible, pero OPCIONAL.
+                  • Al crear: se puede vincular ahora o dejarlo para después.
+                  • Al editar: se reconcilian los vínculos (link/unlink).
+                  • Una tienda también puede existir sin cliente vinculado. */}
               <div className="border-t border-white/5 pt-5 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium">
                     Tiendas vinculadas
+                    <span className="ml-2 text-white/25 normal-case tracking-normal font-normal">(opcional)</span>
                   </p>
                   <span className="text-[10px] text-white/40 font-mono">
                     {pickedStoreIds.length}/{stores.length}
                   </span>
                 </div>
 
+                <p className="text-[11px] text-white/40 bg-cyan-500/[0.06] border border-cyan-500/20 rounded-lg p-2.5 leading-relaxed">
+                  {editing
+                    ? 'Marca o desmarca las tiendas que pertenecen a este cliente. Los cambios se guardan al confirmar.'
+                    : 'Puedes vincular tiendas ahora o dejarlo para después: el cliente se crea igual sin tiendas. Una tienda también puede existir sin cliente vinculado.'}
+                </p>
+
                 {stores.length === 0 ? (
                   <p className="text-[11px] text-white/40 bg-white/[0.02] border border-white/5 rounded p-3">
-                    No hay tiendas creadas todavía.
+                    No hay tiendas creadas todavía. Crea el cliente y vincúlale tiendas
+                    más tarde, o créalas en{' '}
+                    <a href="/panel/tiendas" className="text-cyan-400 hover:text-cyan-300 underline">Tiendas</a>.
                   </p>
                 ) : (
                   <>
@@ -1056,6 +1083,92 @@ export default function ClientesPage() {
                   {submitting ? 'Guardando…' : (editing ? 'Guardar cambios' : 'Crear cliente')}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDetailClient(null)} />
+          <div className="relative bg-[#111] border border-white/10 rounded-xl p-6 w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-start justify-between mb-5">
+              <div className="min-w-0">
+                <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-1">Cliente</p>
+                <h3 className="text-lg font-bold text-white truncate">
+                  {detailClient.full_name || <span className="text-white/30 italic font-normal">Sin nombre</span>}
+                </h3>
+                <p className="text-xs text-white/40 font-mono truncate mt-0.5">{detailClient.email}</p>
+              </div>
+              <button onClick={() => setDetailClient(null)} className="text-white/30 hover:text-white/60 transition-colors shrink-0">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Documento</p>
+                <p className="text-sm text-white/70 font-mono">
+                  {detailClient.cedula_numero ? `${detailClient.doc_tipo || 'V'}-${detailClient.cedula_numero}` : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Teléfono</p>
+                <p className="text-sm text-white/70">{phoneForDisplay(detailClient.telefono_personal)}</p>
+              </div>
+            </div>
+
+            {detailClient.cedula_url && (
+              <div className="mt-4">
+                <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Documento adjunto</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openPrivateDoc(detailClient.cedula_url!)}
+                    className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white/70 text-xs rounded-lg transition-colors"
+                  >
+                    Ver
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadPrivateDoc(detailClient.cedula_url!, `cedula${fileExt(detailClient.cedula_url!)}`)}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs rounded-lg transition-colors"
+                  >
+                    Descargar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 border-t border-white/5 pt-4">
+              <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Tiendas vinculadas</p>
+              <div className="flex gap-1 flex-wrap">
+                {(storesByClient[detailClient.id] ?? []).map(s => (
+                  <span key={s.id} className="text-[11px] bg-cyan-500/10 text-cyan-300 px-2 py-0.5 rounded">
+                    {s.name}
+                  </span>
+                ))}
+                {(storesByClient[detailClient.id] ?? []).length === 0 && (
+                  <span className="text-[11px] text-white/30 italic">Sin tiendas vinculadas</span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-5 mt-5 border-t border-white/5">
+              <button
+                type="button"
+                onClick={() => setDetailClient(null)}
+                className="flex-1 px-4 py-2.5 text-sm text-white/40 hover:text-white/70 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={() => { const c = detailClient; setDetailClient(null); openEdit(c); }}
+                className="flex-1 px-5 py-2.5 text-sm font-medium bg-pink-500/15 text-pink-400 hover:bg-pink-500/25 border border-pink-500/30 rounded-lg transition-colors"
+              >
+                Editar
+              </button>
             </div>
           </div>
         </div>

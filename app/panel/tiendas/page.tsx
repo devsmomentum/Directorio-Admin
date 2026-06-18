@@ -1029,6 +1029,11 @@ export default function TiendasCRUD() {
                   </Link>
                 </div>
 
+                <p className="text-[11px] text-white/40 bg-white/[0.02] border border-white/5 rounded-lg p-2.5 leading-relaxed">
+                  Opcional: la tienda puede crearse <span className="text-white/60">sin cliente vinculado</span> y
+                  asignárselo más tarde. Aquí solo puedes vincular clientes ya existentes.
+                </p>
+
                 {clientsError && (
                   <p className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-2.5">
                     No se pudieron cargar los clientes: {clientsError}
