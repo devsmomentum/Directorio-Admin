@@ -10,20 +10,7 @@ import {
   buildPaymentPayload,
 } from '../payment-fields';
 import { AbonoModal, AbonoRequest } from '../abono-modal';
-
-const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/30 text-cyan-300',
-  ORO: 'from-amber-500/20 to-orange-500/10 border-amber-500/30 text-amber-300',
-  IA_PERFORMANCE: 'from-purple-500/20 to-pink-500/10 border-purple-500/30 text-purple-300',
-  PUBLI_PROMO_DIARIO: 'from-blue-500/20 to-cyan-500/10 border-blue-500/30 text-blue-300',
-  PUBLI_PROMO_SEMANAL: 'from-blue-500/20 to-cyan-500/10 border-blue-500/30 text-blue-300',
-  FLASH_COUPON_DIARIO: 'from-pink-500/20 to-rose-500/10 border-pink-500/30 text-pink-300',
-  FLASH_COUPON_SEMANAL: 'from-pink-500/20 to-rose-500/10 border-pink-500/30 text-pink-300',
-};
-
-// Helper: el plan_key corresponde a addon Flash Coupon, no a plan base.
-const isFlashPlan = (key: string) =>
-  key === 'FLASH_COUPON_DIARIO' || key === 'FLASH_COUPON_SEMANAL';
+import { PLAN_GRADIENT as PLAN_COLORS, isFlashPlan } from '../../../lib/plans';
 
 export default function ClientePlanesPage() {
   const { selectedStore: store } = useClienteStore();

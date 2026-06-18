@@ -12,16 +12,7 @@ import {
   methodLabel,
 } from '../payment-fields';
 import { AbonoModal, AbonoRequest } from '../abono-modal';
-
-const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE: 'Diamante',
-  ORO: 'Oro',
-  IA_PERFORMANCE: 'IA Performance',
-  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
-  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
-  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
-  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
-};
+import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 
 function parseRejectionReason(notes: string | null | undefined): string | null {
   if (!notes) return null;
@@ -30,16 +21,6 @@ function parseRejectionReason(notes: string | null | undefined): string | null {
   const reason = notes.slice(idx + '[RECHAZO]'.length).trim();
   return reason || null;
 }
-
-const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
-  ORO: 'text-amber-400 bg-amber-500/10',
-  IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
-  PUBLI_PROMO_DIARIO: 'text-blue-400 bg-blue-500/10',
-  PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10',
-  FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
-  FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
-};
 
 /**
  * A partir del vencimiento del contrato y la cantidad de ciclos a pagar,

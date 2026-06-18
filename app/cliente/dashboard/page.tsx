@@ -5,28 +5,8 @@ import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
 import { AbonoModal, AbonoRequest } from '../abono-modal';
-
-const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE: 'Diamante',
-  ORO: 'Oro',
-  IA_PERFORMANCE: 'IA Performance',
-  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
-  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
-  FLASH_COUPON_DIARIO: 'Cupones Flash · Diario',
-  FLASH_COUPON_SEMANAL: 'Cupones Flash · Semanal',
-  PROMO_FLASH: 'Promo Flash',
-};
-
-const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
-  ORO: 'text-amber-400 bg-amber-500/10',
-  IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
-  PUBLI_PROMO_DIARIO: 'text-blue-400 bg-blue-500/10',
-  PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10',
-  FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
-  FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
-  PROMO_FLASH: 'text-pink-400 bg-pink-500/10',
-};
+import { downloadCSV, slugify } from '../../../lib/csv';
+import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 
 type Range = '7d' | '30d' | '90d' | 'all';
 const RANGE_LABELS: Record<Range, string> = {
@@ -43,36 +23,6 @@ function rangeStart(r: Range): string | null {
   const days = r === '7d' ? 6 : r === '30d' ? 29 : 89;
   d.setDate(d.getDate() - days);
   return d.toISOString();
-}
-
-// ── Exportación CSV ───────────────────────────────────────────────────────
-// Mismo patrón que el panel admin: comillas dobladas y BOM UTF-8 para Excel.
-function csvCell(v: unknown): string {
-  if (v == null) return '';
-  const s = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadCSV(filename: string, headers: string[], rows: unknown[][]) {
-  const body = [headers.map(csvCell).join(','), ...rows.map(r => r.map(csvCell).join(','))].join('\n');
-  const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function slugify(s: string): string {
-  return (s || 'tienda')
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40);
 }
 
 type StoreMetrics = {

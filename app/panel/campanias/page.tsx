@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
 import { removePublicidadFile } from '../../../lib/storage';
+import { PLAN_LABELS, PLAN_BADGE_BORDERED as PLAN_COLORS } from '../../../lib/plans';
 import { validateKioskVideo } from '../../../lib/videoValidation';
 import Pagination, { usePagination } from '../../components/Pagination';
 import KioskAssignment from './KioskAssignment';
@@ -42,20 +43,6 @@ const PLAN_FREQUENCY_SECONDS: Record<string, number> = {
 // La duración real de cada campaña vive en ad_campaigns.duration_seconds y el
 // loop se calcula sumando esas duraciones (no asumiendo 15s fijos).
 const CAMPAIGN_DURATION_SECONDS = 15;
-
-const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
-  ORO: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
-  PUBLI_PROMO_DIARIO: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
-  PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
-};
-
-const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE: 'Diamante',
-  ORO: 'Oro',
-  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
-  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
-};
 
 interface Store { id: string; name: string; contract_expiry_date: string | null; plan_type: string | null; }
 

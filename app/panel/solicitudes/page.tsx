@@ -5,26 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
 import K2BannerPreview from '../../components/K2BannerPreview';
 import K2CampaignPreview from '../../components/K2CampaignPreview';
-
-const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE: 'Diamante',
-  ORO: 'Oro',
-  IA_PERFORMANCE: 'IA Performance',
-  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
-  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
-  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
-  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
-};
-
-const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
-  ORO: 'text-amber-400 bg-amber-500/10',
-  IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
-  PUBLI_PROMO_DIARIO: 'text-blue-400 bg-blue-500/10',
-  PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10',
-  FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
-  FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
-};
+import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 
 const METHOD_LABEL: Record<string, string> = {
   transfer_bs: 'Transferencia Bs',

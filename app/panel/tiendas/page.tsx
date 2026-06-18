@@ -4,6 +4,9 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
+import { uploadPublicidad, uploadPrivateDoc, openPrivateDoc, downloadPrivateDoc, fileExt } from '../../../lib/storage';
+import { downloadCSV, slugify } from '../../../lib/csv';
+import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 import Pagination, { usePagination } from '../../components/Pagination';
 
 // Planes BASE asignables a una tienda (PDF "PLANES DIRECTORIOS").
@@ -39,74 +42,6 @@ const FALLBACK_PLAN_CAPS: Record<string, number | null> = {
   FLASH_COUPON_DIARIO: FLASH_ADDON_MAX_BRANDS,
   FLASH_COUPON_SEMANAL: FLASH_ADDON_MAX_BRANDS,
 };
-
-const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE: 'text-cyan-400 bg-cyan-500/10',
-  ORO: 'text-amber-400 bg-amber-500/10',
-  IA_PERFORMANCE: 'text-purple-400 bg-purple-500/10',
-  PUBLI_PROMO_DIARIO: 'text-blue-400 bg-blue-500/10',
-  PUBLI_PROMO_SEMANAL: 'text-blue-400 bg-blue-500/10',
-  FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
-  FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
-};
-
-const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE: 'Diamante',
-  ORO: 'Oro',
-  IA_PERFORMANCE: 'IA Performance',
-  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
-  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
-  FLASH_COUPON_DIARIO: 'Flash Coupon · Diario',
-  FLASH_COUPON_SEMANAL: 'Flash Coupon · Semanal',
-};
-
-// Logos → bucket público 'publicidad'
-async function uploadLogo(file: File, path: string): Promise<string> {
-  const { error } = await supabase.storage
-    .from('publicidad')
-    .upload(path, file, { upsert: true });
-  if (error) throw error;
-  const { data } = supabase.storage.from('publicidad').getPublicUrl(path);
-  return data.publicUrl;
-}
-
-// Documentos legales → bucket privado 'documentos', devuelve solo el path
-async function uploadPrivateDoc(file: File, path: string): Promise<string> {
-  const { error } = await supabase.storage
-    .from('documentos')
-    .upload(path, file, { upsert: true });
-  if (error) throw error;
-  return path;
-}
-
-// Genera URL firmada de 60s y abre el documento en nueva pestaña
-async function openPrivateDoc(path: string) {
-  const { data, error } = await supabase.storage
-    .from('documentos')
-    .createSignedUrl(path, 60);
-  if (error || !data) { alert('No se pudo abrir el documento.'); return; }
-  window.open(data.signedUrl, '_blank');
-}
-
-// Igual que openPrivateDoc pero fuerza la descarga con un nombre amigable
-async function downloadPrivateDoc(path: string, filename: string) {
-  const { data, error } = await supabase.storage
-    .from('documentos')
-    .createSignedUrl(path, 60, { download: filename });
-  if (error || !data) { alert('No se pudo descargar el documento.'); return; }
-  const a = document.createElement('a');
-  a.href = data.signedUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-// Extensión (con punto) de un path de storage, p.ej. ".pdf"
-function fileExt(path: string): string {
-  const m = String(path || '').match(/\.[a-z0-9]+$/i);
-  return m ? m[0] : '';
-}
 
 // Normaliza el logo_url para tolerar tres formas históricas que conviven en BD:
 //   1. URL pública completa (https://…/storage/v1/object/public/publicidad/logos/x.png) → usar tal cual
@@ -548,7 +483,7 @@ export default function TiendasCRUD() {
 
       if (logoFile) {
         const ext = logoFile.name.split('.').pop();
-        finalLogoUrl = await uploadLogo(logoFile, `logos/logo_${Date.now()}.${ext}`);
+        finalLogoUrl = await uploadPublicidad(logoFile, `logos/logo_${Date.now()}.${ext}`);
       }
       if (mercantilFile) {
         const ext = mercantilFile.name.split('.').pop();
@@ -1602,36 +1537,6 @@ function rangeStartISO(preset: RangePreset): string | null {
   const days = preset === '7d' ? 6 : preset === '30d' ? 29 : 89;
   d.setDate(d.getDate() - days);
   return d.toISOString();
-}
-
-// CSV-safe: comillas dobladas, comillas envolventes si hay coma/quote/newline.
-function csvCell(v: unknown): string {
-  if (v == null) return '';
-  const s = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadCSV(filename: string, headers: string[], rows: (unknown[])[]) {
-  // BOM para que Excel respete UTF-8.
-  const body = [headers.map(csvCell).join(','), ...rows.map(r => r.map(csvCell).join(','))].join('\n');
-  const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function slugify(s: string): string {
-  return (s || 'tienda')
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40);
 }
 
 function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void }) {

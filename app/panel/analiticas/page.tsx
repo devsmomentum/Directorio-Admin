@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { downloadCSV } from '../../../lib/csv';
 
 // Fila del agregado diario de interacciones (migración 028). Reemplaza el
 // consumo crudo de analytics_events (que ahora se purga a los 30 días).
@@ -366,17 +367,8 @@ export default function AnalyticsDashboard() {
     return { topModules, rows, globalMax };
   }, [filteredInteractions, kiosks]);
 
-  const exportCSV = (headers: string[], rows: string[][], filename: string) => {
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
+  const exportCSV = (headers: string[], rows: string[][], filename: string) =>
+    downloadCSV(filename, headers, rows);
 
   const handleExportTraffic = () => {
     if (!filteredInteractions.length) return alert('No hay interacciones para exportar.');

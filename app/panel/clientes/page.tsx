@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { uploadPrivateDoc, openPrivateDoc, downloadPrivateDoc, fileExt } from '../../../lib/storage';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // /panel/clientes — gestión de usuarios cliente del portal.
@@ -86,47 +87,6 @@ function phoneForDb(raw: string): string {
 function phoneForDisplay(stored: string | null): string {
   if (!stored) return '—';
   return stored;
-}
-
-// Documentos legales → bucket privado 'documentos', devuelve solo el path
-async function uploadPrivateDoc(file: File, path: string): Promise<string> {
-  const { error } = await supabase.storage
-    .from('documentos')
-    .upload(path, file, { upsert: true });
-  if (error) throw error;
-  return path;
-}
-
-// Genera URL firmada de 60s y abre el documento en nueva pestaña
-async function openPrivateDoc(path: string) {
-  const { data, error } = await supabase.storage
-    .from('documentos')
-    .createSignedUrl(path, 60);
-  if (error || !data?.signedUrl) {
-    alert('No se pudo abrir el documento.');
-    return;
-  }
-  window.open(data.signedUrl, '_blank');
-}
-
-// Igual que openPrivateDoc pero fuerza la descarga con un nombre amigable
-async function downloadPrivateDoc(path: string, filename: string) {
-  const { data, error } = await supabase.storage
-    .from('documentos')
-    .createSignedUrl(path, 60, { download: filename });
-  if (error || !data?.signedUrl) { alert('No se pudo descargar el documento.'); return; }
-  const a = document.createElement('a');
-  a.href = data.signedUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-// Extensión (con punto) de un path de storage, p.ej. ".pdf"
-function fileExt(path: string): string {
-  const m = String(path || '').match(/\.[a-z0-9]+$/i);
-  return m ? m[0] : '';
 }
 
 type StoreLite = { id: string; name: string };

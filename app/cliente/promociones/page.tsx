@@ -8,28 +8,7 @@ import { validateKioskVideo } from '../../../lib/videoValidation';
 import { useClienteStore } from '../store-context';
 import K2BannerPreview from '../../components/K2BannerPreview';
 import K2CampaignPreview from '../../components/K2CampaignPreview';
-
-const PLAN_LABELS: Record<string, string> = {
-  DIAMANTE: 'Diamante',
-  ORO: 'Oro',
-  IA_PERFORMANCE: 'IA Performance',
-  FLASH_COUPON_DIARIO: 'Cupones Flash · Diario',
-  FLASH_COUPON_SEMANAL: 'Cupones Flash · Semanal',
-  PUBLI_PROMO_DIARIO: 'Publi Promo · Diario',
-  PUBLI_PROMO_SEMANAL: 'Publi Promo · Semanal',
-};
-
-const PLAN_COLORS: Record<string, string> = {
-  DIAMANTE: 'text-cyan-300 bg-cyan-500/10',
-  ORO: 'text-amber-300 bg-amber-500/10',
-  IA_PERFORMANCE: 'text-purple-300 bg-purple-500/10',
-  FLASH_COUPON_DIARIO: 'text-pink-300 bg-pink-500/10',
-  FLASH_COUPON_SEMANAL: 'text-pink-300 bg-pink-500/10',
-  PUBLI_PROMO_DIARIO: 'text-blue-300 bg-blue-500/10',
-  PUBLI_PROMO_SEMANAL: 'text-blue-300 bg-blue-500/10',
-};
-
-const FLASH_PLANS = new Set(['FLASH_COUPON_DIARIO', 'FLASH_COUPON_SEMANAL']);
+import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS, FLASH_COUPON_PLANS as FLASH_PLANS } from '../../../lib/plans';
 
 const APPROVAL_CHIP: Record<string, { label: string; cls: string }> = {
   pending:  { label: 'EN REVISIÓN', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/30' },

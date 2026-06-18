@@ -3,21 +3,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { PLAN_COLOR_PARTS as PLAN_COLORS, DEFAULT_PLAN_COLOR as DEFAULT_COLOR } from '../../../lib/plans';
 
 // Planes that apply to stores and/or coupons - managed in the store_plans table
 // Falls back to inline editable plan definitions if no dedicated table exists
-
-const PLAN_COLORS: Record<string, { badge: string; border: string; bg: string; dot: string }> = {
-  DIAMANTE: { badge: 'text-cyan-400 bg-cyan-500/10', border: 'border-cyan-500/30', bg: 'bg-cyan-500/5', dot: 'bg-cyan-400' },
-  ORO:      { badge: 'text-amber-400 bg-amber-500/10', border: 'border-amber-500/30', bg: 'bg-amber-500/5', dot: 'bg-amber-400' },
-  IA_PERFORMANCE: { badge: 'text-purple-400 bg-purple-500/10', border: 'border-purple-500/30', bg: 'bg-purple-500/5', dot: 'bg-purple-400' },
-  PUBLI_PROMO_DIARIO:  { badge: 'text-blue-400 bg-blue-500/10', border: 'border-blue-500/30', bg: 'bg-blue-500/5', dot: 'bg-blue-400' },
-  PUBLI_PROMO_SEMANAL: { badge: 'text-blue-400 bg-blue-500/10', border: 'border-blue-500/30', bg: 'bg-blue-500/5', dot: 'bg-blue-400' },
-  FLASH_COUPON_DIARIO:  { badge: 'text-pink-400 bg-pink-500/10', border: 'border-pink-500/30', bg: 'bg-pink-500/5', dot: 'bg-pink-400' },
-  FLASH_COUPON_SEMANAL: { badge: 'text-pink-400 bg-pink-500/10', border: 'border-pink-500/30', bg: 'bg-pink-500/5', dot: 'bg-pink-400' },
-};
-
-const DEFAULT_COLOR = { badge: 'text-white/40 bg-white/5', border: 'border-white/10', bg: 'bg-white/5', dot: 'bg-white/30' };
 
 export default function PlanesCRUD() {
   const [plans, setPlans] = useState<any[]>([]);

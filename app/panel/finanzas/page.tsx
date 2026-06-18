@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { downloadCSV } from '../../../lib/csv';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type Store = { id: string; name: string; plan_type: string | null; is_ally?: boolean; ally_revenue_pct?: number; ally_revenue_base?: 'gross' | 'net' };
@@ -329,13 +330,10 @@ export default function FinanzasPage() {
   };
 
   // ── CSV export ─────────────────────────────────────────────────────────────
-  const exportCSV = (headers: string[], rows: string[][], filename: string) => {
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  };
+  // El escape de comillas/comas lo hace downloadCSV (csvCell); por eso las celdas
+  // de abajo ya no llevan comillas manuales.
+  const exportCSV = (headers: string[], rows: string[][], filename: string) =>
+    downloadCSV(filename, headers, rows);
 
   const handleExportReport = () => {
     const rows: string[][] = [
@@ -350,13 +348,13 @@ export default function FinanzasPage() {
       ['INGRESOS DETALLADOS', '', '', '', ''],
       ['Tienda', 'Plan', 'Período', 'Monto', 'Método', 'Fecha', 'Estado'],
       ...periodPayments.map(p => [
-        `"${storeName(p.store_id)}"`, p.item_name, `"${p.period || ''}"`,
+        storeName(p.store_id), p.item_name, p.period || '',
         fmt(Number(p.amount_usd)), p.payment_method, p.payment_date || '', p.status,
       ]),
       ['', '', '', '', ''],
       ['GASTOS DETALLADOS', '', '', '', ''],
       ['Categoría', 'Descripción', 'Monto', 'Fecha'],
-      ...periodExpenses.map(e => [`"${e.category}"`, `"${e.description || ''}"`, fmt(Number(e.amount_usd)), e.expense_date]),
+      ...periodExpenses.map(e => [e.category, e.description || '', fmt(Number(e.amount_usd)), e.expense_date]),
     ];
     exportCSV(['Concepto', 'Débito', 'Saldo'], rows, `Reporte_${dateStart}_al_${dateEnd}.csv`);
   };

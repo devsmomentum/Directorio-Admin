@@ -5,18 +5,10 @@ import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
 import { removePublicidadFile } from '../../../lib/storage';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 
 // Solo se emiten cupones bajo el plan Cupones Flash (diario o semanal).
 // Los planes base ya no admiten cupones — ver migración 018.
-const PLAN_COLORS: Record<string, string> = {
-  FLASH_COUPON_DIARIO: 'text-pink-400 bg-pink-500/10',
-  FLASH_COUPON_SEMANAL: 'text-pink-400 bg-pink-500/10',
-};
-
-const PLAN_LABELS: Record<string, string> = {
-  FLASH_COUPON_DIARIO: 'Cupones Flash · Diario',
-  FLASH_COUPON_SEMANAL: 'Cupones Flash · Semanal',
-};
 
 // Tope duro de marcas activas en la galería (PDF: 20 marcas máx)
 const FLASH_COUPON_MAX_BRANDS = 20;
