@@ -115,6 +115,14 @@
 
 ### UX inconsistente
 
+- [x] 🟡 **Navegación del cliente plana y con nombres poco intuitivos.** El sidebar
+  era una lista de 9 ítems sin agrupar, con etiquetas que no mapeaban a los
+  objetivos del comerciante. → Hecho: nav **agrupado por objetivo** con encabezados
+  de sección (Publicidad / Plan y pagos / Mi negocio / Ayuda) y renombres:
+  Dashboard→**Resumen**, Candidatos→**Canjes**, "Mi Tienda"→**Mi cuenta**. Títulos
+  de página alineados. Mantiene la visibilidad por rol (seller→Canjes,
+  advertiser→Promociones). Archivo: `app/cliente/layout.tsx` + headers de páginas.
+
 - [ ] 🟡 **Patrón ver-vs-editar inconsistente.** `tiendas`/`clientes` tienen modal
   de detalle de solo-lectura; `categorias`/`services`/`kioscos`/`planes`/`banners`/
   `cupons` saltan directo al form. → Estandarizar: clic → detalle → "Editar".

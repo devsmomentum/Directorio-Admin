@@ -441,7 +441,7 @@ export default function ClienteDashboardPage() {
     <div className="space-y-6 max-w-6xl">
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
-          <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Dashboard</p>
+          <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Resumen</p>
           <h2 className="text-2xl font-bold text-white">{store.name}</h2>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             {store.plan_type ? (

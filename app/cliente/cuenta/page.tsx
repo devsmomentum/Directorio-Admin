@@ -97,8 +97,8 @@ export default function ClienteCuentaPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Mi cuenta</p>
-        <h2 className="text-2xl font-bold text-white">Mis Tiendas</h2>
+        <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Mi negocio</p>
+        <h2 className="text-2xl font-bold text-white">Mi cuenta</h2>
         <p className="text-white/50 text-sm mt-2">
           Tienes <span className="text-cyan-300 font-semibold">{stores.length}</span> tienda{stores.length !== 1 ? 's' : ''} vinculada{stores.length !== 1 ? 's' : ''}.
           Cambia la tienda activa en el sidebar para editar otra.

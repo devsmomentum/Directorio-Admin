@@ -191,9 +191,9 @@ export default function CandidatosPage() {
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">
             Canje de cupones · {store.name}
           </p>
-          <h2 className="text-2xl font-bold text-white">Candidatos</h2>
+          <h2 className="text-2xl font-bold text-white">Canjes</h2>
           <p className="text-white/50 text-sm mt-2">
-            Usuarios que reservaron un cupón y aún no lo han canjeado. Escanea su QR o búscalo
+            Clientes que reservaron un cupón y aún no lo han canjeado. Escanea su QR o búscalo
             por cédula/nombre y presiona <strong>Canjear</strong>. El stock solo baja al canjear.
           </p>
         </div>

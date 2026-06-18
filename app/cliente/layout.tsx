@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
@@ -224,47 +224,60 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     );
   }
 
-  const menuItems = [
-    { name: 'Dashboard', path: '/cliente/dashboard', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-    )},
-    { name: 'Mi Tienda', path: '/cliente/cuenta', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z" /></svg>
-    )},
-    { name: 'Planes', path: '/cliente/planes', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
-    )},
-    { name: 'Promociones', path: '/cliente/promociones', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
-    )},
-    { name: 'Candidatos', path: '/cliente/candidatos', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-    )},
-    { name: 'Pagos', path: '/cliente/pagos', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-    )},
-    { name: 'Equipo', path: '/cliente/equipo', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4 0m8-2a3 3 0 10-2.5-4.5M7 8.5A3 3 0 104.5 4" /></svg>
-    )},
-    { name: 'Notificaciones', path: '/cliente/notificaciones', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-    )},
-    { name: 'Tutorial', path: '/cliente/tutorial', icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
-    )},
+  // Navegación agrupada por objetivo del comerciante (no lista plana): así el
+  // dueño sabe de un vistazo a dónde ir según lo que quiere hacer.
+  const navGroups: { label: string | null; items: { name: string; path: string; icon: ReactNode }[] }[] = [
+    { label: null, items: [
+      { name: 'Resumen', path: '/cliente/dashboard', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+      )},
+    ]},
+    { label: 'Publicidad', items: [
+      { name: 'Promociones', path: '/cliente/promociones', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
+      )},
+      { name: 'Canjes', path: '/cliente/candidatos', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      )},
+    ]},
+    { label: 'Plan y pagos', items: [
+      { name: 'Planes', path: '/cliente/planes', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
+      )},
+      { name: 'Pagos', path: '/cliente/pagos', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+      )},
+    ]},
+    { label: 'Mi negocio', items: [
+      { name: 'Mi cuenta', path: '/cliente/cuenta', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+      )},
+      { name: 'Equipo', path: '/cliente/equipo', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4 0m8-2a3 3 0 10-2.5-4.5M7 8.5A3 3 0 104.5 4" /></svg>
+      )},
+      { name: 'Notificaciones', path: '/cliente/notificaciones', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+      )},
+    ]},
+    { label: 'Ayuda', items: [
+      { name: 'Tutorial', path: '/cliente/tutorial', icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+      )},
+    ]},
   ];
 
-  // Nav según el rol en la tienda activa (la barrera real es RLS/RPC):
+  // Visibilidad según el rol en la tienda activa (la barrera real es RLS/RPC):
   //   · owner      → todo.
-  //   · seller     → solo Candidatos.
+  //   · seller     → solo Canjes.
   //   · advertiser → solo Promociones (publicidad: cupones + campañas).
   const role: StoreRole = selectedStore?.store_role ?? 'owner';
-  const visibleItems =
-    role === 'owner'
-      ? menuItems
-      : role === 'seller'
-      ? menuItems.filter((i) => i.path === '/cliente/candidatos')
-      : menuItems.filter((i) => i.path === '/cliente/promociones');
+  const allowedPaths =
+    role === 'owner' ? null
+    : role === 'seller' ? ['/cliente/candidatos']
+    : ['/cliente/promociones'];
+  const visibleGroups = navGroups
+    .map((g) => ({ ...g, items: allowedPaths ? g.items.filter((i) => allowedPaths.includes(i.path)) : g.items }))
+    .filter((g) => g.items.length > 0);
 
   const initials = (profile?.full_name || profile?.email || '?')
     .split(/\s+/).filter(Boolean).slice(0, 2)
@@ -358,40 +371,49 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
             )}
           </div>
 
-          {/* nav */}
-          <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-            {visibleItems.map((item) => {
-              const isActive = pathname === item.path;
-              const badgeCount = item.path === '/cliente/notificaciones' ? unreadNotifications : 0;
-              const showBadge = badgeCount > 0;
-              return (
-                <Link key={item.path} href={item.path} className="block">
-                  <span
-                    className={`group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
-                      isActive
-                        ? 'bg-surface-2 text-fg shadow-[var(--shadow-card)]'
-                        : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
-                    }`}
-                  >
-                    {isActive && (
-                      <span className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-r-full brand-cliente" />
-                    )}
-                    <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-cliente' : ''}`}>
-                      {item.icon}
-                      {showBadge && (
-                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-2 ring-surface animate-pulse" />
-                      )}
-                    </span>
-                    <span className="flex-1">{item.name}</span>
-                    {showBadge && (
-                      <span className="ml-auto inline-flex min-w-[20px] items-center justify-center rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                        {badgeCount > 99 ? '99+' : badgeCount}
+          {/* nav agrupado por objetivo */}
+          <nav className="flex-1 space-y-4 overflow-y-auto p-3">
+            {visibleGroups.map((group, gi) => (
+              <div key={group.label ?? `g${gi}`} className="space-y-1">
+                {group.label && (
+                  <p className="px-3.5 pb-1 pt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-fg-faint">
+                    {group.label}
+                  </p>
+                )}
+                {group.items.map((item) => {
+                  const isActive = pathname === item.path;
+                  const badgeCount = item.path === '/cliente/notificaciones' ? unreadNotifications : 0;
+                  const showBadge = badgeCount > 0;
+                  return (
+                    <Link key={item.path} href={item.path} className="block">
+                      <span
+                        className={`group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
+                          isActive
+                            ? 'bg-surface-2 text-fg shadow-[var(--shadow-card)]'
+                            : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+                        }`}
+                      >
+                        {isActive && (
+                          <span className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-r-full brand-cliente" />
+                        )}
+                        <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-cliente' : ''}`}>
+                          {item.icon}
+                          {showBadge && (
+                            <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-2 ring-surface animate-pulse" />
+                          )}
+                        </span>
+                        <span className="flex-1">{item.name}</span>
+                        {showBadge && (
+                          <span className="ml-auto inline-flex min-w-[20px] items-center justify-center rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                            {badgeCount > 99 ? '99+' : badgeCount}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                </Link>
-              );
-            })}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
 
           {/* footer: tema + logout */}
