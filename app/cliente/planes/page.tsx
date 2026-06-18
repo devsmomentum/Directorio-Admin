@@ -27,6 +27,10 @@ const isFlashPlan = (key: string) =>
 
 export default function ClientePlanesPage() {
   const { selectedStore: store } = useClienteStore();
+  // Marca aliada: ya tiene campañas + cupones flash sin costo, así que NO solicita
+  // planes de pago. Los planes salen deshabilitados. (Barrera de UI; el admin
+  // gestiona el estatus en /panel/aliados.)
+  const isAlly = !!store?.is_ally;
   const [plans, setPlans] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [storeCounts, setStoreCounts] = useState<Record<string, number>>({});
@@ -227,6 +231,7 @@ export default function ClientePlanesPage() {
   };
 
   const openWidget = (plan: any) => {
+    if (isAlly) return; // los aliados no solicitan planes de pago
     setWidgetPlan(plan);
     setMonths(1);
     setPayment(emptyPaymentState());
@@ -245,6 +250,7 @@ export default function ClientePlanesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!store || !widgetPlan) return;
+    if (isAlly) { setWidgetErr('Tu tienda es marca aliada: no necesita solicitar planes de pago.'); return; }
     setWidgetErr(null);
 
     const built = buildPaymentPayload(payment, totalUsd);
@@ -349,7 +355,21 @@ export default function ClientePlanesPage() {
         </p>
       </div>
 
-      {(store.plan_type || store.flash_coupon_plan) && (
+      {isAlly && (
+        <div className="bg-emerald-500/5 border border-emerald-500/25 rounded-xl p-4 flex items-start gap-2.5">
+          <span className="text-lg leading-none">🤝</span>
+          <div>
+            <p className="text-emerald-300 text-sm font-semibold">Tu tienda es marca aliada</p>
+            <p className="text-white/60 text-xs mt-0.5 leading-relaxed">
+              Ya tienes campañas y cupones flash incluidos sin costo, así que <strong className="text-white/80">no
+              necesitas solicitar ningún plan</strong>. Los planes de pago aparecen deshabilitados.
+              Gestiona tu publicidad desde <a href="/cliente/promociones" className="text-emerald-300 underline hover:text-emerald-200">Promociones</a>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!isAlly && (store.plan_type || store.flash_coupon_plan) && (
         <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 space-y-1">
           {store.plan_type && (
             <p className="text-emerald-300 text-sm font-semibold">
@@ -447,7 +467,7 @@ export default function ClientePlanesPage() {
           <p className="text-white/30 text-sm">No hay planes disponibles en este momento.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${isAlly ? 'opacity-50 pointer-events-none select-none' : ''}`}>
           {plans.map(p => {
             const colors = PLAN_COLORS[p.plan_key] || 'from-white/5 to-white/0 border-white/10 text-white/70';
             const flash = isFlashPlan(p.plan_key);
@@ -484,7 +504,7 @@ export default function ClientePlanesPage() {
 
             // El cliente ya tiene un slot en este plan, así que la disponibilidad
             // global no debe bloquear su renovación.
-            const disabled = pendingThisTrack || (!isCurrent && futureAvailFull) || noExpiry;
+            const disabled = isAlly || pendingThisTrack || (!isCurrent && futureAvailFull) || noExpiry;
             return (
               <div key={p.id} className={`bg-gradient-to-br ${colors} border rounded-2xl p-5 flex flex-col`}>
                 <div className="flex items-start justify-between mb-3">
@@ -642,7 +662,9 @@ export default function ClientePlanesPage() {
                   onClick={() => openWidget(p)}
                   disabled={disabled}
                   className={`w-full text-sm font-semibold rounded-lg px-4 py-2.5 transition-colors ${
-                    pendingThisTrack
+                    isAlly
+                      ? 'bg-white/5 text-white/40 cursor-not-allowed'
+                      : pendingThisTrack
                       ? 'bg-amber-500/10 text-amber-400 cursor-default'
                       : noExpiry
                       ? 'bg-white/5 text-white/40 cursor-not-allowed'
@@ -657,7 +679,9 @@ export default function ClientePlanesPage() {
                       : 'bg-white/10 text-white hover:bg-white/20'
                   } disabled:opacity-60`}
                 >
-                  {pendingThisTrack
+                  {isAlly
+                    ? 'No disponible · eres aliado'
+                    : pendingThisTrack
                     ? 'Solicitud pendiente'
                     : noExpiry
                     ? 'Sin fecha de venc.'
@@ -686,7 +710,7 @@ export default function ClientePlanesPage() {
                 )}
 
                 {/* ── Botón de lista de espera ─────────────────────────── */}
-                {futureAvailFull && !isCurrent && !pendingThisTrack && (
+                {!isAlly && futureAvailFull && !isCurrent && !pendingThisTrack && (
                   <button
                     onClick={() => openWaitlist(p)}
                     className="w-full mt-2 text-xs font-medium rounded-lg px-4 py-2 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/25 text-amber-300 transition-colors flex items-center justify-center gap-1.5"

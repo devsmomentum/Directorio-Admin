@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
 import { removePublicidadFile } from '../../../lib/storage';
@@ -23,15 +24,10 @@ function getExpiryUrgency(endDate: string | null): 'critical' | 'warning' | null
   return null;
 }
 
-// Planes elegibles para el loop publicitario de directorios (PDF "PLANES DIRECTORIOS")
-const PLAN_TYPES = ['DIAMANTE', 'ORO', 'PUBLI_PROMO_DIARIO', 'PUBLI_PROMO_SEMANAL'] as const;
-
-// Capacidad máxima de marcas activas por plan (hard cap)
-const PLAN_MAX_BRANDS: Record<string, number | null> = {
+// Fallback si la BD no responde; sobrescrito en fetchData con plans.max_brands.
+const PLAN_MAX_BRANDS_FALLBACK: Record<string, number | null> = {
   DIAMANTE: 2,
   ORO: 30,
-  PUBLI_PROMO_DIARIO: null,
-  PUBLI_PROMO_SEMANAL: null,
 };
 
 // Frecuencia objetivo del loop por plan (cada cuántos segundos aparece la marca)
@@ -46,8 +42,6 @@ const PLAN_FREQUENCY_SECONDS: Record<string, number> = {
 // La duración real de cada campaña vive en ad_campaigns.duration_seconds y el
 // loop se calcula sumando esas duraciones (no asumiendo 15s fijos).
 const CAMPAIGN_DURATION_SECONDS = 15;
-const LOOP_TARGET_SLOTS = 12;          // 12 slots ≈ 3 min con piezas de 15s
-const LOOP_EXTENDED_SLOTS = 22;        // Escenario ampliado: ≈ 5,5 min con piezas de 15s
 
 const PLAN_COLORS: Record<string, string> = {
   DIAMANTE: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
@@ -84,7 +78,7 @@ interface Campaign {
   stores?: { name: string; contract_expiry_date: string | null };
 }
 
-type Tab = 'campaigns' | 'kioscos';
+type Tab = 'campaigns' | 'kioscos' | 'loop';
 
 function CampaniasAdminInner() {
   const searchParams = useSearchParams();
@@ -93,7 +87,7 @@ function CampaniasAdminInner() {
   const [activeTab, setActiveTab] = useState<Tab>('campaigns');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
-  const [plans, setPlans] = useState<{ plan_key: string; video_seconds: number | null }[]>([]);
+  const [plans, setPlans] = useState<{ plan_key: string; video_seconds: number | null; max_brands: number | null; loop_eligible: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -101,6 +95,10 @@ function CampaniasAdminInner() {
   const [storeFilter, setStoreFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'paused' | 'expired'>('all');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Tamaño del loop en slots: suma de plans.max_brands donde loop_eligible = true.
+  // Configurable desde /panel/configuracion → Slots por plan.
+  const [loopMaxSlots, setLoopMaxSlots] = useState<number>(32);
 
   // Kill-switch state
   const [killSwitchCandidates, setKillSwitchCandidates] = useState<Campaign[]>([]);
@@ -144,8 +142,17 @@ function CampaniasAdminInner() {
     const [campRes, storesRes, plansRes] = await Promise.all([
       supabase.from('ad_campaigns').select('*, stores(name, contract_expiry_date)').order('created_at', { ascending: false }).limit(200),
       supabase.from('stores').select('id, name, contract_expiry_date, plan_type').order('name').limit(500),
-      supabase.from('plans').select('plan_key, video_seconds').limit(200)
+      supabase.from('plans').select('plan_key, video_seconds, max_brands, loop_eligible').limit(200),
     ]);
+    if (plansRes.data) {
+      const plansData = plansRes.data as { plan_key: string; video_seconds: number | null; max_brands: number | null; loop_eligible: boolean }[];
+      setPlans(plansData);
+      // Tamaño del loop = suma de max_brands de planes con loop_eligible = true.
+      const computed = plansData
+        .filter(p => p.loop_eligible && p.max_brands != null)
+        .reduce((s, p) => s + (p.max_brands ?? 0), 0);
+      if (computed > 0) setLoopMaxSlots(computed);
+    }
     if (campRes.data) {
       const data = campRes.data as Campaign[];
       setCampaigns(data);
@@ -160,7 +167,6 @@ function CampaniasAdminInner() {
       setKillSwitchCandidates(overdue);
     }
     if (storesRes.data) setStores(storesRes.data);
-    if (plansRes.data) setPlans(plansRes.data as { plan_key: string; video_seconds: number | null }[]);
     setLoading(false);
     setRefreshing(false);
   };
@@ -168,10 +174,10 @@ function CampaniasAdminInner() {
   // Estado actual del loop: marcas activas, vigentes y pagas que ocupan slots
   const loopStatus = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
-    const loopPlans = new Set<string>(['DIAMANTE', 'ORO', 'PUBLI_PROMO', 'PUBLI_PROMO_DIARIO', 'PUBLI_PROMO_SEMANAL']);
+    const loopEligibleKeys = new Set(plans.filter(p => p.loop_eligible).map(p => p.plan_key));
     const live = campaigns.filter(c =>
       c.is_active &&
-      loopPlans.has(c.plan_type) &&
+      loopEligibleKeys.has(c.plan_type) &&
       (!c.end_date || c.end_date >= today) &&
       (!c.stores?.contract_expiry_date || c.stores.contract_expiry_date >= today || c.admin_managed)
     );
@@ -185,14 +191,17 @@ function CampaniasAdminInner() {
       (sum, c) => sum + (c.duration_seconds || CAMPAIGN_DURATION_SECONDS),
       0
     );
+    // El cap es en slots: 1 campaña activa = 1 slot, sin importar duración del video.
+    const pct = loopMaxSlots > 0 ? slots / loopMaxSlots : 0;
     return {
       slots,
-      durationSeconds,
+      durationSeconds,   // informativo (suma de segundos de todas las campañas vivas)
       byPlan,
-      overTarget: slots > LOOP_TARGET_SLOTS,
-      overExtended: slots > LOOP_EXTENDED_SLOTS,
+      pct,
+      overTarget: pct >= 0.75,
+      overExtended: pct >= 1,
     };
-  }, [campaigns]);
+  }, [campaigns, loopMaxSlots, plans]);
 
   const resetForm = () => {
     setEditingId(null);
@@ -590,12 +599,22 @@ function CampaniasAdminInner() {
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
           Asignación por Kiosco
         </button>
+        <button
+          onClick={() => setActiveTab('loop')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'loop' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/25' : 'text-white/40 hover:text-white/70'}`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          Loop Activo
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${loopStatus.overExtended ? 'bg-red-500/20 text-red-400' : loopStatus.overTarget ? 'bg-amber-500/20 text-amber-400' : 'bg-white/10'}`}>
+            {loopStatus.slots}/{loopMaxSlots}
+          </span>
+        </button>
       </div>
 
       {activeTab === 'campaigns' && (
         <>
           {/* ── Estado del loop publicitario ── */}
-          <div className={`rounded-xl border p-4 ${
+          <div className={`rounded-xl border p-4 space-y-3 ${
             loopStatus.overExtended
               ? 'bg-red-950/30 border-red-500/30'
               : loopStatus.overTarget
@@ -605,48 +624,66 @@ function CampaniasAdminInner() {
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-4 flex-wrap">
                 <div>
-                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-0.5">Loop actual</p>
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-0.5">Slots ocupados</p>
                   <p className="text-white font-mono text-xl">
-                    {loopStatus.slots}<span className="text-white/30 text-sm">/{LOOP_TARGET_SLOTS}</span>
+                    {loopStatus.slots}
+                    <span className="text-white/30 text-sm">/{loopMaxSlots}</span>
                     <span className="text-white/30 text-xs ml-2">slots</span>
                   </p>
                 </div>
                 <div className="h-10 w-px bg-white/10" />
                 <div>
-                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-0.5">Duración</p>
-                  <p className="text-white font-mono text-xl">
+                  <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium mb-0.5">Duración estimada</p>
+                  <p className="text-white/60 font-mono text-base">
                     {Math.floor(loopStatus.durationSeconds / 60)}:{String(loopStatus.durationSeconds % 60).padStart(2, '0')}
-                    <span className="text-white/30 text-xs ml-2">min</span>
+                    <span className="text-white/30 text-xs ml-1">min</span>
                   </p>
+                  <p className="text-white/25 text-[10px] font-mono">{loopStatus.durationSeconds}s · {loopStatus.slots > 0 ? Math.round(loopStatus.durationSeconds / loopStatus.slots) : 0}s/slot prom.</p>
                 </div>
                 <div className="h-10 w-px bg-white/10" />
                 <div className="flex items-center gap-2 flex-wrap">
-                  {PLAN_TYPES.map(p => {
-                    const cap = PLAN_MAX_BRANDS[p];
-                    const used = (p === 'PUBLI_PROMO_DIARIO' || p === 'PUBLI_PROMO_SEMANAL')
-                      ? (loopStatus.byPlan[p] || 0) + (loopStatus.byPlan['PUBLI_PROMO'] || 0)
-                      : (loopStatus.byPlan[p] || 0);
+                  {plans.filter(p => p.loop_eligible).map(p => {
+                    const cap = p.max_brands ?? PLAN_MAX_BRANDS_FALLBACK[p.plan_key] ?? null;
+                    const used = loopStatus.byPlan[p.plan_key] || 0;
                     const saturated = cap != null && used >= cap;
                     return (
-                      <span key={p} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border ${
+                      <span key={p.plan_key} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium border ${
                         saturated
                           ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                          : `${PLAN_COLORS[p]}`
+                          : `${PLAN_COLORS[p.plan_key] || 'text-white/40 bg-white/5 border-white/10'}`
                       }`}>
-                        {PLAN_LABELS[p]} <span className="font-mono">{used}{cap != null ? `/${cap}` : ''}</span>
+                        {PLAN_LABELS[p.plan_key] || p.plan_key} <span className="font-mono">{used}{cap != null ? `/${cap}` : ''}</span>
                       </span>
                     );
                   })}
                 </div>
               </div>
-              <p className="text-[11px] text-white/40 max-w-xs">
-                {loopStatus.overExtended
-                  ? `Excediste el escenario ampliado de ${LOOP_EXTENDED_SLOTS} slots. La frecuencia bajará por debajo del estándar.`
-                  : loopStatus.overTarget
-                  ? `Pasaste el loop base de 3 min. Estás en escenario ampliado (cap. ${LOOP_EXTENDED_SLOTS}).`
-                  : `El loop suma la duración de cada campaña. Loop base ≈ 3 min con 12 slots de ${CAMPAIGN_DURATION_SECONDS}s.`}
-              </p>
+              <div className="text-[11px] text-white/40 max-w-xs space-y-1">
+                <p>
+                  {loopStatus.overExtended
+                    ? 'El loop supera su duración máxima. Los aliados no pueden activar nuevas campañas.'
+                    : loopStatus.overTarget
+                    ? 'El loop está al 75 % o más. Considera pausar campañas o ampliar el máximo.'
+                    : 'La duración máxima determina si los aliados pueden activar campañas.'}
+                </p>
+                <Link href="/panel/configuracion" className="inline-flex items-center gap-1 text-orange-400/70 hover:text-orange-400 transition-colors">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  Cambiar máximo en Configuración
+                </Link>
+              </div>
             </div>
+            {/* Barra de progreso */}
+            <div className="relative h-2 bg-white/5 rounded-full overflow-hidden">
+              <div
+                className={`absolute left-0 top-0 h-full rounded-full transition-all ${
+                  loopStatus.overExtended ? 'bg-red-500' : loopStatus.overTarget ? 'bg-amber-500' : 'bg-orange-500'
+                }`}
+                style={{ width: `${Math.min(loopStatus.pct * 100, 100)}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-white/30 text-right font-mono">
+              {loopStatus.slots} / {loopMaxSlots} slots · {Math.round(loopStatus.pct * 100)}%
+            </p>
           </div>
 
           {/* ── Kill-Switch Alert ── */}
@@ -853,6 +890,142 @@ function CampaniasAdminInner() {
 
       {/* Tab: Kiosco assignment */}
       {activeTab === 'kioscos' && <KioskAssignment />}
+
+      {/* Tab: Loop Activo */}
+      {activeTab === 'loop' && (() => {
+        const today = new Date().toISOString().split('T')[0];
+        const loopEligibleKeys = new Set(plans.filter(p => p.loop_eligible).map(p => p.plan_key));
+        const live = campaigns.filter(c =>
+          c.is_active &&
+          loopEligibleKeys.has(c.plan_type) &&
+          (!c.end_date || c.end_date >= today) &&
+          (!c.stores?.contract_expiry_date || c.stores.contract_expiry_date >= today || c.admin_managed)
+        ).sort((a, b) => (a.priority_level || 99) - (b.priority_level || 99));
+
+        const totalDuration = live.reduce((s, c) => s + (c.duration_seconds || CAMPAIGN_DURATION_SECONDS), 0);
+        const slotsUsed = live.length;
+        const freeSlots = Math.max(0, loopMaxSlots - slotsUsed);
+
+        return (
+          <div className="space-y-5">
+            {/* Timeline */}
+            <div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-white/40 uppercase tracking-widest font-medium">Slots del loop</p>
+                <span className="text-[10px] text-white/40 font-mono">{slotsUsed}/{loopMaxSlots} slots · {totalDuration}s totales</span>
+              </div>
+              {live.length === 0 ? (
+                <p className="text-white/30 text-sm text-center py-4">No hay campañas activas en el loop</p>
+              ) : (
+                <div className="flex h-8 rounded-lg overflow-hidden gap-px">
+                  {live.map(c => {
+                    const widthPct = loopMaxSlots > 0 ? (1 / loopMaxSlots) * 100 : 0;
+                    const color = PLAN_COLORS[c.plan_type]?.split(' ')[0]?.replace('text-', 'bg-') || 'bg-white/20';
+                    return (
+                      <div
+                        key={c.id}
+                        className={`relative group ${color} opacity-70 hover:opacity-100 transition-opacity flex items-center justify-center min-w-[4px]`}
+                        style={{ width: `${widthPct}%` }}
+                        title={`${c.brand_name} · ${c.duration_seconds || CAMPAIGN_DURATION_SECONDS}s`}
+                      >
+                        {widthPct > 6 && (
+                          <span className="text-[9px] text-white font-medium truncate px-1">{c.brand_name}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {freeSlots > 0 && Array.from({ length: freeSlots }).map((_, i) => (
+                    <div
+                      key={`free-${i}`}
+                      className="bg-white/5 border border-dashed border-white/10 flex items-center justify-center"
+                      style={{ width: `${(1 / loopMaxSlots) * 100}%` }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Lista de campañas en el loop */}
+            {live.length === 0 ? (
+              <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center">
+                <p className="text-white/30 text-sm">El loop está vacío</p>
+                <p className="text-white/15 text-xs mt-1">Activa campañas desde la pestaña "Campañas"</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {live.map((c, idx) => {
+                  const dur = c.duration_seconds || CAMPAIGN_DURATION_SECONDS;
+                  const widthPct = loopMaxSlots > 0 ? (1 / loopMaxSlots) * 100 : 0;
+                  const isVideo = c.media_type === 'video';
+                  return (
+                    <div key={c.id} className="bg-[#111] border border-white/8 rounded-xl p-4 flex items-center gap-4">
+                      {/* Posición */}
+                      <span className="text-white/20 font-mono text-xs w-5 shrink-0 text-right">{idx + 1}</span>
+                      {/* Thumbnail */}
+                      <div className="w-16 h-10 bg-black rounded-md overflow-hidden shrink-0 border border-white/5">
+                        {isVideo
+                          ? <video src={c.media_url} className="w-full h-full object-cover" muted playsInline />
+                          : <img src={c.media_url} className="w-full h-full object-cover" alt={c.brand_name} />
+                        }
+                      </div>
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-white text-sm font-medium truncate">{c.brand_name}</p>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${PLAN_COLORS[c.plan_type] || 'text-white/40 border-white/15'}`}>
+                            {PLAN_LABELS[c.plan_type] || c.plan_type}
+                          </span>
+                          {c.admin_managed && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Admin</span>
+                          )}
+                        </div>
+                        {c.stores?.name && <p className="text-white/40 text-xs mt-0.5">{c.stores.name}</p>}
+                        {/* Mini barra de duración */}
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex-1 max-w-32 h-1 bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-full bg-orange-500/60 rounded-full" style={{ width: `${widthPct}%` }} />
+                          </div>
+                          <span className="text-white/40 text-[10px] font-mono">{dur}s</span>
+                        </div>
+                      </div>
+                      {/* Fechas */}
+                      <div className="shrink-0 text-right hidden sm:block">
+                        <p className="text-white/30 text-[10px]">{new Date(c.start_date).toLocaleDateString()}</p>
+                        {c.end_date && <p className="text-white/30 text-[10px]">→ {new Date(c.end_date).toLocaleDateString()}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Resumen de capacidad */}
+            <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 grid grid-cols-4 gap-4 text-center">
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-wider">Slots ocupados</p>
+                <p className="text-white font-mono text-lg mt-0.5">{slotsUsed}<span className="text-white/30 text-sm">/{loopMaxSlots}</span></p>
+              </div>
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-wider">Slots libres</p>
+                <p className={`font-mono text-lg mt-0.5 ${freeSlots <= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {freeSlots}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-wider">Duración total</p>
+                <p className="text-white/60 font-mono text-base mt-0.5">{totalDuration}s</p>
+                <p className="text-white/25 text-[10px] font-mono">{Math.floor(totalDuration/60)}m {totalDuration%60}s</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-white/30 uppercase tracking-wider">Prom. por slot</p>
+                <p className="text-white/60 font-mono text-base mt-0.5">
+                  {slotsUsed > 0 ? Math.round(totalDuration / slotsUsed) : 0}s
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Form Modal */}
       {showForm && (

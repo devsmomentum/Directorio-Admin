@@ -7,6 +7,7 @@ import { removePublicidadFile } from '../../../lib/storage';
 import { validateKioskVideo } from '../../../lib/videoValidation';
 import { useClienteStore } from '../store-context';
 import K2BannerPreview from '../../components/K2BannerPreview';
+import K2CampaignPreview from '../../components/K2CampaignPreview';
 
 const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
@@ -122,6 +123,10 @@ export default function ClientePromocionesPage() {
 
   const [submitting, setSubmitting] = useState(false);
 
+  // Capacidad del loop en slots = suma de plans.max_brands donde loop_eligible = true.
+  const [loopMaxSlots, setLoopMaxSlots] = useState<number>(32);
+  const [loopSlotsUsed, setLoopSlotsUsed] = useState<number>(0);
+
   // Modal de conflicto: una empresa solo puede tener UNA campaña activa a la vez.
   const [conflict, setConflict] = useState<{ active: any; step: 'choose' | 'queue-dates' } | null>(null);
   const [qStartDate, setQStartDate] = useState('');
@@ -170,7 +175,7 @@ export default function ClientePromocionesPage() {
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
     setLoading(true);
-    const [mineCoupons, gallery, mineCampaigns, mineBanners, flashPlan, storeLeads] = await Promise.all([
+    const [mineCoupons, gallery, mineCampaigns, mineBanners, flashPlan, storeLeads, loopPlans, loopUsage] = await Promise.all([
       supabase.from('coupons').select('*')
         .eq('store_id', store.id)
         .order('created_at', { ascending: false })
@@ -191,7 +196,14 @@ export default function ClientePromocionesPage() {
         ? supabase.from('plans').select('coupon_stock_cap').eq('plan_key', store.flash_coupon_plan).maybeSingle()
         : Promise.resolve({ data: null }),
       supabase.from('coupon_leads').select('coupon_id, status').eq('store_id', store.id),
+      supabase.from('plans').select('max_brands').eq('loop_eligible', true).not('max_brands', 'is', null),
+      supabase.from('ad_campaigns').select('id', { count: 'exact', head: true }).eq('is_active', true),
     ]);
+    if (loopPlans.data) {
+      const total = (loopPlans.data as { max_brands: number }[]).reduce((s, p) => s + (p.max_brands ?? 0), 0);
+      if (total > 0) setLoopMaxSlots(total);
+    }
+    if (loopUsage.count !== null) setLoopSlotsUsed(loopUsage.count);
     const camps = mineCampaigns.data || [];
     const leadsRaw = storeLeads.data || [];
     // Mapa coupon_id → total de leads (para sumar al stock disponible en el cap)
@@ -513,6 +525,17 @@ export default function ClientePromocionesPage() {
       return;
     }
 
+    // Aliados: bloquear si el loop está lleno (todos los slots ocupados).
+    if (isAlly && !aEditingId) {
+      if (loopSlotsUsed >= loopMaxSlots) {
+        setFeedback({
+          type: 'err',
+          msg: `El loop publicitario está lleno (${loopSlotsUsed}/${loopMaxSlots} slots ocupados). Tu campaña quedará pendiente hasta que el administrador libere un slot.`,
+        });
+        return;
+      }
+    }
+
     // Tope de campañas activas: 1 para tiendas normales, ally_campaign_limit
     // para aliados. Si ya se alcanzó el tope, abrimos el modal de elección.
     if (!aEditingId) {
@@ -573,7 +596,18 @@ export default function ClientePromocionesPage() {
           .select('id, is_active, approval_status')
           .single();
         if (error) throw error;
-        if (updated && updated.is_active !== aIsActive) {
+        // El trigger decide el destino al editar una campaña:
+        //  • Si cambió el CONTENIDO importante (media o texto), la manda de
+        //    vuelta a 'pending' y la desactiva (is_active=false) hasta que el
+        //    admin la apruebe. Eso NO es un fallo de activación: es el flujo de
+        //    re-revisión. Editar una campaña activa NO debe obligar a pausarla
+        //    primero — simplemente queda en revisión.
+        //  • Si solo se tocó is_active/audio/fechas, sigue 'approved'.
+        const wentToReview = updated?.approval_status === 'pending';
+        // Solo es un error real cuando la campaña NO fue a revisión y aun así
+        // el guard revirtió is_active: p.ej. reactivar una pausada chocando con
+        // el tope de activas o con el plan vencido.
+        if (!wentToReview && updated && updated.is_active !== aIsActive) {
           throw new Error(
             aIsActive
               ? (planActive || isAlly
@@ -585,10 +619,6 @@ export default function ClientePromocionesPage() {
         if (aMediaFile && previousMediaUrl && previousMediaUrl !== finalMediaUrl) {
           await removePublicidadFile(previousMediaUrl);
         }
-        // El trigger decide: si cambió contenido, vuelve a 'pending'; si solo
-        // se tocó is_active/audio, sigue 'approved'. Mensajeamos según el
-        // resultado REAL para no decir "en revisión" cuando no es cierto.
-        const wentToReview = updated?.approval_status === 'pending';
         setFeedback({
           type: 'ok',
           msg: wentToReview
@@ -1010,17 +1040,81 @@ export default function ClientePromocionesPage() {
         </div>
       )}
 
-      {isAlly && (
-        <div className="bg-emerald-500/[0.06] border border-emerald-500/25 rounded-xl p-4">
-          <p className="text-emerald-200 text-sm font-semibold">
-            🤝 Marca Aliada · campañas{allyFlash ? ' + cupones flash' : ''} sin costo
-          </p>
-          <p className="text-white/50 text-xs mt-0.5">
-            Puedes tener hasta <strong className="text-emerald-200">{allyCampaignLimit}</strong> campaña(s)
-            activa(s) a la vez. Acceso de aliado, sin vencimiento.
-          </p>
-        </div>
-      )}
+      {isAlly && (() => {
+        const loopFull = loopSlotsUsed >= loopMaxSlots;
+        const loopPct = loopMaxSlots > 0 ? Math.min(loopSlotsUsed / loopMaxSlots, 1) : 0;
+        const loopNearFull = !loopFull && loopPct >= 0.8;
+        const freeSlots = Math.max(0, loopMaxSlots - loopSlotsUsed);
+        const activeCampaigns = campaigns.filter(c => c.is_active && (!c.end_date || c.end_date >= today));
+        const spotsLeft = Math.max(0, allyCampaignLimit - activeCampaigns.length);
+
+        return (
+          <div className={`border rounded-xl p-5 space-y-4 ${
+            loopFull
+              ? 'bg-red-500/[0.06] border-red-500/25'
+              : 'bg-emerald-500/[0.04] border-emerald-500/20'
+          }`}>
+            {/* Título + badge */}
+            <div className="flex items-center gap-2">
+              <span className="text-base">🤝</span>
+              <div>
+                <p className="text-white text-sm font-semibold">Marca Aliada</p>
+                <p className="text-white/40 text-xs">Campañas{allyFlash ? ' y cupones flash' : ''} sin costo · acceso permanente</p>
+              </div>
+            </div>
+
+            {/* Dos métricas clave */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Slots de campaña */}
+              <div className="bg-white/[0.03] border border-white/8 rounded-lg p-3">
+                <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Mis campañas activas</p>
+                <p className="text-white text-lg font-bold font-mono">
+                  {activeCampaigns.length}
+                  <span className="text-white/30 text-sm font-normal"> / {allyCampaignLimit}</span>
+                </p>
+                <p className={`text-[11px] mt-0.5 ${spotsLeft === 0 ? 'text-amber-400' : 'text-white/40'}`}>
+                  {spotsLeft === 0
+                    ? 'Alcanzaste tu límite de campañas activas'
+                    : spotsLeft === 1
+                    ? 'Puedes activar 1 campaña más'
+                    : `Puedes activar ${spotsLeft} campañas más`}
+                </p>
+              </div>
+
+              {/* Espacio en el loop */}
+              <div className={`border rounded-lg p-3 ${loopFull ? 'bg-red-500/8 border-red-500/20' : 'bg-white/[0.03] border-white/8'}`}>
+                <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Loop publicitario</p>
+                <p className={`text-lg font-bold font-mono ${loopFull ? 'text-red-300' : loopNearFull ? 'text-amber-300' : 'text-emerald-300'}`}>
+                  {loopFull ? 'Lleno' : loopNearFull ? 'Casi lleno' : `${freeSlots} libre${freeSlots !== 1 ? 's' : ''}`}
+                </p>
+                <p className="text-[11px] text-white/40 mt-0.5 font-mono">
+                  {loopSlotsUsed}/{loopMaxSlots} slots
+                </p>
+              </div>
+            </div>
+
+            {/* Barra de progreso del loop */}
+            <div className="space-y-1.5">
+              <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${loopFull ? 'bg-red-500' : loopNearFull ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${loopPct * 100}%` }}
+                />
+              </div>
+              {loopFull && (
+                <p className="text-red-300/80 text-xs leading-relaxed">
+                  El loop publicitario está lleno. Puedes enviar tu campaña y quedará en revisión; se activará cuando el administrador libere espacio.
+                </p>
+              )}
+              {loopNearFull && !loopFull && (
+                <p className="text-amber-300/70 text-xs">
+                  El loop está casi lleno. Tu campaña puede activarse mientras haya espacio.
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {(flashActive || allyFlash) && (
         <div className="bg-pink-500/[0.06] border border-pink-500/25 rounded-xl p-4">
@@ -1310,58 +1404,15 @@ export default function ClientePromocionesPage() {
 
                 {aMediaUrl && (
                   <div className="mt-3 flex items-start gap-3">
-                    {/* Mock del kiosco 9:16 a escala (réplica de home_screen.dart) */}
-                    <div className="shrink-0 relative w-[200px] aspect-[9/16] rounded-xl overflow-hidden bg-black border border-white/15 shadow-lg">
-                      {/* 1. Media a pantalla completa con cover */}
-                      {aMediaType === 'video' ? (
-                        <video
-                          key={aMediaUrl}
-                          src={aMediaUrl}
-                          className="absolute inset-0 w-full h-full object-cover bg-black"
-                          autoPlay
-                          muted
-                          loop
-                          playsInline
-                          controls
-                          preload="metadata"
-                        />
-                      ) : (
-                        <img src={aMediaUrl} alt="preview" className="absolute inset-0 w-full h-full object-cover" />
-                      )}
-
-                      {/* 2. Gradiente vertical (igual al de home_screen: top transparente → bottom oscuro) */}
-                      <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-transparent via-black/30 to-black/85" />
-
-                      {/* 3. Logo Millennium (top-right, ~5% de alto) */}
-                      <div className="absolute top-1.5 right-2 px-1.5 py-0.5 bg-black/45 border border-white/20 rounded text-[7px] font-black tracking-widest text-white/80">
-                        MM
-                      </div>
-
-                      {/* 4. Bloque inferior: badge + marca + descripción + wifi + CTA + footer */}
-                      <div className="absolute left-0 right-0 bottom-2 px-2.5 flex flex-col items-start gap-1">
-                        <span className="text-[7px] font-bold tracking-widest text-white bg-white/10 border border-white/20 rounded-full px-1.5 py-[1px]">
-                          📍 SLOT
-                        </span>
-                        <p className="text-[11px] font-black text-white leading-tight truncate max-w-full">
-                          {aBrandName.trim() || 'Tu marca'}
-                        </p>
-                        <p className="text-[8px] text-white/75 leading-tight line-clamp-2 max-w-full">
-                          {aDescription.trim() || 'Toca para explorar el mall'}
-                        </p>
-                        <div className="mt-0.5 flex items-center gap-1">
-                          <span className="text-[6px] font-mono text-white/60 bg-white/10 border border-white/15 rounded px-1 py-[1px]">📶 WIFI</span>
-                          <span className="text-[6px] font-mono text-white/60 bg-white/10 border border-white/15 rounded px-1 py-[1px]">QR</span>
-                        </div>
-                        <button type="button" disabled
-                          className="mt-1 w-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-[8px] font-black tracking-widest rounded-md py-1 shadow">
-                          COMENZAR ▸
-                        </button>
-                        <span className="text-[6px] text-white/40 tracking-wider mt-0.5">Millennium Mall · Anavi</span>
-                      </div>
-
-                      {/* 5. Marca de aspecto */}
-                      <span className="absolute top-1.5 left-1.5 text-[8px] font-mono bg-black/65 text-white/75 px-1.5 py-0.5 rounded">9:16</span>
-                    </div>
+                    {/* Mock del kiosco 9:16 a escala (réplica de home_screen.dart).
+                        Mismo componente que usa el admin al revisar la solicitud. */}
+                    <K2CampaignPreview
+                      src={aMediaUrl}
+                      type={aMediaType === 'video' ? 'video' : 'image'}
+                      brandName={aBrandName}
+                      description={aDescription}
+                      width={200}
+                    />
 
                     <div className="flex-1 space-y-1.5 text-[11px] text-white/50 leading-snug">
                       <p>

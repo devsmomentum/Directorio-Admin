@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
 import K2BannerPreview from '../../components/K2BannerPreview';
+import K2CampaignPreview from '../../components/K2CampaignPreview';
 
 const PLAN_LABELS: Record<string, string> = {
   DIAMANTE: 'Diamante',
@@ -800,10 +801,14 @@ function CampaignDetailModal({
   return (
     <ModalShell title="Campaña en revisión" subtitle={row.brand_name} idHint={row.id} busy={busy} onClose={onClose}>
       <div className="px-6 py-5 space-y-4 text-sm">
-        <div className="relative w-full aspect-[9/16] max-h-[50vh] mx-auto bg-black border border-white/10 rounded-xl overflow-hidden flex items-center justify-center">
-          {isVideo
-            ? <video src={row.media_url} className="max-w-full max-h-full" controls autoPlay loop muted playsInline />
-            : <img src={row.media_url} className="max-w-full max-h-full object-contain" alt={row.brand_name} />}
+        <div className="flex justify-center">
+          <K2CampaignPreview
+            src={row.media_url}
+            type={isVideo ? 'video' : 'image'}
+            brandName={row.brand_name}
+            description={row.description}
+            width={220}
+          />
         </div>
 
         <DetailRow label="Estado">

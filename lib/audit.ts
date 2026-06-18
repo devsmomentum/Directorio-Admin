@@ -25,7 +25,8 @@ export type AuditEntityType =
   | 'servicio'
   | 'gasto_operativo'
   | 'pago'
-  | 'solicitud';
+  | 'solicitud'
+  | 'configuracion';
 
 export interface AuditActionPayload {
   action_type: AuditActionType;

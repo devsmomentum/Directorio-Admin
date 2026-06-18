@@ -7,7 +7,7 @@ import { logAdminAction } from '../../../lib/audit';
 // Marcas aliadas: tiendas que publican campañas + cupones flash SIN pagar plan,
 // con un tope de campañas activas que fija el admin. Además pueden recibir un
 // % de los ingresos globales que se refleja en Finanzas (cascada de reparto).
-// El estatus es permanente hasta que el admin lo revoque (no usa contract_expiry_date).
+// El tope efectivo por aliado = min(ally_campaign_limit, slots_libres_del_loop).
 
 type RevenueBase = 'gross' | 'net';
 
@@ -19,16 +19,11 @@ type Store = {
   ally_campaign_limit: number;
   ally_flash_enabled: boolean;
   ally_revenue_pct: number;
-  // 'gross' = % sobre el bruto del ingreso (como lo hacía Anavi);
-  // 'net'   = % sobre lo demás (lo que queda tras los % sobre bruto y los gastos).
   ally_revenue_base: RevenueBase;
   ally_since: string | null;
 };
 
-// Tramo de vigencia de un % (historial). Intervalo semiabierto [from, to).
 type Share = { id: string; store_id: string; pct: number; base: RevenueBase; effective_from: string; effective_to: string | null };
-
-// `from` = fecha desde la que rige el % editado (default hoy).
 type Draft = { limit: string; flash: boolean; pct: string; base: RevenueBase; from: string };
 
 const todayStr = () => new Date().toISOString().split('T')[0];
@@ -42,13 +37,17 @@ export default function AliadosPage() {
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [search, setSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-
-  // Borradores editables por tienda aliada (commit explícito con "Guardar").
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+
+  // Loop capacity: tamaño = suma de plans.max_brands donde loop_eligible = true.
+  const [loopMaxSlots, setLoopMaxSlots] = useState<number>(32);
+  // Campañas activas por tienda (store_id → count).
+  const [activeByStore, setActiveByStore] = useState<Record<string, number>>({});
 
   const fetchData = async () => {
     setLoading(true);
-    const [{ data, error }, { data: shareData }] = await Promise.all([
+    const today = todayStr();
+    const [{ data, error }, { data: shareData }, { data: plansData }, { data: campsData }] = await Promise.all([
       supabase
         .from('stores')
         .select('id, name, plan_type, is_ally, ally_campaign_limit, ally_flash_enabled, ally_revenue_pct, ally_revenue_base, ally_since')
@@ -57,18 +56,43 @@ export default function AliadosPage() {
         .from('ally_revenue_shares')
         .select('id, store_id, pct, base, effective_from, effective_to')
         .order('effective_from', { ascending: false }),
+      supabase
+        .from('plans')
+        .select('max_brands')
+        .eq('loop_eligible', true)
+        .not('max_brands', 'is', null),
+      supabase
+        .from('ad_campaigns')
+        .select('store_id')
+        .eq('is_active', true)
+        .or(`end_date.is.null,end_date.gte.${today}`),
     ]);
+
     if (error) setFeedback({ type: 'err', msg: error.message });
     setStores((data as Store[]) || []);
+
     const byStore: Record<string, Share[]> = {};
     for (const sh of (shareData as Share[]) || []) {
       (byStore[sh.store_id] ??= []).push(sh);
     }
     setShares(byStore);
+
+    if (plansData) {
+      const total = (plansData as { max_brands: number }[]).reduce((s, p) => s + (p.max_brands ?? 0), 0);
+      if (total > 0) setLoopMaxSlots(total);
+    }
+
+    if (campsData) {
+      const counts: Record<string, number> = {};
+      for (const c of campsData as { store_id: string }[]) {
+        counts[c.store_id] = (counts[c.store_id] || 0) + 1;
+      }
+      setActiveByStore(counts);
+    }
+
     setLoading(false);
   };
 
-  // Tramo vigente (abierto) de un aliado, si existe.
   const openShareOf = (storeId: string) => (shares[storeId] || []).find(x => x.effective_to === null) || null;
 
   useEffect(() => { fetchData(); }, []);
@@ -79,15 +103,19 @@ export default function AliadosPage() {
     [stores, search],
   );
 
-  // Inicializa el borrador de un aliado a partir del valor guardado.
+  // Slots usados por campañas activas de TODOS (pagos + aliados).
+  const totalSlotsUsed = useMemo(
+    () => Object.values(activeByStore).reduce((s, v) => s + v, 0),
+    [activeByStore],
+  );
+  const freeSlots = Math.max(0, loopMaxSlots - totalSlotsUsed);
+
   const draftFor = (s: Store): Draft => {
     if (drafts[s.id]) return drafts[s.id];
     const open = openShareOf(s.id);
     return {
       limit: String(s.ally_campaign_limit ?? 1),
       flash: !!s.ally_flash_enabled,
-      // El % / base actuales salen del tramo vigente (fuente de verdad); si no hay
-      // tramo abierto, caemos al cache en stores.
       pct: String(open?.pct ?? s.ally_revenue_pct ?? 0),
       base: open?.base ?? s.ally_revenue_base ?? 'net',
       from: todayStr(),
@@ -100,7 +128,6 @@ export default function AliadosPage() {
     setDrafts(prev => ({ ...prev, [id]: { ...base, ...prev[id], ...patch } }));
   };
 
-  // Totales por base, usando el borrador en curso si existe.
   const pctSums = useMemo(() => {
     let gross = 0, net = 0;
     for (const s of allies) {
@@ -137,7 +164,6 @@ export default function AliadosPage() {
       .update({ is_ally: false, ally_revenue_pct: 0 })
       .eq('id', s.id);
     if (!error) {
-      // Cerramos el tramo vigente HOY: lo ganado antes se conserva en el historial.
       await supabase
         .from('ally_revenue_shares')
         .update({ effective_to: todayStr() })
@@ -160,25 +186,32 @@ export default function AliadosPage() {
     if (isNaN(pct) || pct < 0 || pct > 100) { setFeedback({ type: 'err', msg: 'El % de ingresos debe estar entre 0 y 100.' }); return; }
     if (!d.from) { setFeedback({ type: 'err', msg: 'Indica desde qué fecha rige el porcentaje.' }); return; }
 
+    // Slots efectivamente disponibles para este aliado:
+    // los que ya están usando (sus campañas activas) + los libres del loop.
+    const allyActive = activeByStore[s.id] || 0;
+    const effectiveMax = allyActive + freeSlots;
+    if (limit > effectiveMax) {
+      setFeedback({
+        type: 'err',
+        msg: `El límite (${limit}) supera los slots disponibles en el loop. Máximo posible ahora: ${effectiveMax} (${allyActive} que ya usa + ${freeSlots} libres).`,
+      });
+      return;
+    }
+
     setSavingId(s.id);
     setFeedback(null);
 
-    // 1) Campos operativos (no versionados) + cache del valor actual de % / base.
     const { error } = await supabase
       .from('stores')
       .update({ ally_campaign_limit: limit, ally_flash_enabled: d.flash, ally_revenue_pct: pct, ally_revenue_base: d.base })
       .eq('id', s.id);
     if (error) { setSavingId(null); setFeedback({ type: 'err', msg: error.message }); return; }
 
-    // 2) Historial de % con vigencia: solo si el % o la base cambian respecto al
-    //    tramo vigente. Mantiene el prorrateo correcto en Finanzas.
     const open = openShareOf(s.id);
     const changed = !open || Number(open.pct) !== pct || open.base !== d.base;
     let shareErr: string | null = null;
     if (changed) {
       if (open && open.effective_from >= d.from) {
-        // Corrección dentro del mismo tramo (misma fecha de inicio o anterior):
-        // reescribimos el tramo abierto en vez de crear uno de longitud cero.
         const { error: e } = await supabase
           .from('ally_revenue_shares')
           .update({ pct, base: d.base, effective_from: d.from })
@@ -220,6 +253,9 @@ export default function AliadosPage() {
     );
   }
 
+  const loopPct = loopMaxSlots > 0 ? Math.min(totalSlotsUsed / loopMaxSlots, 1) : 0;
+  const loopFull = freeSlots === 0;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -228,9 +264,8 @@ export default function AliadosPage() {
           <p className="text-white/40 text-sm font-medium tracking-wider uppercase mb-1">Administración</p>
           <h2 className="text-2xl font-bold text-white">Marcas Aliadas</h2>
           <p className="text-white/50 text-sm mt-2 max-w-2xl">
-            Las marcas aliadas publican campañas y cupones flash sin pagar plan. Aquí defines su tope de
-            campañas activas, si pueden usar cupones flash, y el porcentaje de ingresos que reciben (se
-            refleja en Finanzas).
+            Las marcas aliadas publican campañas y cupones flash sin pagar plan. El límite por aliado
+            no puede superar los slots libres del loop publicitario.
           </p>
         </div>
         <button
@@ -247,10 +282,8 @@ export default function AliadosPage() {
           : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>{feedback.msg}</div>
       )}
 
-      {/* Resumen de % comprometido. Finanzas se alimenta SOLO de estos aliados:
-          los % sobre bruto salen del ingreso bruto; los % sobre lo demás salen
-          de lo que queda tras restar los % sobre bruto y los gastos. */}
-      <div className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-wrap items-center gap-x-8 gap-y-2">
+      {/* Resumen general */}
+      <div className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-wrap items-center gap-x-8 gap-y-3">
         <div>
           <p className="text-[10px] text-white/30 uppercase tracking-wider">Aliados activos</p>
           <p className="text-xl font-bold text-emerald-400">{allies.length}</p>
@@ -263,13 +296,39 @@ export default function AliadosPage() {
           <p className="text-[10px] text-white/30 uppercase tracking-wider">% sobre lo demás</p>
           <p className="text-xl font-bold text-emerald-400">{pctSums.net.toFixed(2)}%</p>
         </div>
+
+        {/* Separador vertical */}
+        <div className="hidden sm:block w-px h-10 bg-white/8" />
+
+        {/* Loop slots */}
+        <div className="flex-1 min-w-[200px]">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[10px] text-white/30 uppercase tracking-wider">Slots del loop</p>
+            <p className={`text-[11px] font-mono font-semibold ${loopFull ? 'text-red-400' : freeSlots <= 3 ? 'text-amber-400' : 'text-emerald-400'}`}>
+              {freeSlots} libres
+            </p>
+          </div>
+          <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${loopFull ? 'bg-red-500' : loopPct >= 0.75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              style={{ width: `${Math.round(loopPct * 100)}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between mt-1">
+            <p className="text-[10px] text-white/25 font-mono">{totalSlotsUsed}/{loopMaxSlots} ocupados</p>
+            {loopFull && (
+              <p className="text-[10px] text-red-400">Loop lleno · los aliados no pueden activar campañas</p>
+            )}
+          </div>
+        </div>
+
         {pctSums.gross > 100 && (
-          <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-1.5">
+          <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-1.5 w-full">
             ⚠ Los % sobre el bruto suman {pctSums.gross.toFixed(0)}% (&gt;100%): no quedaría nada para repartir.
           </p>
         )}
         {pctSums.net > 100 && (
-          <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-1.5">
+          <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-1.5 w-full">
             ⚠ Los % sobre lo demás suman {pctSums.net.toFixed(0)}% (&gt;100%).
           </p>
         )}
@@ -289,7 +348,7 @@ export default function AliadosPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
-                  {['Tienda', 'Campañas activas (máx)', 'Cupones flash', '% de ingresos', 'Base del %', 'Rige desde', ''].map(h => (
+                  {['Tienda', 'Campañas (activas / máx)', 'Cupones flash', '% de ingresos', 'Base del %', 'Rige desde', ''].map(h => (
                     <th key={h} className="text-[11px] text-white/25 uppercase tracking-wider font-medium px-5 py-3 text-left">{h}</th>
                   ))}
                 </tr>
@@ -300,6 +359,13 @@ export default function AliadosPage() {
                   const dirty = !!drafts[s.id];
                   const hist = shares[s.id] || [];
                   const isOpen = expanded === s.id;
+                  const allyActive = activeByStore[s.id] || 0;
+                  const draftLimit = parseInt(d.limit, 10) || 0;
+                  // Slots que este aliado podría usar como máximo dado el loop.
+                  const effectiveMax = allyActive + freeSlots;
+                  const limitExceedsLoop = draftLimit > effectiveMax;
+                  const atCapacity = allyActive >= draftLimit;
+
                   return (
                     <Fragment key={s.id}>
                     <tr className="hover:bg-white/[0.02] transition-colors">
@@ -307,13 +373,46 @@ export default function AliadosPage() {
                         <p className="text-sm text-white/80 font-medium">{s.name}</p>
                         {s.plan_type && <p className="text-[10px] text-white/30 mt-0.5">también plan {s.plan_type}</p>}
                       </td>
+
+                      {/* Campañas activas vs límite */}
                       <td className="px-5 py-3">
-                        <input
-                          type="number" min={1} value={d.limit}
-                          onChange={e => setDraft(s.id, { limit: e.target.value })}
-                          className="w-20 text-sm bg-[#0a0a0a] border border-white/10 text-white/80 rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-500"
-                        />
+                        <div className="flex items-center gap-2">
+                          {/* Indicador de uso actual */}
+                          <div className="text-right w-8">
+                            <p className={`text-sm font-mono font-semibold ${atCapacity ? 'text-amber-400' : 'text-white/60'}`}>
+                              {allyActive}
+                            </p>
+                            <p className="text-[9px] text-white/25">activas</p>
+                          </div>
+                          <span className="text-white/20 text-xs">/</span>
+                          {/* Input del límite */}
+                          <div>
+                            <input
+                              type="number" min={1} max={effectiveMax}
+                              value={d.limit}
+                              onChange={e => setDraft(s.id, { limit: e.target.value })}
+                              className={`w-20 text-sm bg-[#0a0a0a] border rounded-lg px-3 py-1.5 focus:outline-none transition-colors ${
+                                limitExceedsLoop
+                                  ? 'border-red-500/50 text-red-400 focus:border-red-500'
+                                  : 'border-white/10 text-white/80 focus:border-emerald-500'
+                              }`}
+                            />
+                            {limitExceedsLoop && (
+                              <p className="text-[9px] text-red-400 mt-0.5">máx {effectiveMax}</p>
+                            )}
+                          </div>
+                        </div>
+                        {/* Mini barra de uso */}
+                        {draftLimit > 0 && (
+                          <div className="mt-1.5 h-1 bg-white/5 rounded-full overflow-hidden w-full max-w-[80px]">
+                            <div
+                              className={`h-full rounded-full ${atCapacity ? 'bg-amber-500' : 'bg-emerald-500/60'}`}
+                              style={{ width: `${Math.min((allyActive / draftLimit) * 100, 100)}%` }}
+                            />
+                          </div>
+                        )}
                       </td>
+
                       <td className="px-5 py-3">
                         <button
                           onClick={() => setDraft(s.id, { flash: !d.flash })}
@@ -416,8 +515,13 @@ export default function AliadosPage() {
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setAddOpen(false)} />
           <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
             <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Marcar tienda como aliada</h3>
-              <button onClick={() => setAddOpen(false)} className="text-white/40 hover:text-white/80">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Marcar tienda como aliada</h3>
+                {loopFull && (
+                  <p className="text-[11px] text-amber-400 mt-0.5">El loop está lleno ({totalSlotsUsed}/{loopMaxSlots}). El aliado quedará con límite 1 pero no podrá activar campañas hasta que se libere un slot.</p>
+                )}
+              </div>
+              <button onClick={() => setAddOpen(false)} className="text-white/40 hover:text-white/80 ml-4 shrink-0">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
