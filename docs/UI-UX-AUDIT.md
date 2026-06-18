@@ -69,11 +69,16 @@
   bancarios de la misma fuente que `payment-fields`.
   Archivos: `app/cliente/tutorial/page.tsx` (~112-163).
 
-- [ ] 🔴 **El dashboard del cliente duplica Planes/Pagos.** El vencimiento del
-  contrato aparece ~4 veces en una pantalla (alerta ~512, tarjeta "Plan vigente"
-  ~641, tile "Estado contrato" ~843, y alerta similar en `pagos` ~336). → Colapsar
-  a un indicador + una tira de estado.
-  Archivos: `app/cliente/dashboard/page.tsx`.
+- [~] 🔴 **El dashboard del cliente duplica Planes/Pagos.** → Avance: el
+  vencimiento de contrato pasó de **4 lugares a 2** en el dashboard — se quitaron
+  los tiles "Estado contrato" y "Próximo vencimiento" del grid de métricas (ahora
+  el grid es solo rendimiento); la tarjeta **"Plan vigente"** queda como única
+  fuente del estado del plan y la alerta ≤7 días como overlay urgente. Además se
+  añadió una fila de **Accesos rápidos** (Publicar promoción · Registrar pago ·
+  Ver canjes · Mi plan) para que el dueño sepa a dónde ir. _Pendiente:_ la alerta
+  de `pagos` sigue aparte (es el hub de facturación, ok) y consolidar `AbonoModal`
+  (ver ítem de pagos en 3 páginas).
+  Archivo: `app/cliente/dashboard/page.tsx`.
 
 ---
 

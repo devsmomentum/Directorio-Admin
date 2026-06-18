@@ -250,14 +250,6 @@ export default function ClienteDashboardPage() {
     [requests]
   );
 
-  const nextRenewal = useMemo(() => {
-    const dates = requests
-      .filter(r => r.status === 'approved' && r.expires_at && r.expires_at >= today)
-      .map(r => r.expires_at as string)
-      .sort();
-    return dates[0] || null;
-  }, [requests, today]);
-
   // Cambio de plan ya aprobado y pagado, pendiente de activarse
   const scheduledChange = useMemo(() => {
     return requests.find(r =>
@@ -520,6 +512,37 @@ export default function ClienteDashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Accesos rápidos: qué quieres hacer */}
+      <div>
+        <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-2">Accesos rápidos</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <QuickAction
+            href="/cliente/promociones"
+            label="Publicar promoción"
+            sub="Campañas, cupones y banners"
+            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>}
+          />
+          <QuickAction
+            href="/cliente/pagos"
+            label="Registrar pago"
+            sub="Renueva o reporta un abono"
+            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          />
+          <QuickAction
+            href="/cliente/candidatos"
+            label="Ver canjes"
+            sub="Valida cupones reservados"
+            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          />
+          <QuickAction
+            href="/cliente/planes"
+            label="Mi plan"
+            sub="Cambiar o renovar plan"
+            icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>}
+          />
+        </div>
+      </div>
 
       {abonoFeedback && (
         <div className="rounded-lg p-3 text-sm border bg-emerald-500/10 border-emerald-500/30 text-emerald-300">
@@ -807,16 +830,6 @@ export default function ClienteDashboardPage() {
           (!c.end_date || c.end_date.split('T')[0] >= today)).length}
           accent="text-cyan-400" sub={`${coupons.length} históricos`} />
         <Tile label="Kioscos únicos" value={uniqueKiosks} sub="K2 con actividad de tu tienda" />
-        <Tile label="Estado contrato"
-          accent={store.contract_expiry_date && store.contract_expiry_date < today ? 'text-red-400' : 'text-white/70'}
-          value={store.contract_expiry_date
-            ? (store.contract_expiry_date < today ? 'Vencido' : 'Vigente')
-            : '—'}
-          sub={store.contract_expiry_date ? `Vence ${store.contract_expiry_date}` : 'Sin contrato'} />
-        <Tile label="Próximo vencimiento"
-          accent={nextRenewal ? 'text-amber-300' : 'text-white/40'}
-          value={nextRenewal || '—'}
-          sub={nextRenewal ? 'Recuerda renovar antes' : 'Sin plan aprobado'} />
         <Tile label="Solicitudes pendientes"
           accent={pendingRequests > 0 ? 'text-amber-300' : 'text-white/40'}
           value={pendingRequests}
@@ -1082,5 +1095,24 @@ function Tile({ label, value, accent, sub }: { label: string; value: React.React
       <p className={`text-xl font-semibold ${accent || 'text-white'} leading-none`}>{value}</p>
       {sub && <p className="text-[10px] text-white/30 mt-1.5">{sub}</p>}
     </div>
+  );
+}
+
+// Tarjeta de acceso rápido: el dueño sabe de un vistazo a dónde ir para hacer algo.
+function QuickAction({ href, label, sub, icon }: { href: string; label: string; sub: string; icon: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center gap-3 bg-[#0A0A0A] border border-white/10 rounded-xl p-4 transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/[0.04]"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-cyan-300 transition-colors group-hover:bg-cyan-500/10">
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-white">{label}</span>
+        <span className="block text-[11px] text-white/40 truncate">{sub}</span>
+        <span className="mt-0.5 inline-block text-[11px] font-medium text-cyan-300/0 transition-colors group-hover:text-cyan-300">Ir →</span>
+      </span>
+    </Link>
   );
 }
