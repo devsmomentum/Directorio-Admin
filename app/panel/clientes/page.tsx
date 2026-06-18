@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { uploadPrivateDoc, openPrivateDoc, downloadPrivateDoc, fileExt } from '../../../lib/storage';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // /panel/clientes — gestión de usuarios cliente del portal.
@@ -199,10 +201,16 @@ export default function ClientesPage() {
     const linkedStores = storesByClient[c.id] ?? [];
     const storeNames = linkedStores.map(s => s.name).join(', ');
     const msg = linkedStores.length > 0
-      ? `¿Eliminar al cliente "${c.full_name || c.email}"?\n\nTiene ${linkedStores.length} tienda(s) vinculada(s): ${storeNames}.\nSe desvincularán automáticamente.`
-      : `¿Eliminar al cliente "${c.full_name || c.email}"?\n\nEsta acción no se puede deshacer.`;
+      ? `Tiene ${linkedStores.length} tienda(s) vinculada(s): ${storeNames}. Se desvincularán automáticamente. Esta acción no se puede deshacer.`
+      : 'Esta acción no se puede deshacer.';
 
-    if (!confirm(msg)) return;
+    const ok = await confirmDialog({
+      title: `¿Eliminar al cliente "${c.full_name || c.email}"?`,
+      message: msg,
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     try {
       // Primero desvincular tiendas
@@ -216,10 +224,11 @@ export default function ClientesPage() {
       const { error } = await supabase.from('users').delete().eq('id', c.id);
       if (error) throw error;
       await fetchAll();
+      toast.success('Cliente eliminado.');
     } catch {
       // No mostramos err.message: Supabase puede incluir referencias internas
       // (URL/host de la BD, IDs) en el texto del error.
-      alert('No se pudo eliminar el cliente. Intenta nuevamente.');
+      toast.error('No se pudo eliminar el cliente. Intenta nuevamente.');
     }
   };
 
@@ -232,9 +241,9 @@ export default function ClientesPage() {
   //   3) Reconcilia user_stores: vincula los store_ids elegidos y desvincula
   //      los que estaban antes y ya no están.
   const validateDoc = (file: File): boolean => {
-    if (file.size > 2 * 1024 * 1024) { alert('El documento debe pesar menos de 2 MB.'); return false; }
+    if (file.size > 2 * 1024 * 1024) { toast.error('El documento debe pesar menos de 2 MB.'); return false; }
     if (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)) {
-      alert('Solo se admiten PDF, JPG o PNG.'); return false;
+      toast.error('Solo se admiten PDF, JPG o PNG.'); return false;
     }
     return true;
   };
@@ -411,6 +420,7 @@ export default function ClientesPage() {
 
       await fetchAll();
       resetForm();
+      toast.success(editing ? 'Cliente actualizado.' : 'Cliente creado.');
     } catch (err: any) {
       setFormError(err.message || 'Error al guardar.');
       setSubmitting(false);

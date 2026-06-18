@@ -8,6 +8,8 @@ import { uploadPublicidad, uploadPrivateDoc, openPrivateDoc, downloadPrivateDoc,
 import { downloadCSV, slugify } from '../../../lib/csv';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 // Planes BASE asignables a una tienda (PDF "PLANES DIRECTORIOS").
 // Flash Coupon ya no es plan base: vive como addon en flash_coupon_plan +
@@ -388,11 +390,11 @@ export default function TiendasCRUD() {
 
   const validateImage = (file: File): Promise<boolean> =>
     new Promise((resolve) => {
-      if (file.size > 2 * 1024 * 1024) { alert('El logo debe pesar menos de 2 MB.'); resolve(false); return; }
+      if (file.size > 2 * 1024 * 1024) { toast.error('El logo debe pesar menos de 2 MB.'); resolve(false); return; }
       const img = new Image();
       img.onload = () => {
         if (img.width > 4000 || img.height > 4000) {
-          alert(`Dimensiones excedidas (${img.width}x${img.height}). Maximo: 4000x4000px.`);
+          toast.error(`Dimensiones excedidas (${img.width}x${img.height}). Máximo: 4000x4000px.`);
           resolve(false);
         } else { resolve(true); }
       };
@@ -400,7 +402,7 @@ export default function TiendasCRUD() {
     });
 
   const validateDoc = (file: File): boolean => {
-    if (file.size > 50 * 1024 * 1024) { alert('El documento debe pesar menos de 50 MB.'); return false; }
+    if (file.size > 50 * 1024 * 1024) { toast.error('El documento debe pesar menos de 50 MB.'); return false; }
     return true;
   };
 
@@ -438,8 +440,8 @@ export default function TiendasCRUD() {
         const wasSamePlan = editingStore?.plan_type === planType;
         const currentCount = (planUsage[planType] || 0) - (wasSamePlan ? 1 : 0);
         if (currentCount >= cap) {
-          alert(
-            `Límite alcanzado: ${currentCount}/${cap} tiendas activas con plan ${PLAN_LABELS[planType] || planType}.\n\n` +
+          toast.error(
+            `Límite alcanzado: ${currentCount}/${cap} tiendas activas con plan ${PLAN_LABELS[planType] || planType}. ` +
             `Para asignar este plan, libera un cupo desactivando o cambiando de plan a otra tienda con el mismo plan.`
           );
           return;
@@ -454,8 +456,8 @@ export default function TiendasCRUD() {
       const currentCount = (flashAddonUsage[flashCouponPlan] || 0) - (wasSameAddon ? 1 : 0);
       const flashCap = capFor(flashCouponPlan);
       if (flashCap != null && currentCount >= flashCap) {
-        alert(
-          `Límite alcanzado: ${currentCount}/${flashCap} tiendas con addon ${PLAN_LABELS[flashCouponPlan]}.\n\n` +
+        toast.error(
+          `Límite alcanzado: ${currentCount}/${flashCap} tiendas con addon ${PLAN_LABELS[flashCouponPlan]}. ` +
           `Libera un cupo desactivando el addon en otra tienda.`
         );
         return;
@@ -466,9 +468,9 @@ export default function TiendasCRUD() {
     // que el plan no choque con otro contrato vigente o un cambio futuro ya
     // aprobado/pendiente dentro de la ventana del contrato.
     if (planCollision) {
-      alert(
+      toast.error(
         `Sin cupo para ${PLAN_LABELS[planType] || planType} en el período ` +
-        `${planCollision.start} – ${planCollision.end}.\n\n` +
+        `${planCollision.start} – ${planCollision.end}. ` +
         `Ocupación máxima proyectada: ${planCollision.overlap}/${planCollision.cap} ` +
         `(cuenta contratos vigentes y cambios futuros). Elige otro plan o libera un cupo ` +
         `antes de asignarlo.`
@@ -477,6 +479,7 @@ export default function TiendasCRUD() {
     }
 
     setSubmitting(true);
+    const wasEditing = !!editingId;
     try {
       let finalLogoUrl = logoPreview || '';
       let finalMercantilUrl = mercantilUrl;
@@ -557,7 +560,7 @@ export default function TiendasCRUD() {
             });
             if (linkErr) throw linkErr;
             if (!linkedId) {
-              alert(
+              toast.info(
                 `La tienda se guardó, pero "${client.email}" aún no tiene cuenta activa. ` +
                 `Envíale el magic link desde Clientes para completar la vinculación.`
               );
@@ -597,8 +600,9 @@ export default function TiendasCRUD() {
 
       resetForm();
       fetchData();
+      toast.success(wasEditing ? 'Tienda actualizada.' : 'Tienda creada.');
     } catch (err: any) {
-      alert('Error al guardar: ' + err.message);
+      toast.error('Error al guardar: ' + err.message);
     } finally {
       setSubmitting(false);
     }
@@ -651,17 +655,23 @@ export default function TiendasCRUD() {
   const handleDelete = async (id: string) => {
     const store = stores.find((s) => s.id === id);
     const storeName = store ? store.name : 'Desconocida';
-    if (confirm(`Eliminar esta tienda "${storeName}"?`)) {
-      await supabase.from('stores').delete().eq('id', id);
-      await logAdminAction({
-        action_type: 'ELIMINAR',
-        entity_type: 'tienda',
-        entity_id: id,
-        entity_name: storeName,
-        details: { name: storeName }
-      });
-      fetchData();
-    }
+    const ok = await confirmDialog({
+      title: 'Eliminar tienda',
+      message: `¿Eliminar esta tienda "${storeName}"? Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    await supabase.from('stores').delete().eq('id', id);
+    await logAdminAction({
+      action_type: 'ELIMINAR',
+      entity_type: 'tienda',
+      entity_id: id,
+      entity_name: storeName,
+      details: { name: storeName }
+    });
+    fetchData();
+    toast.success('Tienda eliminada.');
   };
 
   const resetForm = () => {
@@ -1578,10 +1588,10 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
 
   const handleAddContract = async () => {
     if (!newContractFile || !newContractTitle.trim()) {
-      alert('El archivo y el título del contrato son obligatorios.');
+      toast.error('El archivo y el título del contrato son obligatorios.');
       return;
     }
-    if (newContractFile.size > 25 * 1024 * 1024) { alert('El documento debe pesar menos de 25 MB.'); return; }
+    if (newContractFile.size > 25 * 1024 * 1024) { toast.error('El documento debe pesar menos de 25 MB.'); return; }
     setSavingContract(true);
     try {
       const ext = newContractFile.name.split('.').pop();
@@ -1604,28 +1614,36 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
       setNewContractFile(null); setNewContractTitle(''); setNewContractExpiry(''); setNewContractNotes('');
       setShowAddContract(false);
       await loadContracts();
+      toast.success('Contrato agregado al historial.');
     } catch (err: any) {
-      alert('Error al subir el contrato: ' + err.message);
+      toast.error('Error al subir el contrato: ' + err.message);
     } finally {
       setSavingContract(false);
     }
   };
 
   const handleDeleteContract = async (c: any) => {
-    if (!confirm(`¿Eliminar el contrato "${c.title}" del historial de esta tienda?`)) return;
+    const ok = await confirmDialog({
+      title: 'Eliminar contrato',
+      message: `¿Eliminar el contrato "${c.title}" del historial de esta tienda?`,
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    });
+    if (!ok) return;
     const { error } = await supabase.from('store_contracts').delete().eq('id', c.id);
-    if (error) { alert('Error al eliminar: ' + error.message); return; }
+    if (error) { toast.error('Error al eliminar: ' + error.message); return; }
     await logAdminAction({
       action_type: 'ELIMINAR', entity_type: 'contrato_tienda', entity_id: store.id,
       entity_name: `${store.name} · ${c.title}`,
     });
     await loadContracts();
+    toast.success('Contrato eliminado.');
   };
 
   const handleReplaceMercantil = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 25 * 1024 * 1024) { alert('El documento debe pesar menos de 25 MB.'); e.target.value = ''; return; }
+    if (file.size > 25 * 1024 * 1024) { toast.error('El documento debe pesar menos de 25 MB.'); e.target.value = ''; return; }
     setUploadingMercantil(true);
     try {
       const ext = file.name.split('.').pop();
@@ -1637,8 +1655,9 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         action_type: 'EDITAR', entity_type: 'tienda', entity_id: store.id,
         entity_name: store.name, details: { mercantil_url: path },
       });
+      toast.success('Registro mercantil actualizado.');
     } catch (err: any) {
-      alert('Error al subir el registro mercantil: ' + err.message);
+      toast.error('Error al subir el registro mercantil: ' + err.message);
     } finally {
       setUploadingMercantil(false);
       e.target.value = '';
@@ -1648,8 +1667,8 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   const handleReplaceCedula = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!linkedUser?.id) { alert('No hay cliente dueño vinculado a esta tienda.'); e.target.value = ''; return; }
-    if (file.size > 25 * 1024 * 1024) { alert('El documento debe pesar menos de 25 MB.'); e.target.value = ''; return; }
+    if (!linkedUser?.id) { toast.error('No hay cliente dueño vinculado a esta tienda.'); e.target.value = ''; return; }
+    if (file.size > 25 * 1024 * 1024) { toast.error('El documento debe pesar menos de 25 MB.'); e.target.value = ''; return; }
     setUploadingCedula(true);
     try {
       const ext = file.name.split('.').pop();
@@ -1661,8 +1680,9 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
         action_type: 'EDITAR', entity_type: 'cliente', entity_id: linkedUser.id,
         entity_name: linkedUser.full_name || linkedUser.email || linkedUser.id, details: { cedula_url: path },
       });
+      toast.success('Cédula actualizada.');
     } catch (err: any) {
-      alert('Error al subir la cédula: ' + err.message);
+      toast.error('Error al subir la cédula: ' + err.message);
     } finally {
       setUploadingCedula(false);
       e.target.value = '';
@@ -1959,7 +1979,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   };
 
   const exportImpressions = () => {
-    if (!impressionsDaily.length) { alert('Sin impresiones de campaña en el rango.'); return; }
+    if (!impressionsDaily.length) { toast.info('Sin impresiones de campaña en el rango.'); return; }
     const byCamp: Record<string, string> = {};
     campaigns.forEach(c => { byCamp[c.id] = c.brand_name; });
     const rows = impressionsDaily
@@ -1977,7 +1997,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   };
 
   const exportEvents = () => {
-    if (!interactions.length && !searchRows.length) { alert('Sin interacciones K2 en el rango.'); return; }
+    if (!interactions.length && !searchRows.length) { toast.info('Sin interacciones K2 en el rango.'); return; }
     const rows: any[] = [];
     
     interactions.forEach(e => {
@@ -2013,7 +2033,7 @@ function StoreDetailModal({ store, onClose }: { store: any; onClose: () => void 
   };
 
   const exportCoupons = () => {
-    if (!coupons.length) { alert('Esta tienda no tiene cupones.'); return; }
+    if (!coupons.length) { toast.info('Esta tienda no tiene cupones.'); return; }
     const rows = coupons.map(c => [
       c.id,
       c.title,

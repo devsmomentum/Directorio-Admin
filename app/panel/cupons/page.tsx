@@ -6,6 +6,8 @@ import { logAdminAction } from '../../../lib/audit';
 import { removePublicidadFile } from '../../../lib/storage';
 import Pagination, { usePagination } from '../../components/Pagination';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 // Solo se emiten cupones bajo el plan Cupones Flash (diario o semanal).
 // Los planes base ya no admiten cupones — ver migración 018.
@@ -186,10 +188,10 @@ export default function CuponsAdminPage() {
 
   const validateImage = (file: File): Promise<boolean> => {
     return new Promise((resolve) => {
-      if (file.size > 500 * 1024) { alert('La imagen debe pesar menos de 500 KB.'); resolve(false); return; }
+      if (file.size > 500 * 1024) { toast.error('La imagen debe pesar menos de 500 KB.'); resolve(false); return; }
       const img = new Image();
       img.onload = () => {
-        if (img.width > 800 || img.height > 800) { alert(`Dimensiones excedidas (${img.width}x${img.height}). Máximo: 800x800px.`); resolve(false); }
+        if (img.width > 800 || img.height > 800) { toast.error(`Dimensiones excedidas (${img.width}x${img.height}). Máximo: 800x800px.`); resolve(false); }
         else { resolve(true); }
       };
       img.src = URL.createObjectURL(file);
@@ -211,13 +213,13 @@ export default function CuponsAdminPage() {
 
   const handleSaveCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStoreId) { alert('Debes seleccionar una tienda.'); return; }
-    if (!endDate) { alert('La fecha de vencimiento es requerida por el esquema.'); return; }
-    if (!planType) { alert('Debes seleccionar el plan del cupón.'); return; }
+    if (!selectedStoreId) { toast.error('Debes seleccionar una tienda.'); return; }
+    if (!endDate) { toast.error('La fecha de vencimiento es requerida por el esquema.'); return; }
+    if (!planType) { toast.error('Debes seleccionar el plan del cupón.'); return; }
 
     // Solo se aceptan cupones bajo el plan Cupones Flash vigente de la tienda.
     if (!FLASH_COUPON_PLANS.has(planType) || !planOptionsForStore.includes(planType)) {
-      alert(
+      toast.error(
         `La tienda seleccionada no tiene un plan Cupones Flash activo. ` +
         `Actívalo en /panel/tiendas antes de emitir cupones.`
       );
@@ -227,8 +229,8 @@ export default function CuponsAdminPage() {
     // Cap de 20 marcas en galería
     const isNewBrand = !flashCouponBrands.has(selectedStoreId);
     if (isNewBrand && !editingCouponId && flashCouponBrands.size >= FLASH_COUPON_MAX_BRANDS) {
-      alert(
-        `Límite alcanzado: ${flashCouponBrands.size}/${FLASH_COUPON_MAX_BRANDS} marcas activas en la galería.\n\n` +
+      toast.error(
+        `Límite alcanzado: ${flashCouponBrands.size}/${FLASH_COUPON_MAX_BRANDS} marcas activas en la galería. ` +
         `Para añadir esta marca, libera un slot dejando que un cupón existente se agote o venza.`
       );
       return;
@@ -250,9 +252,9 @@ export default function CuponsAdminPage() {
 
       if (issuedInWindow >= brandLimit.max) {
         const storeName = stores.find(s => s.id === selectedStoreId)?.name || 'esta marca';
-        alert(
+        toast.error(
           `Límite alcanzado: ${storeName} ya lanzó ${issuedInWindow}/${brandLimit.max} cupones ` +
-          `en ${PLAN_LABELS[planType]} durante el período (${brandLimit.label}).\n\n` +
+          `en ${PLAN_LABELS[planType]} durante el período (${brandLimit.label}). ` +
           `Espera al próximo período para emitir más cupones.`
         );
         return;
@@ -321,20 +323,28 @@ export default function CuponsAdminPage() {
         }
       }
 
+      const wasEditing = !!editingCouponId;
       resetForm();
       fetchData();
+      toast.success(wasEditing ? 'Cupón actualizado.' : 'Cupón creado.');
     } catch (err: any) {
-      alert(`Error al guardar: ${err.message}`);
+      toast.error(`Error al guardar: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Eliminar este cupón permanentemente?')) return;
+    const ok = await confirmDialog({
+      title: 'Eliminar cupón',
+      message: 'Se eliminará este cupón permanentemente. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    });
+    if (!ok) return;
     const coupon = coupons.find(c => c.id === id);
     const { error } = await supabase.from('coupons').delete().eq('id', id);
-    if (error) { alert(error.message); return; }
+    if (error) { toast.error(error.message); return; }
     await logAdminAction({
       action_type: 'ELIMINAR',
       entity_type: 'cupón',
@@ -344,6 +354,7 @@ export default function CuponsAdminPage() {
     });
     await removePublicidadFile(coupon?.image_url);
     fetchData();
+    toast.success('Cupón eliminado.');
   };
 
   const handleToggleActive = async (coupon: Coupon) => {
@@ -354,15 +365,15 @@ export default function CuponsAdminPage() {
       const flashOk = !!store?.flash_coupon_plan
         && (!store.flash_coupon_expiry_date || store.flash_coupon_expiry_date >= today);
       if (!flashOk) {
-        alert('No se puede reactivar: la tienda no tiene plan Cupones Flash vigente. Renueva el plan primero.');
+        toast.error('No se puede reactivar: la tienda no tiene plan Cupones Flash vigente. Renueva el plan primero.');
         return;
       }
       if (coupon.end_date && coupon.end_date < new Date().toISOString()) {
-        alert('No se puede reactivar: el cupón ya venció (end_date pasada). Edita la fecha primero.');
+        toast.error('No se puede reactivar: el cupón ya venció (end_date pasada). Edita la fecha primero.');
         return;
       }
       if (coupon.amount_available <= 0) {
-        alert('No se puede reactivar: el cupón está sin stock. Edita el stock primero.');
+        toast.error('No se puede reactivar: el cupón está sin stock. Edita el stock primero.');
         return;
       }
     }
@@ -370,7 +381,7 @@ export default function CuponsAdminPage() {
       .from('coupons')
       .update({ is_active: !coupon.is_active })
       .eq('id', coupon.id);
-    if (error) alert(error.message);
+    if (error) toast.error(error.message);
     else {
       await logAdminAction({
         action_type: !coupon.is_active ? 'ACTIVAR' : 'DESACTIVAR',
@@ -380,6 +391,7 @@ export default function CuponsAdminPage() {
         details: { is_active: !coupon.is_active }
       });
       fetchData();
+      toast.success(!coupon.is_active ? 'Cupón activado.' : 'Cupón desactivado.');
     }
   };
 

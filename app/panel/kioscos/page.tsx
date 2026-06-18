@@ -3,6 +3,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 export default function KioscosCRUD() {
   const [kiosks, setKiosks] = useState<any[]>([]);
@@ -53,7 +55,8 @@ export default function KioscosCRUD() {
         .update({ name, location, mall_id: mallId || null })
         .eq('id', editingId);
 
-      if (error) alert('Error al actualizar: ' + error.message);
+      if (error) { toast.error('Error al actualizar: ' + error.message); setSubmitting(false); return; }
+      toast.success('Kiosco actualizado.');
     } else {
       const { error } = await supabase.from('kiosks').insert([{
         name,
@@ -63,7 +66,8 @@ export default function KioscosCRUD() {
         hardware_id: null
       }]);
 
-      if (error) alert('Error al crear: ' + error.message);
+      if (error) { toast.error('Error al crear: ' + error.message); setSubmitting(false); return; }
+      toast.success('Kiosco creado.');
     }
 
     resetForm();
@@ -89,17 +93,31 @@ export default function KioscosCRUD() {
   };
 
   const handleUnbind = async (id: string) => {
-    if (confirm('Desvincular hardware de este kiosco? Dejara de registrar analiticas hasta vincular una nueva pantalla.')) {
-      await supabase.from('kiosks').update({ hardware_id: null, status: 'offline' }).eq('id', id);
-      fetchKiosks();
-    }
+    const ok = await confirmDialog({
+      title: 'Desvincular hardware',
+      message: 'Dejará de registrar analíticas hasta vincular una nueva pantalla.',
+      confirmLabel: 'Desvincular',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    const { error } = await supabase.from('kiosks').update({ hardware_id: null, status: 'offline' }).eq('id', id);
+    if (error) { toast.error('No se pudo desvincular: ' + error.message); return; }
+    fetchKiosks();
+    toast.success('Hardware desvinculado.');
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Eliminar este kiosco por completo? Se perdera su historial asociado.')) {
-      await supabase.from('kiosks').delete().eq('id', id);
-      fetchKiosks();
-    }
+    const ok = await confirmDialog({
+      title: 'Eliminar kiosco',
+      message: 'Se perderá su historial asociado. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    const { error } = await supabase.from('kiosks').delete().eq('id', id);
+    if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
+    fetchKiosks();
+    toast.success('Kiosco eliminado.');
   };
 
   const handleToggleKioskMode = async (id: string, current: boolean) => {

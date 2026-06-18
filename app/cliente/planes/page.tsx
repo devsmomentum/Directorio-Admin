@@ -11,6 +11,8 @@ import {
 } from '../payment-fields';
 import { AbonoModal, AbonoRequest } from '../abono-modal';
 import { PLAN_GRADIENT as PLAN_COLORS, isFlashPlan } from '../../../lib/plans';
+import { ErrorState } from '../../components/ErrorState';
+import { PageSpinner } from '../../components/PageSpinner';
 
 export default function ClientePlanesPage() {
   const { selectedStore: store } = useClienteStore();
@@ -22,6 +24,8 @@ export default function ClientePlanesPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [storeCounts, setStoreCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
   const [widgetPlan, setWidgetPlan] = useState<any | null>(null);
@@ -64,6 +68,7 @@ export default function ClientePlanesPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setLoadError(false);
       const [plansRes, reqRes, capRes, txRes] = await Promise.all([
         supabase.from('plans').select('*').eq('is_active', true).order('display_order', { ascending: true }),
         supabase.from('plan_requests')
@@ -78,6 +83,11 @@ export default function ClientePlanesPage() {
           .eq('status', 'pending'),
       ]);
       if (cancelled) return;
+      if (plansRes.error || reqRes.error) {
+        setLoadError(true);
+        setLoading(false);
+        return;
+      }
       setPlans(plansRes.data || []);
       setRequests(reqRes.data || []);
       setPendingTxCount(txRes.count ?? 0);
@@ -97,7 +107,7 @@ export default function ClientePlanesPage() {
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [store]);
+  }, [store, reloadKey]);
 
   // Refrescar capacidad tras crear/aprobar solicitudes (cambia requests.length).
   useEffect(() => {
@@ -321,10 +331,16 @@ export default function ClientePlanesPage() {
   }
 
   if (loading) {
+    return <PageSpinner label="Cargando planes…" />;
+  }
+
+  if (loadError) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <ErrorState
+        title="No se pudieron cargar los planes"
+        message="Revisa tu conexión e inténtalo de nuevo."
+        onRetry={() => setReloadKey(k => k + 1)}
+      />
     );
   }
 

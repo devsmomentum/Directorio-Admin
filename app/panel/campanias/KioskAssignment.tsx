@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 interface Kiosk { id: string; name: string; status: string; location_name: string; }
 interface Campaign { id: string; brand_name: string; plan_type: string; is_active: boolean; }
@@ -73,19 +75,22 @@ export default function KioskAssignment() {
       }
       // Close panel after save
       setOpenKiosk(null);
+      toast.success('Asignación de campañas guardada.');
     } catch (e: any) {
-      alert('Error: ' + e.message);
+      toast.error('Error: ' + e.message);
     } finally {
       setSaving(null);
     }
   };
 
   const resetKiosk = async (kioskId: string) => {
-    if (!confirm('¿Restablecer a "Todas las campañas" para este kiosco?')) return;
+    const ok = await confirmDialog({ title: 'Restablecer kiosco', message: '¿Restablecer a "Todas las campañas" para este kiosco?', confirmLabel: 'Restablecer', tone: 'danger' });
+    if (!ok) return;
     setSaving(kioskId);
     await supabase.from('kiosk_campaigns').delete().eq('kiosk_id', kioskId);
     setAssignments(prev => { const n = { ...prev }; delete n[kioskId]; return n; });
     setSaving(null);
+    toast.success('Kiosco restablecido a todas las campañas.');
   };
 
   if (loading) return (

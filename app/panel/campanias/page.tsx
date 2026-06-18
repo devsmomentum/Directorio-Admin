@@ -9,6 +9,8 @@ import { removePublicidadFile } from '../../../lib/storage';
 import { PLAN_LABELS, PLAN_BADGE_BORDERED as PLAN_COLORS } from '../../../lib/plans';
 import { validateKioskVideo } from '../../../lib/videoValidation';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 import KioskAssignment from './KioskAssignment';
 
 function getDaysUntilExpiry(endDate: string | null): number | null {
@@ -265,7 +267,7 @@ function CampaniasAdminInner() {
       const isImage = file.type.startsWith('image/');
 
       if (!isVideo && !isImage) {
-        alert('Formato no soportado. Sube una imagen (JPG/PNG/WEBP) o un video (MP4/WEBM).');
+        toast.error('Formato no soportado. Sube una imagen (JPG/PNG/WEBP) o un video (MP4/WEBM).');
         e.target.value = '';
         return;
       }
@@ -274,26 +276,26 @@ function CampaniasAdminInner() {
       const allowedImageExt = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
       const allowedVideoExt = ['mp4', 'webm', 'mov', 'm4v'];
       if (isImage && !allowedImageExt.includes(ext)) {
-        alert(`Extensión "${ext}" no permitida para imagen. Usa: ${allowedImageExt.join(', ')}.`);
+        toast.error(`Extensión "${ext}" no permitida para imagen. Usa: ${allowedImageExt.join(', ')}.`);
         e.target.value = '';
         return;
       }
       if (isVideo && !allowedVideoExt.includes(ext)) {
-        alert(`Extensión "${ext}" no permitida para video. Usa: ${allowedVideoExt.join(', ')}.`);
+        toast.error(`Extensión "${ext}" no permitida para video. Usa: ${allowedVideoExt.join(', ')}.`);
         e.target.value = '';
         return;
       }
 
       const maxSize = isVideo ? 200 * 1024 * 1024 : 5 * 1024 * 1024;
       if (file.size > maxSize) {
-        alert(`El archivo excede el límite (${isVideo ? '200MB para video' : '5MB para imagen'}).`);
+        toast.error(`El archivo excede el límite (${isVideo ? '200MB para video' : '5MB para imagen'}).`);
         e.target.value = '';
         return;
       }
       // Compatibilidad con el decoder del kiosco K2 (rechaza 4K / HEVC / Level alto).
       if (isVideo) {
         const check = await validateKioskVideo(file);
-        if (!check.ok) { alert(check.message); e.target.value = ''; return; }
+        if (!check.ok) { toast.error(check.message || 'El video no es válido.'); e.target.value = ''; return; }
       }
       setMediaFile(file);
       setMediaType(isVideo ? 'video' : 'image');
@@ -303,16 +305,16 @@ function CampaniasAdminInner() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingId && !mediaFile) { alert('Debes subir un archivo multimedia.'); return; }
+    if (!editingId && !mediaFile) { toast.error('Debes subir un archivo multimedia.'); return; }
 
     // Tope de end_date por el plan de la tienda (si está vigente): igual que el portal cliente.
     const today = new Date().toISOString().split('T')[0];
     const selStore = stores.find(s => s.id === storeId);
     const planExpiry = selStore?.contract_expiry_date ?? null;
     if (storeId && planExpiry && planExpiry >= today) {
-      if (!endDate) { alert('Indica la fecha de fin: esta tienda tiene un plan vigente.'); return; }
+      if (!endDate) { toast.error('Indica la fecha de fin: esta tienda tiene un plan vigente.'); return; }
       if (endDate > planExpiry) {
-        alert(`La campaña no puede pasar de la vigencia del plan de la tienda (${planExpiry}).`);
+        toast.error(`La campaña no puede pasar de la vigencia del plan de la tienda (${planExpiry}).`);
         return;
       }
     }
@@ -324,12 +326,13 @@ function CampaniasAdminInner() {
         (!c.end_date || c.end_date >= today)
       ).length;
       if (activeInStore >= 5) {
-        alert('Esta tienda ya tiene 5 campañas activas (máximo). Pausa una antes de activar otra.');
+        toast.error('Esta tienda ya tiene 5 campañas activas (máximo). Pausa una antes de activar otra.');
         return;
       }
     }
 
     setIsSaving(true);
+    const wasEditing = !!editingId;
 
     try {
       const previousMediaUrl = editingId
@@ -395,15 +398,22 @@ function CampaniasAdminInner() {
 
       resetForm();
       fetchData();
+      toast.success(wasEditing ? 'Campaña actualizada.' : 'Campaña creada.');
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      toast.error('Error: ' + err.message);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDelete = async (id: string, url: string) => {
-    if (!confirm('Eliminar campaña permanentemente?')) return;
+    const ok = await confirmDialog({
+      title: 'Eliminar campaña',
+      message: 'La campaña se eliminará permanentemente. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       const camp = campaigns.find(c => c.id === id);
       const campName = camp ? camp.brand_name : 'Desconocida';
@@ -418,8 +428,9 @@ function CampaniasAdminInner() {
       });
       await removePublicidadFile(url);
       fetchData();
+      toast.success('Campaña eliminada.');
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      toast.error('Error: ' + err.message);
     }
   };
 
@@ -428,8 +439,13 @@ function CampaniasAdminInner() {
     const campName = camp ? camp.brand_name : 'Desconocida';
 
     if (current) {
-      if (!confirm('¿Deseas pausar esta campaña?')) return;
-      if (!confirm('¿Confirmas pausar la campaña?')) return;
+      const ok = await confirmDialog({
+        title: 'Pausar campaña',
+        message: `¿Deseas pausar la campaña "${campName}"? Dejará de sonar en el loop de pantallas.`,
+        confirmLabel: 'Pausar',
+        tone: 'danger',
+      });
+      if (!ok) return;
     }
 
     // Pedimos el row de vuelta: así detectamos tanto un error explícito como
@@ -450,9 +466,9 @@ function CampaniasAdminInner() {
       .eq('id', id)
       .select('id, is_active, start_date')
       .single();
-    if (error) { alert('Error: ' + error.message); return; }
+    if (error) { toast.error('Error: ' + error.message); return; }
     if (!updated || updated.is_active !== !current) {
-      alert('No se pudo cambiar el estado de la campaña (permisos o regla de la base de datos). Vuelve a intentar.');
+      toast.error('No se pudo cambiar el estado de la campaña (permisos o regla de la base de datos). Vuelve a intentar.');
       fetchData();
       return;
     }
@@ -468,6 +484,7 @@ function CampaniasAdminInner() {
         ? { ...c, is_active: !current, start_date: (updated.start_date as string) ?? c.start_date }
         : c
     ));
+    toast.success(current ? 'Campaña pausada.' : 'Campaña reactivada.');
   };
 
   const openReactivate = (c: Campaign) => {
@@ -479,8 +496,8 @@ function CampaniasAdminInner() {
     const c = reactivateTarget;
     if (!c) return;
     const today = new Date().toISOString().split('T')[0];
-    if (!reactivateEnd) { alert('Indica la nueva fecha de fin de la campaña.'); return; }
-    if (reactivateEnd < today) { alert('La fecha de fin debe ser hoy o futura.'); return; }
+    if (!reactivateEnd) { toast.error('Indica la nueva fecha de fin de la campaña.'); return; }
+    if (reactivateEnd < today) { toast.error('La fecha de fin debe ser hoy o futura.'); return; }
 
     setSavingReactivate(true);
     // Reactivar como gestionada por admin: queda exenta del plan vencido y
@@ -501,9 +518,9 @@ function CampaniasAdminInner() {
       .single();
     setSavingReactivate(false);
 
-    if (error) { alert('Error: ' + error.message); return; }
+    if (error) { toast.error('Error: ' + error.message); return; }
     if (!updated || !updated.is_active) {
-      alert('No se pudo reactivar la campaña. Revisa el tope de 5 campañas activas por tienda.');
+      toast.error('No se pudo reactivar la campaña. Revisa el tope de 5 campañas activas por tienda.');
       fetchData(); setReactivateTarget(null); return;
     }
     await logAdminAction({
@@ -515,12 +532,19 @@ function CampaniasAdminInner() {
     });
     setReactivateTarget(null);
     fetchData();
+    toast.success('Campaña reactivada.');
   };
 
   const handleApplyKillSwitch = async () => {
     if (!killSwitchCandidates.length) return;
     const names = killSwitchCandidates.map(c => `• ${c.brand_name}`).join('\n');
-    if (!confirm(`Desactivar ${killSwitchCandidates.length} campaña(s) vencida(s):\n\n${names}\n\nSe quitarán del loop de pantallas.`)) return;
+    const ok = await confirmDialog({
+      title: `Desactivar ${killSwitchCandidates.length} campaña(s) vencida(s)`,
+      message: `${names}\n\nSe quitarán del loop de pantallas.`,
+      confirmLabel: 'Desactivar',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     setApplyingKillSwitch(true);
     try {
@@ -532,8 +556,9 @@ function CampaniasAdminInner() {
       if (error) throw error;
       setKillSwitchCandidates([]);
       fetchData();
+      toast.success('Campañas vencidas desactivadas.');
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      toast.error('Error: ' + err.message);
     } finally {
       setApplyingKillSwitch(false);
     }

@@ -3,6 +3,8 @@
 import { useState, useEffect, ChangeEvent, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 interface Service {
   id: string;
@@ -58,15 +60,18 @@ export default function ServicesAdminPage() {
   };
 
   const handleDeleteClick = async (id: string) => {
-    if (!confirm('Eliminar este servicio?')) return;
-    await supabase.from('services').delete().eq('id', id);
+    const ok = await confirmDialog({ title: 'Eliminar servicio', message: '¿Seguro que deseas eliminar este servicio? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', tone: 'danger' });
+    if (!ok) return;
+    const { error } = await supabase.from('services').delete().eq('id', id);
+    if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
     fetchServices();
+    toast.success('Servicio eliminado.');
   };
 
   const toggleStatus = async (id: string, current: boolean) => {
     const { error } = await supabase.from('services').update({ is_active: !current }).eq('id', id);
     if (error) {
-      alert('Error al cambiar estado: ' + error.message);
+      toast.error('Error al cambiar estado: ' + error.message);
       return;
     }
     setServices(prev => prev.map(s => s.id === id ? { ...s, is_active: !current } : s));
@@ -75,7 +80,7 @@ export default function ServicesAdminPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingId && !imageFile) {
-      alert('Sube un logo para el nuevo servicio.');
+      toast.error('Sube un logo para el nuevo servicio.');
       return;
     }
 
@@ -102,8 +107,9 @@ export default function ServicesAdminPage() {
 
       resetForm();
       fetchServices();
+      toast.success(editingId ? 'Servicio actualizado.' : 'Servicio creado.');
     } catch (error: any) {
-      alert('Error: ' + error.message);
+      toast.error('Error: ' + error.message);
     } finally {
       setIsSaving(false);
     }

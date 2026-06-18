@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 // Marcas aliadas: tiendas que publican campañas + cupones flash SIN pagar plan,
 // con un tope de campañas activas que fija el admin. Además pueden recibir un
@@ -156,7 +157,8 @@ export default function AliadosPage() {
   };
 
   const revokeAlly = async (s: Store) => {
-    if (!confirm(`Quitar el estatus de aliado a "${s.name}"? Dejará de poder publicar campañas/cupones gratis y no recibirá % de ingresos a partir de hoy. El historial se conserva.`)) return;
+    const ok = await confirmDialog({ title: `Quitar estatus de aliado a "${s.name}"`, message: 'Dejará de poder publicar campañas/cupones gratis y no recibirá % de ingresos a partir de hoy. El historial se conserva.', confirmLabel: 'Quitar', tone: 'danger' });
+    if (!ok) return;
     setSavingId(s.id);
     setFeedback(null);
     const { error } = await supabase

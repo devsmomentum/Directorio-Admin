@@ -9,6 +9,8 @@ import { useClienteStore } from '../store-context';
 import K2BannerPreview from '../../components/K2BannerPreview';
 import K2CampaignPreview from '../../components/K2CampaignPreview';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS, FLASH_COUPON_PLANS as FLASH_PLANS } from '../../../lib/plans';
+import { toast } from '../../components/toast';
+import { confirmDialog as confirmModal } from '../../components/confirm-dialog';
 
 const APPROVAL_CHIP: Record<string, { label: string; cls: string }> = {
   pending:  { label: 'EN REVISIÓN', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/30' },
@@ -326,7 +328,7 @@ export default function ClientePromocionesPage() {
   const handleImage = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 500 * 1024) { alert('La imagen debe pesar menos de 500 KB.'); e.target.value = ''; return; }
+    if (f.size > 500 * 1024) { toast.error('La imagen debe pesar menos de 500 KB.'); e.target.value = ''; return; }
     setCImageFile(f);
     setCImageUrl(URL.createObjectURL(f));
   };
@@ -336,7 +338,7 @@ export default function ClientePromocionesPage() {
     const isVideo = f.type.startsWith('video/');
     const limitBytes = isVideo ? 120 * 1024 * 1024 : 50 * 1024 * 1024;
     if (f.size > limitBytes) {
-      alert(`El archivo debe pesar menos de ${isVideo ? '120 MB' : '50 MB'}.`);
+      toast.error(`El archivo debe pesar menos de ${isVideo ? '120 MB' : '50 MB'}.`);
       e.target.value = '';
       return;
     }
@@ -344,7 +346,7 @@ export default function ClientePromocionesPage() {
     // los bloqueamos aquí para que el cliente no descubra el fallo en el equipo.
     if (f.type.startsWith('video/')) {
       const check = await validateKioskVideo(f);
-      if (!check.ok) { alert(check.message); e.target.value = ''; return; }
+      if (!check.ok) { toast.error(check.message || 'El video no es válido.'); e.target.value = ''; return; }
     }
     setAMediaFile(f);
     setAMediaType(f.type.startsWith('video/') ? 'video' : 'image');
@@ -686,7 +688,7 @@ export default function ClientePromocionesPage() {
   };
 
   const deleteCoupon = async (c: any) => {
-    if (!confirm(`Eliminar el cupón "${c.title}"?`)) return;
+    if (!(await confirmModal({ title: 'Eliminar cupón', message: `¿Eliminar el cupón "${c.title}"?`, confirmLabel: 'Eliminar', tone: 'danger' }))) return;
     const { error } = await supabase.from('coupons').delete().eq('id', c.id);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
     await removePublicidadFile(c.image_url);
@@ -694,7 +696,7 @@ export default function ClientePromocionesPage() {
     fetchData();
   };
   const deleteCampaign = async (c: any) => {
-    if (!confirm(`Eliminar la campaña "${c.brand_name}"?`)) return;
+    if (!(await confirmModal({ title: 'Eliminar campaña', message: `¿Eliminar la campaña "${c.brand_name}"?`, confirmLabel: 'Eliminar', tone: 'danger' }))) return;
     const { error } = await supabase.from('ad_campaigns').delete().eq('id', c.id);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
     await removePublicidadFile(c.media_url);
@@ -798,12 +800,12 @@ export default function ClientePromocionesPage() {
     if (!file) return;
     const isVideo = file.type.startsWith('video/');
     if (file.size > 100 * 1024 * 1024) {
-      alert('El archivo debe pesar menos de 100 MB.');
+      toast.error('El archivo debe pesar menos de 100 MB.');
       e.target.value = ''; return;
     }
     if (isVideo) {
       const check = await validateKioskVideo(file);
-      if (!check.ok) { alert(check.message); e.target.value = ''; return; }
+      if (!check.ok) { toast.error(check.message || 'El video no es válido.'); e.target.value = ''; return; }
     }
     setBMediaFile(file);
     setBMediaType(isVideo ? 'video' : 'image');
@@ -889,7 +891,7 @@ export default function ClientePromocionesPage() {
   };
 
   const deleteBanner = async (b: any) => {
-    if (!confirm(`¿Eliminar el banner de la posición "${b.ui_position}"?`)) return;
+    if (!(await confirmModal({ title: 'Eliminar banner', message: `¿Eliminar el banner de la posición "${b.ui_position}"?`, confirmLabel: 'Eliminar', tone: 'danger' }))) return;
     const { error } = await supabase.from('banners').delete().eq('id', b.id);
     if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
     await removePublicidadFile(b.media_url);

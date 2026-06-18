@@ -3,11 +3,14 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
+import { ErrorState } from '../../components/ErrorState';
+import { PageSpinner } from '../../components/PageSpinner';
 
 export default function ClienteCuentaPage() {
   const { stores, selectedStore: store, refreshStores } = useClienteStore();
   const [user, setUser] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
@@ -18,9 +21,16 @@ export default function ClienteCuentaPage() {
   const [telefonoPersonal, setTelefonoPersonal] = useState('');
 
   const fetchUser = async () => {
+    setLoading(true);
+    setLoadError(false);
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) { setLoading(false); return; }
-    const { data: u } = await supabase.from('users').select('*').eq('id', authUser.id).maybeSingle();
+    const { data: u, error } = await supabase.from('users').select('*').eq('id', authUser.id).maybeSingle();
+    if (error) {
+      setLoadError(true);
+      setLoading(false);
+      return;
+    }
     setUser(u);
     if (u) {
       setFullName(u.full_name || '');
@@ -71,10 +81,16 @@ export default function ClienteCuentaPage() {
   };
 
   if (loading) {
+    return <PageSpinner label="Cargando tu cuenta…" />;
+  }
+
+  if (loadError) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <ErrorState
+        title="No se pudo cargar tu cuenta"
+        message="Revisa tu conexión e inténtalo de nuevo."
+        onRetry={fetchUser}
+      />
     );
   }
 

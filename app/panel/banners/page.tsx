@@ -5,6 +5,8 @@ import { supabase } from '../../../lib/supabase';
 import { validateKioskVideo } from '../../../lib/videoValidation';
 import Pagination, { usePagination } from '../../components/Pagination';
 import K2BannerPreview from '../../components/K2BannerPreview';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 const BANNER_W = 80;
 const BANNER_H = 192;
@@ -151,7 +153,7 @@ export default function BannersAdminPage() {
 
     if (bannersRes.error) {
       console.error("Error fetching banners:", bannersRes.error);
-      alert("Error al cargar banners: " + bannersRes.error.message);
+      toast.error("Error al cargar banners: " + bannersRes.error.message);
     } else if (bannersRes.data) {
       setBanners(bannersRes.data as Banner[]);
     }
@@ -199,13 +201,13 @@ export default function BannersAdminPage() {
     if (!file) return;
     const isVideo = file.type.startsWith('video/');
     if (file.size > (isVideo ? 15 : 2) * 1024 * 1024) {
-      alert(`Máximo ${isVideo ? '15 MB (video)' : '2 MB (imagen)'}.`);
+      toast.error(`Máximo ${isVideo ? '15 MB (video)' : '2 MB (imagen)'}.`);
       e.target.value = ''; return;
     }
     // Compatibilidad con el decoder del kiosco K2 (rechaza 4K / HEVC / Level alto).
     if (isVideo) {
       const check = await validateKioskVideo(file);
-      if (!check.ok) { alert(check.message); e.target.value = ''; return; }
+      if (!check.ok) { toast.error(check.message || 'El video no es válido.'); e.target.value = ''; return; }
     }
     setMediaFile(file);
     setMediaType(isVideo ? 'video' : 'image');
@@ -214,18 +216,18 @@ export default function BannersAdminPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingId && !mediaFile) { alert('Sube un archivo multimedia.'); return; }
+    if (!editingId && !mediaFile) { toast.error('Sube un archivo multimedia.'); return; }
 
     // Tienda DIAMANTE es obligatoria — el slot del banner solo se vende dentro
     // de ese plan. Validamos en cliente para feedback inmediato; el trigger
     // `enforce_banner_diamante` lo refuerza en BD.
     if (!storeId) {
-      alert('Vincula una tienda con plan DIAMANTE antes de guardar el banner.');
+      toast.error('Vincula una tienda con plan DIAMANTE antes de guardar el banner.');
       return;
     }
     const storeStillDiamante = diamanteStores.some(s => s.id === storeId);
     if (!storeStillDiamante) {
-      alert('La tienda seleccionada ya no tiene plan DIAMANTE. Elige otra tienda DIAMANTE activa.');
+      toast.error('La tienda seleccionada ya no tiene plan DIAMANTE. Elige otra tienda DIAMANTE activa.');
       return;
     }
 
@@ -261,19 +263,23 @@ export default function BannersAdminPage() {
         if (error) throw error;
       }
       resetForm(); fetchData();
-    } catch (err: any) { alert(`Error: ${err.message}`); }
+      toast.success(editingId ? 'Banner actualizado.' : 'Banner creado.');
+    } catch (err: any) { toast.error(`Error: ${err.message}`); }
     finally { setIsSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Eliminar este banner?')) return;
+    const ok = await confirmDialog({ title: 'Eliminar banner', message: '¿Seguro que deseas eliminar este banner? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', tone: 'danger' });
+    if (!ok) return;
     const { error } = await supabase.from('banners').delete().eq('id', id);
-    if (error) alert(error.message); else fetchData();
+    if (error) { toast.error(error.message); return; }
+    fetchData();
+    toast.success('Banner eliminado.');
   };
 
   const handleToggle = async (id: string, current: boolean) => {
     const { error } = await supabase.from('banners').update({ is_active: !current }).eq('id', id);
-    if (error) { alert(error.message); return; }
+    if (error) { toast.error(error.message); return; }
     setBanners(prev => prev.map(b => b.id === id ? { ...b, is_active: !current } : b));
   };
 

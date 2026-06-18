@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { downloadCSV } from '../../../lib/csv';
+import { toast } from '../../components/toast';
 
 // Fila del agregado diario de interacciones (migración 028). Reemplaza el
 // consumo crudo de analytics_events (que ahora se purga a los 30 días).
@@ -371,7 +372,7 @@ export default function AnalyticsDashboard() {
     downloadCSV(filename, headers, rows);
 
   const handleExportTraffic = () => {
-    if (!filteredInteractions.length) return alert('No hay interacciones para exportar.');
+    if (!filteredInteractions.length) return toast.info('No hay interacciones para exportar.');
     const headers = ['Fecha', 'Tipo', 'Modulo', 'Elemento', 'Kiosco ID', 'Kiosco', 'Cantidad'];
     const rows = filteredInteractions.map(e => {
       const k = kiosks.find(k => k.id === e.kiosk_id);
@@ -396,13 +397,13 @@ export default function AnalyticsDashboard() {
             rows.push([`"${c.brand_name}"`, day, String(validCount), String(fullCount), String(partialCount)]);
           });
       });
-    if (!rows.length) return alert('Sin impresiones registradas para exportar.');
+    if (!rows.length) return toast.info('Sin impresiones registradas para exportar.');
     exportCSV(['Campana', 'Fecha', 'Impresiones Validas', 'Vistas Completas', 'Vistas Parciales'], rows, `Impresiones_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
 
   const handleExportHeatmap = () => {
-    if (!heatmapData.rows.length) return alert('Sin datos de heatmap para exportar.');
+    if (!heatmapData.rows.length) return toast.info('Sin datos de heatmap para exportar.');
     const headers = ['Kiosco', 'Ubicacion', ...heatmapData.topModules];
     const rows = heatmapData.rows.map(r => [
       `"${r.kioskName}"`,

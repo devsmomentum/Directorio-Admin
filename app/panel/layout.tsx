@@ -6,6 +6,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { MallHubTile, MallHubWordmark } from '../components/MallHubMark';
+import { Toaster } from '../components/toast';
+import { ConfirmHost } from '../components/confirm-dialog';
+import { onUnreadChanged } from '../components/unread-bus';
 
 // Shell del panel admin. Guard + sidebar fijo + área de contenido scrollable.
 // Guard:
@@ -94,10 +97,13 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
     const id = setInterval(load, 30_000);
     const onFocus = () => load();
     window.addEventListener('focus', onFocus);
+    // La página de notificaciones avisa por el bus al marcar como leído.
+    const unsub = onUnreadChanged(load);
     return () => {
       cancelled = true;
       clearInterval(id);
       window.removeEventListener('focus', onFocus);
+      unsub();
     };
   }, [authorized, pathname]);
 
@@ -291,6 +297,8 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           </div>
         </main>
       </div>
+      <Toaster />
+      <ConfirmHost />
     </div>
   );
 }

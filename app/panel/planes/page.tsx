@@ -4,6 +4,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 import { PLAN_COLOR_PARTS as PLAN_COLORS, DEFAULT_PLAN_COLOR as DEFAULT_COLOR } from '../../../lib/plans';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 // Planes that apply to stores and/or coupons - managed in the store_plans table
 // Falls back to inline editable plan definitions if no dedicated table exists
@@ -102,7 +104,7 @@ export default function PlanesCRUD() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!planName || !planKey) {
-      alert('El nombre y la clave del plan son obligatorios.');
+      toast.error('El nombre y la clave del plan son obligatorios.');
       return;
     }
     setSubmitting(true);
@@ -141,22 +143,26 @@ export default function PlanesCRUD() {
       }
       resetForm();
       fetchPlans();
+      toast.success(editingId ? 'Plan actualizado.' : 'Plan creado.');
     } catch (error: any) {
-      alert('Error: ' + error.message);
+      toast.error('Error: ' + error.message);
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Eliminar este plan? Las tiendas o cupones que lo usen quedarán sin plan asignado.')) return;
-    await supabase.from('plans').delete().eq('id', id);
+    const ok = await confirmDialog({ title: 'Eliminar plan', message: 'Las tiendas o cupones que lo usen quedarán sin plan asignado.', confirmLabel: 'Eliminar', tone: 'danger' });
+    if (!ok) return;
+    const { error } = await supabase.from('plans').delete().eq('id', id);
+    if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
     fetchPlans();
+    toast.success('Plan eliminado.');
   };
 
   const handleToggleActive = async (id: string, current: boolean) => {
     const { error } = await supabase.from('plans').update({ is_active: !current }).eq('id', id);
-    if (error) { alert('Error: ' + error.message); return; }
+    if (error) { toast.error('Error: ' + error.message); return; }
     setPlans(prev => prev.map(p => p.id === id ? { ...p, is_active: !current } : p));
   };
 

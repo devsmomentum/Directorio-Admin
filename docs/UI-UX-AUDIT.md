@@ -34,12 +34,20 @@
   de solo-lectura en el otro; corregir el default.
   Archivos: `app/panel/banners/page.tsx` (~13, ~90, ~192), `app/panel/solicitudes/page.tsx` (~277-279).
 
-- [ ] 🔴 **No hay componentes compartidos Confirm/Toast/Modal/Spinner/EmptyState.**
-  Confirmaciones ~100% `confirm()` nativo y errores con `alert()` (~30 llamadas
-  en 16 páginas; `campanias` encadena doble `confirm()` al pausar). El spinner de
-  carga está reimplementado ~19 veces con colores distintos por página. Mayoría de
-  guardados sin feedback de éxito. → Crear `ConfirmDialog`, `useToast()`,
-  `<PageSpinner/>`, `Modal`, `EmptyState` y migrar. Empezar por toast + confirm + spinner.
+- [~] 🔴 **No hay componentes compartidos Confirm/Toast/Modal/Spinner/EmptyState.**
+  → Hecho: creados `app/components/toast.tsx` (`toast.success/error/info` +
+  `<Toaster/>`), `app/components/confirm-dialog.tsx` (`confirmDialog()` que
+  devuelve `Promise<boolean>` + `<ConfirmHost/>`) y `app/components/PageSpinner.tsx`,
+  todos con tokens de tema (light/dark). `<Toaster/>` y `<ConfirmHost/>` montados
+  en ambos layouts. Migrados TODOS los `alert()`/`confirm()` nativos del panel y el
+  cliente (≈70 alert + ≈18 confirm en 15 archivos): errores→`toast.error`,
+  avisos→`toast.info`, y se añadió `toast.success` tras guardados/eliminaciones que
+  antes no daban feedback. El doble-`confirm()` de pausar campaña quedó en un solo
+  diálogo. `mapa`/`promociones`/`equipo`/`aliados` conservan su feedback propio pero
+  ya usan los diálogos compartidos.
+  _Pendiente:_ (a) crear `Modal`/`EmptyState` base; (b) cambiar los ~19 spinners
+  inline a `<PageSpinner/>`; (c) `login` mantiene 1 `alert()` (está fuera de los
+  layouts, no tiene host montado).
 
 ### Cliente
 
@@ -116,19 +124,27 @@
   (`tiendas` sí pagina bien con `pg.paginated` — no tocar.) → Añadir paginación a
   `clientes` y búsqueda a `aliados`.
 
-- [ ] 🟡 **`alert()` mezclado con el sistema de banners propio** en `promociones`
-  (usa `confirm()`/`alert()` nativos aun teniendo `confirmDialog` custom) y en el
-  CSV del dashboard cliente. → Unificar al toast/confirm compartido.
+- [x] 🟡 **`alert()` mezclado con el sistema de banners propio** en `promociones`
+  y CSV del dashboard cliente. → Hecho: `promociones` usa los diálogos compartidos
+  (import con alias `confirmModal` para no chocar con su `confirmDialog` local) y
+  `toast.error`; el CSV del dashboard usa `toast.info`.
 
-- [ ] 🟡 **Estados de error tragados en cliente** (`dashboard`, `pagos`, `planes`,
-  `equipo`, `notificaciones`): errores sin feedback y sin refetch tras la acción →
-  carga fallida se ve como "vacío" y el estado queda desincronizado.
+- [x] 🟡 **Estados de error tragados en cliente.** → Hecho: creado
+  `app/components/ErrorState.tsx` (con reintento) y aplicado en `dashboard`,
+  `pagos`, `planes`, `cuenta` y `notificaciones`: las cargas ahora detectan el
+  `.error` de Supabase (o lanzan, en `dashboard`) y muestran un estado de error con
+  botón "Reintentar" en vez de verse como "vacío". Las acciones (`markOne`/`markAll`,
+  abonos) ya dan feedback por `toast`/`feedback`. Spinners de carga cambiados a
+  `<PageSpinner/>` en esas páginas.
 
-- [ ] 🟡 **Badge de no-leídas con lag de ~30s.** El layout (admin y cliente) sondea
-  cada 30s; la página de notificaciones marca como leído solo en estado local, así
-  que el badge tarda hasta 30s en bajar. → Subir el contador a contexto y
-  decrementarlo al marcar.
-  Archivos: `app/cliente/layout.tsx` (~138-159), `app/cliente/notificaciones/page.tsx`.
+- [x] 🟡 **Badge de no-leídas con lag de ~30s.** → Hecho en ambos lados.
+  - Cliente: `unreadNotifications` + `refreshUnread()` expuestos en
+    `store-context`; `notificaciones` llama `refreshUnread()` al marcar → el badge
+    baja al instante.
+  - Admin: el panel no tiene contexto compartido, así que se añadió un bus mínimo
+    (`app/components/unread-bus.ts`); `notificaciones` admin dispara
+    `notifyUnreadChanged()` y el layout re-consulta. Ambas páginas muestran
+    `toast.error` si falla el marcado.
 
 - [ ] 🟡 **Filtro de rango del dashboard cliente** solo gobierna parte de las
   tarjetas (campaigns/impressions/searches/coupons); `requests` y `redeemed` se
@@ -189,10 +205,12 @@
 2. **Centralizar helpers** — `lib/plans.ts` ✅, `lib/csv.ts` ✅, ampliar
    `lib/storage.ts` (docs privados ✅ + upload genérico ~), `lib/format.ts`
    (módulo ✅, falta migrar call-sites). _(mayormente hecho)_
-3. **Componentes compartidos** — `useToast()` + `ConfirmDialog` + `<PageSpinner/>`,
-   luego `Modal`/`EmptyState`. Migrar `alert()`/`confirm()` por página.
-4. **Sincronización y estados** — badge en contexto, errores visibles en cliente,
-   rango del dashboard, cobertura de auditoría (6 entidades).
+3. **Componentes compartidos** — `toast()` ✅ + `confirmDialog()` ✅ +
+   `<PageSpinner/>` ✅ creados y `alert()`/`confirm()` migrados ✅. Falta `Modal`/
+   `EmptyState` base y reemplazar los spinners inline por `<PageSpinner/>`.
+4. **Sincronización y estados** — badge sin lag ✅, errores visibles en cliente ✅.
+   Falta: filtro de rango del dashboard (gobernar todo), cobertura de auditoría
+   (6 entidades).
 5. **Decisiones de producto** (requieren criterio del equipo) — unificar flujos de
    aprobación, consolidar pagos del cliente, reconciliar tutorial, decidir destino
    de `categorias`/`services`/`mapa`.

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
+import { toast } from '../../components/toast';
+import { notifyUnreadChanged } from '../../components/unread-bus';
 
 type Notification = {
   id: string;
@@ -56,8 +58,9 @@ export default function AdminNotificacionesPage() {
     setBusy(true);
     const { error } = await supabase.rpc('mark_admin_notification_read', { p_id: n.id });
     setBusy(false);
-    if (error) return;
+    if (error) { toast.error('No se pudo marcar como leída.'); return; }
     setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+    notifyUnreadChanged();
   };
 
   const markAll = async () => {
@@ -65,9 +68,11 @@ export default function AdminNotificacionesPage() {
     setBusy(true);
     const { error } = await supabase.rpc('mark_all_admin_notifications_read');
     setBusy(false);
-    if (error) return;
+    if (error) { toast.error('No se pudieron marcar como leídas.'); return; }
     const now = new Date().toISOString();
     setNotifications(prev => prev.map(n => n.read_at ? n : { ...n, read_at: now }));
+    notifyUnreadChanged();
+    toast.success('Notificaciones marcadas como leídas.');
   };
 
   if (loading) {

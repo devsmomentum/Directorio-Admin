@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 type StaffRow = {
   user_id: string;
@@ -140,7 +141,13 @@ export default function ClienteEquipoPage() {
 
   const handleRemove = async (row: StaffRow) => {
     if (!store) return;
-    if (!confirm(`¿Quitar a ${row.full_name || row.email} del equipo de ${store.name}?`)) return;
+    const ok = await confirmDialog({
+      title: 'Quitar del equipo',
+      message: `¿Quitar a ${row.full_name || row.email} del equipo de ${store.name}?`,
+      confirmLabel: 'Quitar',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setRemovingId(row.user_id);
     const { error } = await supabase.rpc('owner_remove_store_staff', {
       p_user_id: row.user_id,

@@ -7,6 +7,8 @@ import { supabase } from '../../lib/supabase';
 import { ClienteStore, ClienteStoreContext, StoreRole } from './store-context';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { MallHubWordmark } from '../components/MallHubMark';
+import { Toaster } from '../components/toast';
+import { ConfirmHost } from '../components/confirm-dialog';
 
 type ClienteProfile = {
   id: string;
@@ -133,30 +135,31 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   // Cierra drawer móvil al cambiar de ruta
   useEffect(() => { setSidebarOpen(false); }, [pathname]);
 
-  // Notificaciones sin leer de la tienda seleccionada — refresca en cada
-  // navegación, focus de ventana y cada 30s para mantener el badge fresco.
+  // Notificaciones sin leer de la tienda seleccionada. Expuesto en el contexto
+  // como refreshUnread para que la página de notificaciones lo invoque al marcar
+  // como leído y el badge baje al instante (sin esperar el sondeo de 30s).
+  const refreshUnread = useCallback(async () => {
+    if (!isAuthorized || !selectedId) { setUnreadNotifications(0); return; }
+    const { count } = await supabase
+      .from('client_notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('store_id', selectedId)
+      .is('read_at', null);
+    setUnreadNotifications(count ?? 0);
+  }, [isAuthorized, selectedId]);
+
+  // Refresca en cada navegación, focus de ventana y cada 30s.
   useEffect(() => {
     if (!isAuthorized || !selectedId) { setUnreadNotifications(0); return; }
-    let cancelled = false;
-    const load = async () => {
-      const { count } = await supabase
-        .from('client_notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('store_id', selectedId)
-        .is('read_at', null);
-      if (cancelled) return;
-      setUnreadNotifications(count ?? 0);
-    };
-    load();
-    const id = setInterval(load, 30_000);
-    const onFocus = () => load();
+    refreshUnread();
+    const id = setInterval(refreshUnread, 30_000);
+    const onFocus = () => refreshUnread();
     window.addEventListener('focus', onFocus);
     return () => {
-      cancelled = true;
       clearInterval(id);
       window.removeEventListener('focus', onFocus);
     };
-  }, [isAuthorized, selectedId, pathname]);
+  }, [isAuthorized, selectedId, pathname, refreshUnread]);
 
   const handleLogout = async () => {
     if (typeof window !== 'undefined') localStorage.removeItem(STORE_LS_KEY);
@@ -191,7 +194,9 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     selectedStore,
     setSelectedStoreId: handleSelect,
     refreshStores: fetchStores,
-  }), [stores, selectedStore, fetchStores]);
+    unreadNotifications,
+    refreshUnread,
+  }), [stores, selectedStore, fetchStores, unreadNotifications, refreshUnread]);
 
   // Si el rol del vendedor/publicista aún no coincide con la ruta, el redirect
   // de abajo ya se disparó pero el render se adelanta (React es síncrono,
@@ -447,6 +452,8 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
           </main>
         </div>
       </div>
+      <Toaster />
+      <ConfirmHost />
     </ClienteStoreContext.Provider>
   );
 }

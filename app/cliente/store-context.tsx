@@ -31,6 +31,11 @@ export type ClienteStoreCtx = {
   selectedStore: ClienteStore | null;
   setSelectedStoreId: (id: string) => void;
   refreshStores: () => Promise<void>;
+  /** Notificaciones sin leer de la tienda activa (alimenta el badge del sidebar). */
+  unreadNotifications: number;
+  /** Re-consulta el conteo de no-leídas. Llamar tras marcar como leído para que
+   *  el badge baje al instante en vez de esperar al sondeo de 30s. */
+  refreshUnread: () => Promise<void>;
 };
 
 export const ClienteStoreContext = createContext<ClienteStoreCtx | null>(null);

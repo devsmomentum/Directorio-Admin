@@ -7,6 +7,9 @@ import { useClienteStore } from '../store-context';
 import { AbonoModal, AbonoRequest } from '../abono-modal';
 import { downloadCSV, slugify } from '../../../lib/csv';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
+import { toast } from '../../components/toast';
+import { ErrorState } from '../../components/ErrorState';
+import { PageSpinner } from '../../components/PageSpinner';
 
 type Range = '7d' | '30d' | '90d' | 'all';
 const RANGE_LABELS: Record<Range, string> = {
@@ -45,6 +48,10 @@ async function fetchStoreMetrics(storeId: string, startDay: string | null): Prom
       .eq('store_id', storeId).order('created_at', { ascending: false }),
   ]);
 
+  // Las tablas core (campañas/cupones) son la fuente del dashboard: si fallan,
+  // propagamos el error para mostrar un estado de error en vez de "vacío".
+  if (campRes.error) throw campRes.error;
+  if (couponsRes.error) throw couponsRes.error;
   const campaigns = campRes.data || [];
   const coupons = couponsRes.data || [];
   const campIds = campaigns.map(c => c.id);
@@ -153,6 +160,8 @@ export default function ClienteDashboardPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [range, setRange] = useState<Range>('30d');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
   const [abonoFeedback, setAbonoFeedback] = useState<string | null>(null);
 
@@ -168,6 +177,7 @@ export default function ClienteDashboardPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setLoadError(false);
       try {
         const start = rangeStart(range);
         const startDay = start ? start.split('T')[0] : null;
@@ -190,12 +200,14 @@ export default function ClienteDashboardPage() {
         setSearchRows(metrics.searchRows);
         setCouponRows(metrics.couponRows);
         setRequests(reqRes.data || []);
+      } catch {
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [range, store]);
+  }, [range, store, reloadKey]);
 
   const totalImpressions = useMemo(() =>
     impressions.reduce((s, d) => s + validOf(d), 0), [impressions]);
@@ -322,21 +334,21 @@ export default function ClienteDashboardPage() {
 
   const exportSelImpresiones = () => {
     const rows = buildImpressionRows(campaigns, impressions);
-    if (!rows.length) { alert('Sin impresiones de campaña en el rango seleccionado.'); return; }
+    if (!rows.length) { toast.info('Sin impresiones de campaña en el rango seleccionado.'); return; }
     downloadCSV(`metricas_${slugify(store!.name)}_impresiones_${stamp}.csv`,
       ['fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas', 'vistas_parciales'], rows);
   };
 
   const exportSelBusquedas = () => {
     const rows = buildSearchRows(searchRows);
-    if (!rows.length) { alert('Sin búsquedas ni clicks en el rango seleccionado.'); return; }
+    if (!rows.length) { toast.info('Sin búsquedas ni clicks en el rango seleccionado.'); return; }
     downloadCSV(`metricas_${slugify(store!.name)}_busquedas_${stamp}.csv`,
       ['fecha', 'tipo', 'termino', 'cantidad'], rows);
   };
 
   const exportSelCupones = () => {
     const rows = buildCouponStatRows(couponRows);
-    if (!rows.length) { alert('Sin actividad de cupones flash en el rango seleccionado.'); return; }
+    if (!rows.length) { toast.info('Sin actividad de cupones flash en el rango seleccionado.'); return; }
     downloadCSV(`metricas_${slugify(store!.name)}_cupones_${stamp}.csv`,
       ['fecha', 'mostrados', 'canjeados'], rows);
   };
@@ -382,7 +394,7 @@ export default function ClienteDashboardPage() {
             : buildCouponStatRows(data.couponRows);
         for (const r of part) rows.push([s.name, ...r]);
       }
-      if (!rows.length) { alert('Sin datos para exportar en el rango seleccionado.'); return; }
+      if (!rows.length) { toast.info('Sin datos para exportar en el rango seleccionado.'); return; }
 
       const header = kind === 'impresiones'
         ? ['tienda', 'fecha', 'campania', 'campaign_id', 'kiosk_id', 'impresiones_validas', 'vistas_completas', 'vistas_parciales']
@@ -412,10 +424,16 @@ export default function ClienteDashboardPage() {
   }
 
   if (loading) {
+    return <PageSpinner label="Cargando tu tablero…" />;
+  }
+
+  if (loadError) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <ErrorState
+        title="No se pudo cargar tu tablero"
+        message="Hubo un problema al traer tus métricas. Revisa tu conexión e inténtalo de nuevo."
+        onRetry={() => setReloadKey(k => k + 1)}
+      />
     );
   }
 

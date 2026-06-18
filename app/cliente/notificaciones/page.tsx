@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
+import { toast } from '../../components/toast';
+import { ErrorState } from '../../components/ErrorState';
+import { PageSpinner } from '../../components/PageSpinner';
 
 type Notification = {
   id: string;
@@ -27,21 +30,28 @@ const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
 };
 
 export default function ClienteNotificacionesPage() {
-  const { selectedStore: store } = useClienteStore();
+  const { selectedStore: store, refreshUnread } = useClienteStore();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [filter, setFilter] = useState<Filter>('unread');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
     setLoading(true);
-    const { data } = await supabase
+    setError(false);
+    const { data, error: err } = await supabase
       .from('client_notifications')
       .select('*')
       .eq('store_id', store.id)
       .order('created_at', { ascending: false })
       .limit(500);
+    if (err) {
+      setError(true);
+      setLoading(false);
+      return;
+    }
     setNotifications(data || []);
     setLoading(false);
   };
@@ -63,8 +73,9 @@ export default function ClienteNotificacionesPage() {
     setBusy(true);
     const { error } = await supabase.rpc('mark_client_notification_read', { p_id: n.id });
     setBusy(false);
-    if (error) return;
+    if (error) { toast.error('No se pudo marcar como leída.'); return; }
     setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
+    refreshUnread();
   };
 
   const markAll = async () => {
@@ -72,9 +83,11 @@ export default function ClienteNotificacionesPage() {
     setBusy(true);
     const { error } = await supabase.rpc('mark_all_client_notifications_read', { p_store_id: store.id });
     setBusy(false);
-    if (error) return;
+    if (error) { toast.error('No se pudieron marcar como leídas.'); return; }
     const now = new Date().toISOString();
     setNotifications(prev => prev.map(n => n.read_at ? n : { ...n, read_at: now }));
+    refreshUnread();
+    toast.success('Notificaciones marcadas como leídas.');
   };
 
   if (!store) {
@@ -86,10 +99,16 @@ export default function ClienteNotificacionesPage() {
   }
 
   if (loading) {
+    return <PageSpinner label="Cargando notificaciones…" />;
+  }
+
+  if (error) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <ErrorState
+        title="No se pudieron cargar las notificaciones"
+        message="Revisa tu conexión e inténtalo de nuevo."
+        onRetry={fetchData}
+      />
     );
   }
 

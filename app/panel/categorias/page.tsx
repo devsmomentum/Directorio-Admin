@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { toast } from '../../components/toast';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 export default function CategoriasCRUD() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -47,8 +49,9 @@ export default function CategoriasCRUD() {
       }
       resetForm();
       fetchCategories();
+      toast.success(editingId ? 'Categoría actualizada.' : 'Categoría creada.');
     } catch (error: any) {
-      alert('Error al guardar: ' + error.message);
+      toast.error('Error al guardar: ' + error.message);
     } finally {
       setSubmitting(false);
     }
@@ -62,10 +65,17 @@ export default function CategoriasCRUD() {
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Eliminar esta categoria? Las tiendas asociadas podrian quedar sin categoria.')) {
-      await supabase.from('categories').delete().eq('id', id);
-      fetchCategories();
-    }
+    const ok = await confirmDialog({
+      title: 'Eliminar categoría',
+      message: 'Las tiendas asociadas podrían quedar sin categoría.',
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    const { error } = await supabase.from('categories').delete().eq('id', id);
+    if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
+    fetchCategories();
+    toast.success('Categoría eliminada.');
   };
 
   const resetForm = () => {

@@ -13,6 +13,8 @@ import {
 } from '../payment-fields';
 import { AbonoModal, AbonoRequest } from '../abono-modal';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
+import { ErrorState } from '../../components/ErrorState';
+import { PageSpinner } from '../../components/PageSpinner';
 
 function parseRejectionReason(notes: string | null | undefined): string | null {
   if (!notes) return null;
@@ -69,6 +71,7 @@ export default function ClientePagosPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [activePlan, setActivePlan] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
@@ -84,9 +87,10 @@ export default function ClientePagosPage() {
   const fetchData = async () => {
     if (!store) { setLoading(false); return; }
     setLoading(true);
+    setLoadError(false);
     const planQ = store.plan_type
       ? supabase.from('plans').select('*').eq('plan_key', store.plan_type).maybeSingle()
-      : Promise.resolve({ data: null });
+      : Promise.resolve({ data: null, error: null });
     const [txRes, reqRes, planRes] = await Promise.all([
       supabase.from('transactions')
         .select('*')
@@ -100,6 +104,11 @@ export default function ClientePagosPage() {
         .order('created_at', { ascending: false }),
       planQ,
     ]);
+    if (txRes.error || reqRes.error) {
+      setLoadError(true);
+      setLoading(false);
+      return;
+    }
     setTransactions(txRes.data || []);
     setRequests(reqRes.data || []);
     setActivePlan(planRes.data ?? null);
@@ -223,10 +232,16 @@ export default function ClientePagosPage() {
   }
 
   if (loading) {
+    return <PageSpinner label="Cargando pagos…" />;
+  }
+
+  if (loadError) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <ErrorState
+        title="No se pudieron cargar los pagos"
+        message="Revisa tu conexión e inténtalo de nuevo."
+        onRetry={fetchData}
+      />
     );
   }
 

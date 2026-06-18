@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
+import { toast } from '../../components/toast';
 
 interface ConfigEntry {
   key: string;
@@ -151,7 +152,7 @@ export default function ConfiguracionPage() {
     if (meta?.type === 'number') {
       const n = Number(value);
       if (isNaN(n) || (meta.min !== undefined && n < meta.min) || (meta.max !== undefined && n > meta.max)) {
-        alert(`Valor inválido. Debe estar entre ${meta.min} y ${meta.max}.`);
+        toast.error(`Valor inválido. Debe estar entre ${meta.min} y ${meta.max}.`);
         return;
       }
     }
@@ -163,7 +164,7 @@ export default function ConfiguracionPage() {
       .upsert({ key, value, description: meta?.hint ?? null, updated_at: now }, { onConflict: 'key' });
 
     if (error) {
-      alert('Error al guardar: ' + error.message);
+      toast.error('Error al guardar: ' + error.message);
     } else {
       setEntries(prev => {
         const existing = prev.find(e => e.key === key);
@@ -188,7 +189,7 @@ export default function ConfiguracionPage() {
     const raw = planDrafts[plan.id] ?? (plan.max_brands != null ? String(plan.max_brands) : '');
     const n = parseInt(raw);
     if (isNaN(n) || n < 0 || n > 500) {
-      alert('Valor inválido. Debe ser un número entre 0 y 500.');
+      toast.error('Valor inválido. Debe ser un número entre 0 y 500.');
       return;
     }
 
@@ -199,7 +200,7 @@ export default function ConfiguracionPage() {
       .eq('id', plan.id);
 
     if (error) {
-      alert('Error al guardar: ' + error.message);
+      toast.error('Error al guardar: ' + error.message);
     } else {
       setLoopPlans(prev => prev.map(p => p.id === plan.id ? { ...p, max_brands: n } : p));
       setPlanDrafts(d => { const next = { ...d }; delete next[plan.id]; return next; });
@@ -220,7 +221,7 @@ export default function ConfiguracionPage() {
     const raw = allyLimitDrafts[ally.id] ?? String(ally.ally_campaign_limit);
     const n = parseInt(raw);
     if (isNaN(n) || n < 1 || n > 50) {
-      alert('Valor inválido. Debe ser un número entre 1 y 50.');
+      toast.error('Valor inválido. Debe ser un número entre 1 y 50.');
       return;
     }
     setAllyLimitSaving(s => ({ ...s, [ally.id]: true }));
@@ -229,7 +230,7 @@ export default function ConfiguracionPage() {
       .update({ ally_campaign_limit: n })
       .eq('id', ally.id);
     if (error) {
-      alert('Error al guardar: ' + error.message);
+      toast.error('Error al guardar: ' + error.message);
     } else {
       setAllies(prev => prev.map(a => a.id === ally.id ? { ...a, ally_campaign_limit: n } : a));
       setAllyLimitDrafts(d => { const next = { ...d }; delete next[ally.id]; return next; });
