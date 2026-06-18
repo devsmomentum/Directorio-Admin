@@ -164,7 +164,7 @@ async function handle(req: Request): Promise<Response> {
   const chatId = toChatId(phoneRaw)
   const roleLabel = storeRole === 'seller' ? 'vendedor' : 'publicista'
   const message =
-    `Te invitaron como ${roleLabel} en una tienda de Millennium Mall.\n` +
+    `Te invitaron como ${roleLabel} en una tienda de MallHub.\n` +
     `Abre este enlace en tu teléfono para activar tu cuenta y definir tu contraseña ` +
     `(expira en 1 hora):\n${safeLink}\n\n` +
     `Si no esperabas esto, ignora este mensaje.`

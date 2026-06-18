@@ -154,15 +154,12 @@ function AuthCallbackInner() {
         return;
       }
 
-      // role decide el destino. Lo leemos de public.users (fuente de verdad).
-      const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', session.user.id)
-        .maybeSingle();
-      if (!cancelled) {
-        router.replace(profile?.role === 'admin' ? '/panel' : '/cliente/dashboard');
-      }
+      // El link de activación ya se usó (la contraseña ya fue definida): es de
+      // un solo uso. No auto-logueamos al panel/dashboard — cerramos la sesión
+      // temporal del magic-link y mandamos al login para que entre con su
+      // contraseña.
+      await supabase.auth.signOut({ scope: 'local' });
+      if (!cancelled) router.replace('/login');
     };
 
     finish();

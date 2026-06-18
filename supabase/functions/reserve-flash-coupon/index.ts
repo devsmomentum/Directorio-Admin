@@ -70,10 +70,28 @@ function qrImageUrl(token: string): string {
   return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${data}`;
 }
 
+// Normaliza el logo_url a una URL pública ABSOLUTA (los correos no resuelven
+// rutas relativas). Tolera las tres formas históricas que conviven en BD:
+//   1. URL completa (https://…) → tal cual
+//   2. Path crudo dentro del bucket (logos/x.png) → resolver con SUPABASE_URL
+//   3. Path con prefijo redundante (publicidad/logos/x.png o /publicidad/…) → limpiar y resolver
+// El bucket público es "publicidad". Devuelve null si no hay valor utilizable.
+function resolveLogoUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!v) return null;
+  if (/^https?:\/\//i.test(v)) return v;
+  const base = Deno.env.get("SUPABASE_URL");
+  if (!base) return null;
+  const cleaned = v.replace(/^\/+/, "").replace(/^publicidad\//, "");
+  return `${base.replace(/\/$/, "")}/storage/v1/object/public/publicidad/${cleaned}`;
+}
+
 function buildEmail(input: {
   nombre: string;
   couponTitle: string;
   storeName: string | null;
+  storeLogoUrl: string | null;
   endDate: string | null;
   token: string;
 }): { subject: string; html: string; text: string } {
@@ -91,8 +109,22 @@ function buildEmail(input: {
 
   const subject = `🎟️ Tu QR de canje: ${input.couponTitle}`;
 
+  // Encabezado con la tienda que ofrece el cupón: logo (si existe en BD) +
+  // nombre. El logo es opcional — si no hay, mostramos solo el nombre.
+  const logo = input.storeLogoUrl ? escapeHtml(input.storeLogoUrl) : null;
+  const storeHeader = `
+      <div style="text-align:center;margin:0 0 20px">
+        ${logo
+          ? `<img src="${logo}" alt="${safeStore}" width="72" height="72"
+               style="display:block;margin:0 auto 10px;width:72px;height:72px;border-radius:14px;object-fit:cover;border:1px solid #eee" />`
+          : ""}
+        <div style="font-size:11px;letter-spacing:2px;color:#888;text-transform:uppercase">Cupón ofrecido por</div>
+        <div style="font-size:20px;font-weight:800;color:#111;margin-top:2px">${safeStore}</div>
+      </div>`;
+
   const html = `
     <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:520px;margin:auto;padding:24px;background:#fff;color:#111">
+      ${storeHeader}
       <h1 style="color:#e53935;margin:0 0 8px">¡Hola ${safeName}!</h1>
       <p style="font-size:16px;line-height:1.5">
         Tu cupón <strong>${safeTitle}</strong> quedó <strong>reservado</strong>.
@@ -118,6 +150,8 @@ function buildEmail(input: {
   `;
 
   const text = [
+    `Cupón ofrecido por: ${input.storeName ?? "la tienda"}`,
+    ``,
     `Hola ${input.nombre},`,
     ``,
     `Tu cupón "${input.couponTitle}" quedó reservado en ${input.storeName ?? "la tienda"}.`,
@@ -193,13 +227,31 @@ Deno.serve(async (req: Request) => {
     return jsonResponse(500, { error: "rpc_empty" });
   }
 
-  // 2) Envío del QR vía Resend (misma infraestructura que el resto del
+  // 2) Logo de la tienda (best-effort): el RPC no lo devuelve, así que lo
+  //    leemos directo de stores con el store_id que sí trae. Si falla o no
+  //    existe, el correo sale igual sin logo.
+  let storeLogoUrl: string | null = null;
+  if (row.store_id) {
+    const { data: storeRow, error: storeErr } = await supabase
+      .from("stores")
+      .select("logo_url")
+      .eq("id", row.store_id)
+      .maybeSingle();
+    if (storeErr) {
+      console.warn("[reserve-flash-coupon] no se pudo leer logo de tienda:", storeErr);
+    } else {
+      storeLogoUrl = resolveLogoUrl(storeRow?.logo_url ?? null);
+    }
+  }
+
+  // 3) Envío del QR vía Resend (misma infraestructura que el resto del
   //    proyecto). Si falla, NO revertimos la reserva: el lead ya quedó
   //    registrado y el negocio puede reenviar el correo.
   const { subject, html, text } = buildEmail({
     nombre,
     couponTitle: row.coupon_title,
     storeName: row.store_name,
+    storeLogoUrl,
     endDate: row.end_date,
     token: row.redemption_token,
   });
@@ -236,7 +288,7 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // 3) Marca la reserva como notificada (best-effort).
+  // 4) Marca la reserva como notificada (best-effort).
   const { error: updateError } = await supabase
     .from("coupon_leads")
     .update({ email_sent_at: new Date().toISOString() })

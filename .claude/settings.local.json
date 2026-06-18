@@ -49,7 +49,9 @@
       "mcp__claude_ai_Supabase__execute_sql",
       "mcp__claude_ai_Supabase__get_logs",
       "mcp__claude_ai_Supabase__apply_migration",
-      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(ls -la admin/)",
+      "Bash(ls -la web/)"
     ]
   }
 }

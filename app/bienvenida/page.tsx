@@ -51,12 +51,11 @@ function BienvenidaInner() {
             ?.password_set,
         );
         if (passwordSet) {
-          const { data: profile } = await supabase
-            .from('users')
-            .select('role')
-            .eq('id', session.user.id)
-            .maybeSingle();
-          router.replace(profile?.role === 'admin' ? '/panel' : '/cliente/dashboard');
+          // El link de activación es de un solo uso: si la contraseña ya se
+          // definió, no completamos onboarding de nuevo. Cerramos la sesión
+          // temporal y mandamos al login.
+          await supabase.auth.signOut({ scope: 'local' });
+          router.replace('/login');
           return;
         }
       }
