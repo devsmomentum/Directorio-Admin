@@ -231,6 +231,22 @@ export default function BannersAdminPage() {
       return;
     }
 
+    // Reglas de slot (reforzadas en BD): 1 banner activo por posición (top /
+    // bottom) y 1 por tienda ("uno por plan"). En el futuro se podrá tener más
+    // de uno si se asignan a distintos K2.
+    if (isActive) {
+      const slotOccupied = banners.some(b => b.ui_position === uiPosition && b.is_active && b.id !== editingId);
+      if (slotOccupied) {
+        toast.error(`La posición "${uiPosition}" ya tiene un banner activo. Pausa el actual o elige otra posición.`);
+        return;
+      }
+      const storeOccupied = banners.some(b => b.store_id === storeId && b.is_active && b.id !== editingId);
+      if (storeOccupied) {
+        toast.error('Esta tienda ya tiene un banner activo. Pausa el actual antes de activar otro.');
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
       let finalUrl = mediaPreview;
@@ -278,6 +294,23 @@ export default function BannersAdminPage() {
   };
 
   const handleToggle = async (id: string, current: boolean) => {
+    // Al activar: la posición no debe estar ocupada y la tienda no debe tener
+    // ya otro banner activo (1 por posición + 1 por tienda; reforzado en BD).
+    if (!current) {
+      const banner = banners.find(b => b.id === id);
+      if (banner) {
+        const slotOccupied = banners.some(b => b.ui_position === banner.ui_position && b.is_active && b.id !== id);
+        if (slotOccupied) {
+          toast.error(`La posición "${banner.ui_position}" ya tiene un banner activo. Pausa el actual antes de activar otro.`);
+          return;
+        }
+        const storeOccupied = banners.some(b => b.store_id === banner.store_id && b.is_active && b.id !== id);
+        if (storeOccupied) {
+          toast.error('Esta tienda ya tiene un banner activo. Pausa el actual antes de activar otro.');
+          return;
+        }
+      }
+    }
     const { error } = await supabase.from('banners').update({ is_active: !current }).eq('id', id);
     if (error) { toast.error(error.message); return; }
     setBanners(prev => prev.map(b => b.id === id ? { ...b, is_active: !current } : b));

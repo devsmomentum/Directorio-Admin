@@ -6,6 +6,7 @@ import { logAdminAction } from '../../../lib/audit';
 import K2BannerPreview from '../../components/K2BannerPreview';
 import K2CampaignPreview from '../../components/K2CampaignPreview';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
+import { confirmDialog } from '../../components/confirm-dialog';
 
 const METHOD_LABEL: Record<string, string> = {
   transfer_bs: 'Transferencia Bs',
@@ -248,15 +249,79 @@ export default function SolicitudesPanelPage() {
     fetchData();
   };
 
+  // Resuelve qué slot ocuparía el banner `row` según la elección del admin
+  // (`chosen`: 'auto' | 'top' | 'bottom'). Lo usan tanto la aprobación como la
+  // previsualización del modal, para que el preview muestre el slot real.
+  //  - position: posición final (vacío si 'auto' y no hay libre).
+  //  - ownActive: banner(s) activo(s) de la MISMA tienda (se reemplazan en silencio).
+  //  - displaced: banner activo de OTRA tienda en esa posición (requiere advertencia).
+  //  - noFreeSlot: 'auto' sin ningún slot libre.
+  const resolveBannerSlot = (row: any, chosen: string) => {
+    const live = (b: any) =>
+      b.is_active && (!b.end_date || new Date(b.end_date).getTime() >= Date.now());
+    const others = banners.filter(b => b.id !== row.id && live(b));
+    const occByOther: Record<string, any> = {};
+    others.filter(b => b.store_id !== row.store_id).forEach(b => { occByOther[b.ui_position] = b; });
+    const ownActive = others.filter(b => b.store_id === row.store_id);
+
+    let position = chosen;
+    let noFreeSlot = false;
+    if (chosen === 'auto') {
+      position = (['top', 'bottom'] as const).find(p => !occByOther[p]) || '';
+      if (!position) noFreeSlot = true;
+    }
+    const displaced = position ? occByOther[position] : undefined;
+    return { position, ownActive, displaced, noFreeSlot };
+  };
+
   const approveBanner = async (row: any) => {
-    if (approvalPosition !== 'top' && approvalPosition !== 'bottom') {
-      setFeedback({ type: 'err', msg: 'Debes seleccionar "top" o "bottom" — son las únicas posiciones que el K2 renderiza.' });
+    // El admin solo aprueba. La posición se auto-asigna al primer slot libre
+    // (top→bottom) salvo que el admin elija una explícita. El banner activo de
+    // la PROPIA tienda se reemplaza en silencio (1 por tienda). SOLO se muestra
+    // advertencia si la posición elegida ya tiene el banner de OTRA tienda
+    // (desplazarlo es una decisión deliberada).
+    const { position, ownActive, displaced, noFreeSlot } = resolveBannerSlot(row, approvalPosition);
+
+    if (approvalPosition === 'auto' && noFreeSlot) {
+      setFeedback({ type: 'err', msg: 'No hay posición libre. Elige "top" o "bottom" manualmente para reemplazar el banner de otra tienda (te pediremos confirmación).' });
       return;
     }
+    if (!position) {
+      setFeedback({ type: 'err', msg: 'Selecciona "top", "bottom" o deja la asignación en Automático.' });
+      return;
+    }
+
+    // Advertencia solo cuando se desplaza el banner de OTRA tienda.
+    if (displaced) {
+      const name = storesById[displaced.store_id]?.name || 'otra tienda';
+      const ok = await confirmDialog({
+        title: 'La posición está ocupada por otra tienda',
+        message: `La posición "${position}" ya tiene el banner activo de ${name}. Si continúas, ese banner se desactivará y este ocupará su lugar. ¿Deseas continuar?`,
+        confirmLabel: 'Desactivar el otro y aprobar',
+        cancelLabel: 'Cancelar',
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
+
     setBusy(true); setFeedback(null);
-    // Asignar posición y slot antes de aprobar (el RPC no los toca)
+
+    // Desactivar: el banner propio (reemplazo silencioso) + el de otra tienda
+    // que el admin haya decidido desplazar (con advertencia previa).
+    const toDeactivate = [
+      ...ownActive.map(b => b.id),
+      ...(displaced ? [displaced.id] : []),
+    ];
+    if (toDeactivate.length > 0) {
+      const { error: deErr } = await supabase.from('banners')
+        .update({ is_active: false })
+        .in('id', toDeactivate);
+      if (deErr) { setBusy(false); setFeedback({ type: 'err', msg: deErr.message }); return; }
+    }
+
+    // Asignar posición y slot antes de aprobar (el RPC no los toca).
     const { error: updErr } = await supabase.from('banners')
-      .update({ ui_position: approvalPosition, slot_position: Number(approvalSlot) || null })
+      .update({ ui_position: position, slot_position: Number(approvalSlot) || 1 })
       .eq('id', row.id);
     if (updErr) { setBusy(false); setFeedback({ type: 'err', msg: updErr.message }); return; }
     const { error } = await supabase.rpc('admin_approve_banner', { p_banner_id: row.id });
@@ -266,10 +331,10 @@ export default function SolicitudesPanelPage() {
       action_type: 'APROBAR',
       entity_type: 'banner',
       entity_id: row.id,
-      entity_name: `Banner ${approvalPosition} (Slot ${approvalSlot})`,
-      details: { store_id: row.store_id, ui_position: approvalPosition, slot_position: Number(approvalSlot) }
+      entity_name: `Banner ${position} (Slot ${approvalSlot})`,
+      details: { store_id: row.store_id, ui_position: position, slot_position: Number(approvalSlot) }
     });
-    setFeedback({ type: 'ok', msg: `Banner aprobado en posición "${approvalPosition}" slot ${approvalSlot}. Aparecerá en el K2 en los próximos 3 minutos.` });
+    setFeedback({ type: 'ok', msg: `Banner aprobado en posición "${position}" slot ${approvalSlot}. Aparecerá en el K2 en los próximos 3 minutos.` });
     setDetail(null);
     fetchData();
   };
@@ -441,7 +506,7 @@ export default function SolicitudesPanelPage() {
                 key={b.id}
                 row={b}
                 store={storesById[b.store_id]}
-                onOpen={() => { setRejectReason(''); setApprovalPosition(b.ui_position || 'top'); setApprovalSlot(String(b.slot_position || 1)); setDetail({ kind: 'banners', row: b }); }}
+                onOpen={() => { setRejectReason(''); setApprovalPosition('auto'); setApprovalSlot(String(b.slot_position || 1)); setDetail({ kind: 'banners', row: b }); }}
               />
             ))}
           </div>
@@ -488,7 +553,9 @@ export default function SolicitudesPanelPage() {
         />
       )}
 
-      {detail && detail.kind === 'banners' && (
+      {detail && detail.kind === 'banners' && (() => {
+        const slot = resolveBannerSlot(detail.row, approvalPosition);
+        return (
         <BannerDetailModal
           row={detail.row}
           store={storesById[detail.row.store_id]}
@@ -498,12 +565,16 @@ export default function SolicitudesPanelPage() {
           setApprovalPosition={setApprovalPosition}
           approvalSlot={approvalSlot}
           setApprovalSlot={setApprovalSlot}
+          resolvedPosition={slot.position}
+          noFreeSlot={slot.noFreeSlot}
+          displacedName={slot.displaced ? (storesById[slot.displaced.store_id]?.name || 'otra tienda') : null}
           busy={busy}
           onClose={() => { if (!busy) { setDetail(null); setRejectReason(''); } }}
           onApprove={() => approveBanner(detail.row)}
           onReject={() => rejectBanner(detail.row)}
         />
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -1081,6 +1152,7 @@ function BannerCard({
 function BannerDetailModal({
   row, store, rejectReason, setRejectReason,
   approvalPosition, setApprovalPosition, approvalSlot, setApprovalSlot,
+  resolvedPosition, noFreeSlot, displacedName,
   busy, onClose, onApprove, onReject,
 }: {
   row: any;
@@ -1091,6 +1163,9 @@ function BannerDetailModal({
   setApprovalPosition: (s: string) => void;
   approvalSlot: string;
   setApprovalSlot: (s: string) => void;
+  resolvedPosition: string;
+  noFreeSlot: boolean;
+  displacedName: string | null;
   busy: boolean;
   onClose: () => void;
   onApprove: () => void;
@@ -1100,7 +1175,7 @@ function BannerDetailModal({
   const isPending = status === 'pending';
   const isVideo = row.media_type === 'video';
   const ui = approvalChip(status);
-  const positionValid = approvalPosition === 'top' || approvalPosition === 'bottom';
+  const positionValid = approvalPosition === 'auto' || approvalPosition === 'top' || approvalPosition === 'bottom';
 
   return (
     <ModalShell title="Banner en revisión" subtitle={`${store?.name || '—'} · ${row.media_type?.toUpperCase()}`} idHint={row.id} busy={busy} onClose={onClose}>
@@ -1109,7 +1184,7 @@ function BannerDetailModal({
           <K2BannerPreview
             src={row.media_url}
             type={isVideo ? 'video' : 'image'}
-            position={approvalPosition === 'bottom' ? 'bottom' : 'top'}
+            position={resolvedPosition === 'bottom' ? 'bottom' : 'top'}
             previewWidth={140}
           />
           <div className="flex-1 bg-black border border-white/10 rounded-xl overflow-hidden" style={{ minHeight: 140 }}>
@@ -1156,6 +1231,7 @@ function BannerDetailModal({
                 onChange={e => setApprovalPosition(e.target.value)}
                 className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
               >
+                <option value="auto">Automático — primer slot libre</option>
                 <option value="top">top — franja superior</option>
                 <option value="bottom">bottom — franja inferior</option>
               </select>
@@ -1175,6 +1251,21 @@ function BannerDetailModal({
           {!positionValid && (
             <p className="text-[10px] text-amber-300">
               Solo "top" y "bottom" son renderizados por el K2. Otros valores no aparecerán en pantalla.
+            </p>
+          )}
+          {approvalPosition === 'auto' && !noFreeSlot && resolvedPosition && (
+            <p className="text-[10px] text-cyan-200/80">
+              Se asignará automáticamente a la posición <span className="font-mono font-semibold">{resolvedPosition}</span> (primer slot libre). El preview ya la refleja.
+            </p>
+          )}
+          {approvalPosition === 'auto' && noFreeSlot && (
+            <p className="text-[10px] text-amber-300">
+              No hay slot libre: top y bottom están ocupados por otras tiendas. Elige "top" o "bottom" manualmente para reemplazar uno (se pedirá confirmación).
+            </p>
+          )}
+          {displacedName && (
+            <p className="text-[10px] text-amber-300">
+              La posición <span className="font-mono font-semibold">{resolvedPosition}</span> ya tiene el banner activo de <span className="font-semibold">{displacedName}</span>. Al aprobar se te pedirá confirmar para desactivarlo.
             </p>
           )}
           <p className="text-[10px] text-white/35">

@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { MallHubBrand } from '../components/MallHubMark';
+import { MallHubLogo } from '../components/MallHubLogo';
 
 // Login de Mall Hub. El destino post-login depende del rol que
 // devuelve public.users, pero la UI nunca lo menciona.
@@ -70,14 +70,14 @@ function LoginInner() {
         className="orb-2 pointer-events-none absolute -right-40 top-1/3 h-[520px] w-[520px] rounded-full blur-3xl opacity-20 dark:opacity-40"
         style={{ background: 'radial-gradient(circle, var(--brand-cliente-from), transparent 65%)' }}
       />
+      <div
+        className="orb-1 pointer-events-none absolute bottom-[-120px] left-1/2 h-[420px] w-[420px] rounded-full blur-3xl opacity-15 dark:opacity-35"
+        style={{ background: 'radial-gradient(circle, var(--accent-fuchsia), transparent 65%)' }}
+      />
 
       {/* Header — minimal, brand a la izquierda, toggle a la derecha */}
       <header className="absolute inset-x-0 top-0 z-30 flex items-center justify-between px-5 py-4 sm:px-8 lg:px-10">
-        <MallHubBrand
-          variant="mix"
-          wordSize="md"
-          tileSize={36}
-        />
+        <MallHubLogo markSize={42} wordSize="md" />
         <ThemeToggle />
       </header>
 
@@ -111,12 +111,12 @@ function LoginInner() {
             <h1 className="text-[42px] font-black leading-[1.04] tracking-tight text-fg xl:text-[52px]">
               <span className="block">Donde cada</span>
               <span className="block">
-                <span className="text-brand-mix">Mall</span>
+                <span className="text-brand-mix brand-animate">Mall</span>
                 <span
                   aria-hidden
-                  className="brand-mix mx-3 inline-block h-3 w-3 translate-y-[-6px] rounded-full xl:h-4 xl:w-4"
+                  className="brand-mix brand-animate mx-3 inline-block h-3 w-3 translate-y-[-6px] rounded-full xl:h-4 xl:w-4"
                 />
-                <span className="text-brand-mix">Hub</span>
+                <span className="text-brand-mix brand-animate">Hub</span>
               </span>
               <span className="block">a sus comercios.</span>
             </h1>
@@ -152,7 +152,7 @@ function LoginInner() {
                 <div className="scanline" />
 
                 {/* Línea brand */}
-                <div className="absolute -top-px left-10 right-10 h-px brand-mix opacity-90" />
+                <div className="brand-rule absolute -top-px left-10 right-10" />
 
                
 
@@ -323,7 +323,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="min-h-dvh bg-mesh flex items-center justify-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-cyan-500/20 border-t-cyan-500" />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-line border-t-[color:var(--brand-cliente-from)]" />
         </div>
       }
     >

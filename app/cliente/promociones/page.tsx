@@ -93,14 +93,13 @@ export default function ClientePromocionesPage() {
 
   // Banner form state
   const [bEditingId, setBEditingId] = useState<string | null>(null);
-  const [bUiPosition, setBUiPosition] = useState<string>('home_hero');
+  const [bUiPosition, setBUiPosition] = useState<string>('top');
   const [bSlotPosition, setBSlotPosition] = useState<string>('1');
   const [bMediaFile, setBMediaFile] = useState<File | null>(null);
   const [bMediaUrl, setBMediaUrl] = useState<string>('');
   const [bMediaType, setBMediaType] = useState<'image' | 'video'>('image');
   const [bStartDate, setBStartDate] = useState<string>('');
   const [bEndDate, setBEndDate] = useState<string>('');
-  const [bPreviewPosition, setBPreviewPosition] = useState<'top' | 'bottom'>('top');
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -269,7 +268,7 @@ export default function ClientePromocionesPage() {
 
   const resetBannerForm = () => {
     setBEditingId(null);
-    setBUiPosition('home_hero');
+    setBUiPosition('top');
     setBSlotPosition('1');
     setBMediaFile(null);
     setBMediaUrl('');
@@ -822,6 +821,29 @@ export default function ClientePromocionesPage() {
       return;
     }
 
+    // Igual que con las campañas: tu tienda solo puede tener UN banner activo a
+    // la vez. Si ya hay uno activo+vigente (distinto del que se edita), avisamos
+    // antes de enviar este a revisión — al aprobarlo reemplazará al actual.
+    const nowMs = Date.now();
+    const activeBanner = banners.find(b =>
+      b.id !== bEditingId &&
+      b.is_active &&
+      (!b.end_date || new Date(b.end_date).getTime() >= nowMs)
+    );
+    if (activeBanner) {
+      const ok = await confirmModal({
+        title: 'Ya tienes un banner activo',
+        message:
+          `Tu tienda solo puede tener un banner activo a la vez (posición "${activeBanner.ui_position}"). ` +
+          `Cuando el administrador apruebe este, reemplazará al banner activo actual (se desactivará). ` +
+          `¿Deseas enviarlo de todos modos?`,
+        confirmLabel: bEditingId ? 'Guardar y enviar a revisión' : 'Enviar a revisión',
+        cancelLabel: 'Cancelar',
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
+
     setSubmitting(true); setFeedback(null);
     try {
       const previousMediaUrl = bEditingId
@@ -841,21 +863,17 @@ export default function ClientePromocionesPage() {
         finalMediaType = bMediaFile.type.startsWith('video/') ? 'video' : 'image';
       }
 
-      // El slot/posición lo asigna el admin; el cliente solo envía el contenido y las fechas.
-      // En creación se mantiene el valor por defecto; en edición se preserva el valor que asignó el admin.
-      const payload: any = {
-        ui_position: bUiPosition,
-        slot_position: Number(bSlotPosition) || null,
-        media_url: finalMediaUrl,
-        media_type: finalMediaType,
-        start_date: bStartDate ? new Date(bStartDate).toISOString() : null,
-        end_date: new Date(bEndDate).toISOString(),
-        store_id: store.id,
-      };
-
       if (bEditingId) {
+        // Al editar: NO incluir ui_position ni slot_position para preservar
+        // la asignación que hizo el admin al aprobar el banner.
         const { data: updated, error } = await supabase.from('banners')
-          .update(payload)
+          .update({
+            media_url: finalMediaUrl,
+            media_type: finalMediaType,
+            start_date: bStartDate ? new Date(bStartDate).toISOString() : null,
+            end_date: new Date(bEndDate).toISOString(),
+            store_id: store.id,
+          })
           .eq('id', bEditingId)
           .select('id, is_active, approval_status')
           .single();
@@ -873,9 +891,18 @@ export default function ClientePromocionesPage() {
             : 'Banner actualizado.',
         });
       } else {
-        payload.is_active = false;
-        payload.approval_status = 'pending';
-        const { error } = await supabase.from('banners').insert([payload]);
+        // Nuevo banner: el admin asignará ui_position y slot_position al aprobarlo.
+        const { error } = await supabase.from('banners').insert([{
+          media_url: finalMediaUrl,
+          media_type: finalMediaType,
+          start_date: bStartDate ? new Date(bStartDate).toISOString() : null,
+          end_date: new Date(bEndDate).toISOString(),
+          store_id: store.id,
+          ui_position: 'top',
+          slot_position: null,
+          is_active: false,
+          approval_status: 'pending',
+        }]);
         if (error) throw error;
 
         setFeedback({ type: 'ok', msg: 'Banner enviado a revisión. El administrador asignará el slot y lo publicará al aprobarlo.' });
@@ -1606,44 +1633,17 @@ export default function ClientePromocionesPage() {
                     <K2BannerPreview
                       src={bMediaUrl}
                       type={bMediaType}
-                      position={bPreviewPosition}
+                      position="top"
                       previewWidth={140}
                     />
-                    <div className="flex flex-col gap-2 pt-1">
-                      <p className="text-[10px] text-white/50 leading-snug">
-                        El admin asignará la posición. Previsualiza cómo se vería:
-                      </p>
-                      <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setBPreviewPosition('top')}
-                          className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-colors ${
-                            bPreviewPosition === 'top'
-                              ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300'
-                              : 'bg-white/5 border-white/10 text-white/40 hover:border-white/20'
-                          }`}
-                        >
-                          ▲ Top
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBPreviewPosition('bottom')}
-                          className={`px-3 py-1 text-[10px] font-semibold rounded-lg border transition-colors ${
-                            bPreviewPosition === 'bottom'
-                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
-                              : 'bg-white/5 border-white/10 text-white/40 hover:border-white/20'
-                          }`}
-                        >
-                          ▼ Bottom
-                        </button>
-                      </div>
-                      <p className="text-[9px] text-white/25 leading-snug">
-                        Franja de 10% del alto de pantalla.<br />
-                        Resolución nativa: 1080 × 192 px.<br />
-                        Si tu imagen no es 1080 × 192 (5.625:1) se verá
-                        con bordes negros, tal como en este preview.
-                      </p>
-                    </div>
+                    <p className="text-[9px] text-white/25 leading-snug pt-1">
+                      Franja de 10% del alto de pantalla.<br />
+                      Resolución nativa: 1080 × 192 px.<br />
+                      El administrador asignará la posición<br />
+                      (superior o inferior) según disponibilidad.<br />
+                      Si tu imagen no es 1080 × 192 (5.625:1)<br />
+                      se verá con bordes negros.
+                    </p>
                   </div>
                 </div>
               )}

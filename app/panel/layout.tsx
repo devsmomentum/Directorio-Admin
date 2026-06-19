@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { MallHubTile, MallHubWordmark } from '../components/MallHubMark';
+import { MallHubLogo, MallHubMark } from '../components/MallHubLogo';
 import { Toaster } from '../components/toast';
 import { ConfirmHost } from '../components/confirm-dialog';
 import { onUnreadChanged } from '../components/unread-bus';
@@ -177,8 +177,10 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-bg text-fg">
-      {/* halo de marca, decorativo */}
-      <div className="halo-admin pointer-events-none absolute -top-32 right-0 h-[400px] w-[600px] opacity-60" />
+      {/* fondo técnico decorativo */}
+      <div aria-hidden className="bg-grid pointer-events-none absolute inset-0 opacity-[0.04]" />
+      <div className="halo-admin pointer-events-none absolute -top-32 right-0 h-[440px] w-[640px] opacity-70" />
+      <div className="halo-cliente pointer-events-none absolute -bottom-40 left-1/3 h-[420px] w-[560px] opacity-40" />
 
       {/* Drawer móvil */}
       {sidebarOpen && (
@@ -190,20 +192,14 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 flex-col border-r border-line bg-surface transition-transform duration-300 md:static md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 flex-col border-r border-line bg-surface/85 backdrop-blur-xl transition-transform duration-300 md:static md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
         {/* logo */}
         <div className="relative h-20 shrink-0 flex items-center border-b border-line px-6">
-          <div className="absolute inset-x-0 top-0 h-px brand-admin opacity-70" />
-          <div className="flex items-center gap-3">
-            <MallHubTile variant="admin" size={40} />
-            <div>
-              <MallHubWordmark variant="admin" size="md" className="tracking-wider" />
-              <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Panel admin</p>
-            </div>
-          </div>
+          <div className="brand-rule absolute inset-x-0 top-0" />
+          <MallHubLogo markSize={40} wordSize="md" subtitle="Panel admin" />
         </div>
 
         {/* nav */}
@@ -219,16 +215,22 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
             return (
               <Link key={item.path} href={item.path} className="block">
                 <span
-                  className={`group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
+                  className={`group relative flex items-center gap-3 overflow-hidden rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
                     isActive
-                      ? 'bg-surface-2 text-fg shadow-[var(--shadow-card)]'
+                      ? 'text-fg'
                       : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
                   }`}
+                  style={isActive ? {
+                    backgroundImage:
+                      'linear-gradient(135deg, color-mix(in oklab, var(--brand-admin-from) 26%, transparent), color-mix(in oklab, var(--brand-cliente-from) 12%, transparent) 72%)',
+                    boxShadow:
+                      'inset 0 0 0 1px color-mix(in oklab, var(--brand-admin-from) 38%, transparent), 0 8px 24px -10px rgba(219, 37, 121, 0.55)',
+                  } : undefined}
                 >
                   {isActive && (
-                    <span className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-r-full brand-admin" />
+                    <span className="brand-admin glow-admin absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-full" />
                   )}
-                  <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-admin' : ''}`}>
+                  <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-admin' : 'group-hover:text-fg'}`}>
                     {item.icon}
                     {showBadge && (
                       <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-2 ring-surface animate-pulse" />
@@ -271,7 +273,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <MallHubWordmark variant="admin" size="sm" className="tracking-wider md:hidden" />
+          <MallHubMark size={30} className="md:hidden" />
           <div className="flex items-center gap-2 md:ml-auto">
             <Link
               href="/panel/notificaciones"

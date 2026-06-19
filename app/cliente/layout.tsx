@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import { ClienteStore, ClienteStoreContext, StoreRole } from './store-context';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { MallHubWordmark } from '../components/MallHubMark';
+import { MallHubLogo } from '../components/MallHubLogo';
 import { Toaster } from '../components/toast';
 import { ConfirmHost } from '../components/confirm-dialog';
 
@@ -286,7 +286,9 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   return (
     <ClienteStoreContext.Provider value={ctxValue}>
       <div className="relative flex h-screen overflow-hidden bg-bg text-fg">
-        <div className="halo-cliente pointer-events-none absolute -top-32 right-0 h-[400px] w-[600px] opacity-60" />
+        <div aria-hidden className="bg-grid pointer-events-none absolute inset-0 opacity-[0.04]" />
+        <div className="halo-cliente pointer-events-none absolute -top-32 right-0 h-[440px] w-[640px] opacity-70" />
+        <div className="halo-admin pointer-events-none absolute -bottom-40 left-1/3 h-[420px] w-[560px] opacity-40" />
 
         {/* Drawer móvil */}
         {sidebarOpen && (
@@ -298,52 +300,21 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
         )}
 
         <aside
-          className={`fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 flex-col border-r border-line bg-surface transition-transform duration-300 md:static md:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 flex-col border-r border-line bg-surface/85 backdrop-blur-xl transition-transform duration-300 md:static md:translate-x-0 ${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
           }`}
         >
           {/* logo */}
           <div className="relative h-20 shrink-0 flex items-center border-b border-line px-6">
-            <div className="absolute inset-x-0 top-0 h-px brand-cliente opacity-70" />
-            <div className="flex items-center gap-3">
-              <div className="brand-cliente glow-cliente flex h-10 w-10 items-center justify-center rounded-xl shrink-0">
-                <svg className="h-5 w-5 text-fg-on-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                </svg>
-              </div>
-              <div className="leading-tight">
-                <h1 className="text-base font-black tracking-wider text-brand-cliente">MI COMERCIO</h1>
-                <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-fg-subtle">
-                  <span>powered by</span>
-                  <MallHubWordmark variant="cliente" size="sm" className="text-[10px] tracking-tight" />
-                </p>
-              </div>
-            </div>
+            <div className="brand-rule absolute inset-x-0 top-0" />
+            <MallHubLogo markSize={40} wordSize="md" subtitle="Portal comercio" />
           </div>
 
-          {/* perfil */}
-          {profile && (
-            <div className="border-b border-line p-4">
-              <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 p-3">
-                <div className="brand-cliente flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-bold text-fg-on-brand text-xs">
-                  {initials}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-fg">
-                    {profile.full_name || <span className="italic text-fg-faint">Sin nombre</span>}
-                  </p>
-                  <p className="truncate text-[11px] text-fg-subtle">{profile.email}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Selector de tienda */}
-          <div className="border-b border-line px-4 py-3">
-            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-fg-subtle">Tienda activa</p>
+          {/* Tienda activa — identidad del comercio */}
+          <div className="border-b border-line px-4 py-4">
             {stores.length === 0 ? (
               <p
-                className="rounded-md border px-2 py-1.5 text-[11px]"
+                className="rounded-xl border px-3 py-2.5 text-[11px] font-medium"
                 style={{
                   background: 'var(--warning-bg)',
                   borderColor: 'color-mix(in oklab, var(--warning) 30%, transparent)',
@@ -352,24 +323,82 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
               >
                 ⚠ Sin tiendas vinculadas
               </p>
-            ) : stores.length === 1 ? (
-              <p className="truncate text-sm font-medium text-fg">{stores[0].name}</p>
             ) : (
-              <select
-                value={selectedId ?? ''}
-                onChange={(e) => handleSelect(e.target.value)}
-                className="w-full rounded-lg border border-line bg-surface-2 px-2 py-1.5 text-sm text-fg focus:outline-none focus:ring-2"
-                style={{ '--tw-ring-color': 'var(--brand-cliente-from)' } as React.CSSProperties}
-              >
-                {stores.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            )}
-            {stores.length > 1 && (
-              <p className="mt-1.5 text-[10px] text-fg-subtle">{stores.length} tiendas vinculadas</p>
+              <div className="holo relative overflow-hidden rounded-2xl p-3.5">
+                <div className="scanline" />
+                <div className="relative flex items-center gap-3">
+                  <div className="brand-cliente glow-cliente flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
+                    <svg className="h-5 w-5 text-fg-on-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-fg-faint">Tienda activa</p>
+                    <p className="truncate text-[15px] font-bold leading-tight text-fg">
+                      {selectedStore?.name ?? '—'}
+                    </p>
+                  </div>
+                </div>
+
+                {(selectedStore?.plan_type || selectedStore?.is_ally) && (
+                  <div className="relative mt-2.5 flex flex-wrap items-center gap-1.5">
+                    {selectedStore?.plan_type && (
+                      <span className="rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                        {String(selectedStore.plan_type).replace(/_/g, ' ')}
+                      </span>
+                    )}
+                    {selectedStore?.is_ally && (
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-cliente"
+                        style={{ background: 'color-mix(in oklab, var(--brand-cliente-from) 16%, transparent)' }}
+                      >
+                        ★ Aliado
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {stores.length > 1 && (
+                  <div className="relative mt-3">
+                    <label className="mb-1 block font-mono text-[9px] uppercase tracking-[0.2em] text-fg-faint">
+                      Cambiar de tienda
+                    </label>
+                    <select
+                      value={selectedId ?? ''}
+                      onChange={(e) => handleSelect(e.target.value)}
+                      className="w-full rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-sm text-fg focus:outline-none focus:ring-2"
+                      style={{ '--tw-ring-color': 'var(--brand-cliente-from)' } as React.CSSProperties}
+                    >
+                      {stores.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1.5 text-[10px] text-fg-subtle">{stores.length} tiendas vinculadas</p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
+
+          {/* perfil */}
+          {profile && (
+            <div className="border-b border-line px-4 pb-4">
+              <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-2/60 p-3">
+                <div className="brand-cliente flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-fg-on-brand">
+                  {initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-fg">
+                    {profile.full_name || <span className="italic text-fg-faint">Sin nombre</span>}
+                  </p>
+                  <p className="truncate text-[11px] text-fg-subtle">{profile.email}</p>
+                </div>
+                <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-fg-subtle">
+                  {role === 'owner' ? 'Dueño' : role === 'seller' ? 'Vendedor' : 'Publicista'}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* nav agrupado por objetivo */}
           <nav className="flex-1 space-y-4 overflow-y-auto p-3">
@@ -387,16 +416,22 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
                   return (
                     <Link key={item.path} href={item.path} className="block">
                       <span
-                        className={`group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
+                        className={`group relative flex items-center gap-3 overflow-hidden rounded-xl px-3.5 py-2.5 text-sm font-medium transition-all ${
                           isActive
-                            ? 'bg-surface-2 text-fg shadow-[var(--shadow-card)]'
+                            ? 'text-fg'
                             : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
                         }`}
+                        style={isActive ? {
+                          backgroundImage:
+                            'linear-gradient(135deg, color-mix(in oklab, var(--brand-cliente-from) 24%, transparent), color-mix(in oklab, var(--accent-fuchsia) 12%, transparent) 72%)',
+                          boxShadow:
+                            'inset 0 0 0 1px color-mix(in oklab, var(--brand-cliente-from) 38%, transparent), 0 8px 24px -10px rgba(68, 171, 225, 0.5)',
+                        } : undefined}
                       >
                         {isActive && (
-                          <span className="absolute left-0 top-1/2 h-6 -translate-y-1/2 w-1 rounded-r-full brand-cliente" />
+                          <span className="brand-cliente glow-cliente absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-full" />
                         )}
-                        <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-cliente' : ''}`}>
+                        <span className={`shrink-0 relative transition-colors ${isActive ? 'text-brand-cliente' : 'group-hover:text-fg'}`}>
                           {item.icon}
                           {showBadge && (
                             <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-2 ring-surface animate-pulse" />
@@ -441,7 +476,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-sm font-bold tracking-wider text-brand-cliente md:hidden">MI COMERCIO</h1>
+            <span className="max-w-[55%] truncate text-sm font-bold text-fg md:hidden">{selectedStore?.name ?? 'Portal comercio'}</span>
             <div className="flex items-center gap-2 md:ml-auto">
               {role === 'owner' && (
                 <Link

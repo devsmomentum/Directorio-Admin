@@ -319,14 +319,14 @@ function CampaniasAdminInner() {
       }
     }
 
-    // Cap por tienda: hasta 5 campañas activas (la BD lo refuerza). El admin apila.
+    // Máximo 1 campaña activa por tienda (igual que el portal cliente).
     if (isActive && storeId) {
       const activeInStore = campaigns.filter(c =>
         c.id !== editingId && c.store_id === storeId && c.is_active &&
         (!c.end_date || c.end_date >= today)
       ).length;
-      if (activeInStore >= 5) {
-        toast.error('Esta tienda ya tiene 5 campañas activas (máximo). Pausa una antes de activar otra.');
+      if (activeInStore >= 1) {
+        toast.error('Esta tienda ya tiene una campaña activa. Pausa la actual antes de activar otra.');
         return;
       }
     }
@@ -448,6 +448,22 @@ function CampaniasAdminInner() {
       if (!ok) return;
     }
 
+    // Máximo 1 activa por tienda al activar.
+    if (!current) {
+      const camp = campaigns.find(c => c.id === id);
+      if (camp?.store_id) {
+        const today = new Date().toISOString().split('T')[0];
+        const hasOtherActive = campaigns.some(c =>
+          c.id !== id && c.store_id === camp.store_id && c.is_active &&
+          (!c.end_date || c.end_date >= today)
+        );
+        if (hasOtherActive) {
+          toast.error('Esta tienda ya tiene una campaña activa. Pausa la actual antes de activar otra.');
+          return;
+        }
+      }
+    }
+
     // Pedimos el row de vuelta: así detectamos tanto un error explícito como
     // el caso en que la BD no actualizó ninguna fila (RLS/permiso) sin lanzar.
     const updatePayload: Record<string, unknown> = { is_active: !current };
@@ -499,6 +515,18 @@ function CampaniasAdminInner() {
     if (!reactivateEnd) { toast.error('Indica la nueva fecha de fin de la campaña.'); return; }
     if (reactivateEnd < today) { toast.error('La fecha de fin debe ser hoy o futura.'); return; }
 
+    // Máximo 1 activa por tienda.
+    if (c.store_id) {
+      const hasOtherActive = campaigns.some(other =>
+        other.id !== c.id && other.store_id === c.store_id && other.is_active &&
+        (!other.end_date || other.end_date >= today)
+      );
+      if (hasOtherActive) {
+        toast.error('Esta tienda ya tiene una campaña activa. Pausa la actual antes de reactivar otra.');
+        return;
+      }
+    }
+
     setSavingReactivate(true);
     // Reactivar como gestionada por admin: queda exenta del plan vencido y
     // suena hasta la nueva fecha de fin. Si el inicio quedó en el pasado, se
@@ -520,7 +548,7 @@ function CampaniasAdminInner() {
 
     if (error) { toast.error('Error: ' + error.message); return; }
     if (!updated || !updated.is_active) {
-      toast.error('No se pudo reactivar la campaña. Revisa el tope de 5 campañas activas por tienda.');
+      toast.error('No se pudo reactivar la campaña. Verifica que la tienda no tenga ya una campaña activa.');
       fetchData(); setReactivateTarget(null); return;
     }
     await logAdminAction({

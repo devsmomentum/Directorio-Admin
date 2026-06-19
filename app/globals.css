@@ -104,11 +104,13 @@ body {
   background-image: linear-gradient(135deg, var(--brand-cliente-from), var(--brand-cliente-to));
 }
 .brand-mix {
-  background-image: linear-gradient(135deg,
-    var(--brand-admin-from) 0%,
-    var(--brand-admin-to) 35%,
-    var(--brand-cliente-to) 70%,
-    var(--brand-cliente-from) 100%);
+  background-image: linear-gradient(120deg,
+    var(--brand-cliente-from) 0%,   /* azul */
+    var(--brand-cliente-to) 28%,    /* púrpura */
+    var(--accent-fuchsia) 56%,      /* fucsia brillante */
+    var(--brand-admin-from) 80%,    /* rosa */
+    var(--brand-admin-to) 100%);    /* magenta */
+  background-size: 180% 180%;
 }
 .text-brand-admin {
   background-image: linear-gradient(135deg, var(--brand-admin-from), var(--brand-admin-to));
@@ -123,15 +125,50 @@ body {
   color: transparent;
 }
 .text-brand-mix {
-  background-image: linear-gradient(135deg,
-    var(--brand-admin-from) 0%,
-    var(--brand-admin-to) 35%,
-    var(--brand-cliente-to) 70%,
-    var(--brand-cliente-from) 100%);
+  background-image: linear-gradient(120deg,
+    var(--brand-cliente-from) 0%,
+    var(--brand-cliente-to) 28%,
+    var(--accent-fuchsia) 56%,
+    var(--brand-admin-from) 80%,
+    var(--brand-admin-to) 100%);
+  background-size: 180% 180%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
+
+/* Gradiente "vivo" — recorre lentamente. Da el toque IA/futurista a wordmarks
+   y headings sin distraer. Aplicar junto a .brand-mix / .text-brand-mix. */
+@keyframes brand-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.brand-animate { animation: brand-flow 9s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .brand-animate { animation: none; } }
+
+/* Glows de acento — neón sobre superficies oscuras */
+.glow-fuchsia { box-shadow: 0 0 28px -4px color-mix(in oklab, var(--accent-fuchsia) 60%, transparent); }
+
+/* Tarjeta holográfica — superficie con sheen de marca + borde sutil. Para
+   contenedores destacados (sidebar header, cards de KPI, etc.). */
+.holo {
+  background-color: var(--bg-elev-1);
+  background-image:
+    linear-gradient(150deg, color-mix(in oklab, var(--accent-fuchsia) 9%, transparent), transparent 42%),
+    linear-gradient(330deg, color-mix(in oklab, var(--brand-cliente-from) 8%, transparent), transparent 42%);
+  border: 1px solid var(--line);
+}
+
+/* Barra/divisor con gradiente de marca animado (línea neón) */
+.brand-rule {
+  height: 1px;
+  background-image: linear-gradient(90deg,
+    transparent, var(--brand-cliente-from), var(--accent-fuchsia), var(--brand-admin-from), transparent);
+  background-size: 220% 100%;
+  animation: brand-flow 7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .brand-rule { animation: none; } }
 .glow-admin { box-shadow: var(--glow-admin); }
 .glow-cliente { box-shadow: var(--glow-cliente); }
 
