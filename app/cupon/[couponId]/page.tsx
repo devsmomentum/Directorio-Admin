@@ -31,8 +31,18 @@ type CouponView = {
 
 type Phase = 'loading' | 'invalid' | 'form' | 'submitting' | 'done';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Solo dígitos para cédula/teléfono; el correo con un patrón básico.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function sanitizeString(input: string): string {
+  return input
+    .normalize('NFC')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF\u202A-\u202E\u2066-\u2069]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export default function CapturaCuponPage({
   params,
@@ -55,6 +65,11 @@ export default function CapturaCuponPage({
 
   // 1) Cargar y validar el cupón (lectura anónima permitida por RLS).
   useEffect(() => {
+    if (!UUID_RE.test(couponId)) {
+      setInvalidReason('Este cupón no existe o el enlace es inválido.');
+      setPhase('invalid');
+      return;
+    }
     let alive = true;
     (async () => {
       const { data, error } = await supabase
@@ -131,13 +146,14 @@ export default function CapturaCuponPage({
     setFormError(null);
     setPhase('submitting');
 
+    const cleanNombre = sanitizeString(nombre);
     const formattedCedula = `${cedulaType}-${cedulaNum.trim()}`;
     const formattedTelefono = `${phonePrefix}-${phoneNum.trim()}`;
 
     const { data, error } = await supabase.functions.invoke('reserve-flash-coupon', {
       body: {
         coupon_id: couponId,
-        nombre: nombre.trim(),
+        nombre: cleanNombre,
         cedula: formattedCedula,
         telefono: formattedTelefono,
         email: email.trim().toLowerCase(),
