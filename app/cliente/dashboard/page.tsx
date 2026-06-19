@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
-import { AbonoModal, AbonoRequest } from '../abono-modal';
 import { downloadCSV, slugify } from '../../../lib/csv';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 import { toast } from '../../components/toast';
@@ -162,7 +161,6 @@ export default function ClienteDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-  const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
   const [abonoFeedback, setAbonoFeedback] = useState<string | null>(null);
 
   // Historial de canjes — solo para el dueño; no depende del rango de métricas.
@@ -281,25 +279,33 @@ export default function ClienteDashboardPage() {
     return Math.round((exp.getTime() - today.getTime()) / 86400000);
   }, [store]);
 
-  // Fetch canjes del dueño (independiente del rango de métricas).
+  // Fetch canjes del dueño (ahora obedece al rango de métricas).
   useEffect(() => {
     if (!store || store.store_role !== 'owner') { setRedeemed([]); return; }
     let cancelled = false;
     setRedeemedLoading(true);
     (async () => {
-      const { data } = await supabase
+      const start = rangeStart(range);
+      const startDay = start ? start.split('T')[0] : null;
+
+      let query = supabase
         .from('coupon_leads')
         .select('id, first_name, last_name, id_document, email, telefono, redeemed_at, coupons(title)')
         .eq('store_id', store.id)
-        .eq('status', 'CANJEADO')
+        .eq('status', 'CANJEADO');
+        
+      if (startDay) query = query.gte('redeemed_at', startDay);
+      
+      const { data } = await query
         .order('redeemed_at', { ascending: false })
         .limit(200);
+
       if (cancelled) return;
       setRedeemed(data || []);
       setRedeemedLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [store]);
+  }, [store, range]);
 
   const visibleRedeemed = useMemo(() => {
     const q = redeemedQuery.trim().toLowerCase();
@@ -585,17 +591,12 @@ export default function ClienteDashboardPage() {
                       Reporta tu abono aquí mismo. El plan se activa cuando el saldo llegue a $0.00.
                     </p>
                   </div>
-                  <button
-                    onClick={() => setAbonoRequest({
-                      id: r.id,
-                      plan_key: r.plan_key,
-                      total_amount_usd: r.total_amount_usd,
-                      paid_amount_usd: r.paid_amount_usd,
-                    })}
-                    className="shrink-0 text-sm font-bold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black rounded-lg px-5 py-2.5 shadow-lg transition-colors"
+                  <Link
+                    href="/cliente/pagos"
+                    className="shrink-0 text-sm font-bold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black rounded-lg px-5 py-2.5 shadow-lg transition-colors inline-block text-center"
                   >
-                    Reportar abono →
-                  </button>
+                    Ir a Pagos →
+                  </Link>
                 </div>
               </div>
             );
@@ -772,17 +773,12 @@ export default function ClienteDashboardPage() {
                     const outstanding = Math.max(total - paid, 0);
                     if (outstanding > 0.005) {
                       return (
-                        <button
-                          onClick={() => setAbonoRequest({
-                            id: pendingChange.id,
-                            plan_key: pendingChange.plan_key,
-                            total_amount_usd: pendingChange.total_amount_usd,
-                            paid_amount_usd: pendingChange.paid_amount_usd,
-                          })}
+                        <Link
+                          href="/cliente/pagos"
                           className="inline-block mt-3 text-[11px] font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 rounded-md px-3 py-1.5"
                         >
-                          Reportar abono →
-                        </button>
+                          Ir a Pagos para abonar →
+                        </Link>
                       );
                     }
                     return (
@@ -833,7 +829,7 @@ export default function ClienteDashboardPage() {
         <Tile label="Solicitudes pendientes"
           accent={pendingRequests > 0 ? 'text-amber-300' : 'text-white/40'}
           value={pendingRequests}
-          sub={`${requests.length} solicitudes totales`} />
+          sub={`${requests.length} histórico (sin filtro de fecha)`} />
       </div>
 
 
@@ -985,7 +981,7 @@ export default function ClienteDashboardPage() {
           </div>
           {redeemedLoading ? (
             <div className="flex h-20 items-center justify-center">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-line border-t-cyan-400" />
+              <PageSpinner />
             </div>
           ) : visibleRedeemed.length === 0 ? (
             <div className="bg-white/[0.02] border border-white/5 rounded-lg p-6 text-center text-white/30 text-xs">
@@ -1024,21 +1020,6 @@ export default function ClienteDashboardPage() {
         </div>
       )}
 
-      <AbonoModal
-        request={abonoRequest}
-        onClose={() => setAbonoRequest(null)}
-        onSuccess={async (msg) => {
-          setAbonoFeedback(msg);
-          if (store) {
-            const { data } = await supabase
-              .from('plan_requests')
-              .select('*')
-              .eq('store_id', store.id)
-              .order('created_at', { ascending: false });
-            setRequests(data || []);
-          }
-        }}
-      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Link href="/cliente/planes" className="bg-cyan-500/5 hover:bg-cyan-500/10 border border-cyan-500/20 hover:border-cyan-500/40 rounded-xl p-4 transition-colors">

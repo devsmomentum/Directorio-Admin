@@ -27,6 +27,13 @@ export const BANK_BS_OPTIONS = [
   'Otro',
 ];
 
+export const COMPANY_BANK_ACCOUNTS = {
+  rif: 'J506637529',
+  bs: '0172-0125-52-1255415786',
+  usd: '0172-0125-57-1255412486',
+  email: 'anavidirectorios@gmail.com',
+};
+
 export const BANK_USD_OPTIONS = [
   'Bancamiga USD',
 ];

@@ -12,6 +12,7 @@
 // pasa por sus guards de sesión.
 // =====================================================================
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { use, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 
@@ -182,7 +183,7 @@ export default function CapturaCuponPage({
       <div className="w-full max-w-md">
         {phase === 'loading' && (
           <div className="flex flex-col items-center gap-4 py-20">
-            <div className="h-10 w-10 rounded-full border-2 border-red-500 border-t-transparent animate-spin" />
+            <PageSpinner />
             <p className="text-white/50 text-sm">Cargando cupón…</p>
           </div>
         )}

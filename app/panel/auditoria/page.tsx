@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
@@ -179,7 +180,7 @@ export default function AuditDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[50vh]">
-        <div className="w-8 h-8 border-2 border-brand-admin border-t-transparent rounded-full animate-spin" />
+        <PageSpinner />
       </div>
     );
   }

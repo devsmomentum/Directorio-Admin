@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { downloadCSV } from '../../../lib/csv';
@@ -371,7 +372,7 @@ export default function FinanzasPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+        <PageSpinner />
       </div>
     );
   }

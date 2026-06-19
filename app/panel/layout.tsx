@@ -6,8 +6,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { MallHubLogo, MallHubMark } from '../components/MallHubLogo';
-import { Toaster } from '../components/toast';
-import { ConfirmHost } from '../components/confirm-dialog';
 import { onUnreadChanged } from '../components/unread-bus';
 
 // Shell del panel admin. Guard + sidebar fijo + área de contenido scrollable.
@@ -299,8 +297,6 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           </div>
         </main>
       </div>
-      <Toaster />
-      <ConfirmHost />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -29,7 +30,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-      <div className="w-10 h-10 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+      <PageSpinner />
     </div>
   );
 }

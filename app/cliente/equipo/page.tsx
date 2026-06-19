@@ -11,6 +11,7 @@
 // La autorización real vive en el servidor; esta pantalla solo orquesta.
 // =====================================================================
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
@@ -302,7 +303,7 @@ export default function ClienteEquipoPage() {
         </h3>
         {loading ? (
           <div className="flex h-32 items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-[color:var(--brand-cliente-from)]" />
+            <PageSpinner />
           </div>
         ) : staff.length === 0 ? (
           <div className="rounded-xl border border-line bg-surface p-8 text-center text-sm text-fg-subtle">

@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useState, useEffect, useMemo, useRef, ChangeEvent } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { validateKioskVideo } from '../../../lib/videoValidation';
@@ -318,7 +319,7 @@ export default function BannersAdminPage() {
 
   if (loading) return (
     <div className="flex items-center justify-center h-full">
-      <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <PageSpinner />
     </div>
   );
 

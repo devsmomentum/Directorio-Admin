@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -173,7 +174,7 @@ function AuthCallbackInner() {
       <div className="max-w-md w-full bg-[#111111] border border-white/10 rounded-2xl p-8 text-center">
         {status === 'verifying' ? (
           <>
-            <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mx-auto mb-4" />
+            <PageSpinner />
             <p className="text-white/70 text-sm font-mono tracking-widest uppercase">
               Verificando enlace...
             </p>
@@ -221,7 +222,7 @@ export default function AuthCallbackPage() {
       fallback={
         <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-[#111111] border border-white/10 rounded-2xl p-8 text-center">
-            <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mx-auto mb-4" />
+            <PageSpinner />
             <p className="text-white/70 text-sm font-mono tracking-widest uppercase">
               Verificando enlace...
             </p>

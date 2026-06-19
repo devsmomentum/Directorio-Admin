@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { toast } from '../../components/toast';
@@ -95,7 +96,7 @@ export default function KioskAssignment() {
 
   if (loading) return (
     <div className="flex items-center justify-center py-16">
-      <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+      <PageSpinner />
     </div>
   );
 

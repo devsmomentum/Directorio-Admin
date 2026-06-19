@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
@@ -142,7 +143,7 @@ export default function KioscosCRUD() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+        <PageSpinner />
       </div>
     );
   }

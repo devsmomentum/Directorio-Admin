@@ -9,6 +9,7 @@
 //   - Búsqueda por cédula / nombre / correo.
 // =====================================================================
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
@@ -222,7 +223,7 @@ export default function CandidatosPage() {
 
       {loading ? (
         <div className="flex items-center justify-center h-40">
-          <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+          <PageSpinner />
         </div>
       ) : visible.length === 0 ? (
         <div className="bg-[#111] border border-white/5 rounded-xl p-10 text-center">

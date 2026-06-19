@@ -1,8 +1,10 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { toast } from '../components/toast';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { MallHubLogo } from '../components/MallHubLogo';
 
@@ -291,7 +293,7 @@ function LoginInner() {
                           setError('No se pudo enviar el enlace de recuperación. Intenta más tarde.');
                         } else {
                           setError(null);
-                          alert(
+                          toast.info(
                             'Si el correo existe, recibirás un enlace para restablecer tu contraseña.',
                           );
                         }
@@ -323,7 +325,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="min-h-dvh bg-mesh flex items-center justify-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-line border-t-[color:var(--brand-cliente-from)]" />
+          <PageSpinner />
         </div>
       }
     >

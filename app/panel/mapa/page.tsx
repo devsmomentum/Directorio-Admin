@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { supabase } from '../../../lib/supabase';
@@ -492,7 +493,7 @@ export default function MapaEditorPage() {
       <div className="flex flex-1 overflow-hidden">
         <div ref={wrapRef} className="flex-1 relative bg-[#1e1e2a] overflow-hidden">
           <canvas ref={canvasRef} className="absolute inset-0" />
-          {(loadingMap || loadingBg) && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#1e1e2a]/80 backdrop-blur-sm pointer-events-none"><div className="w-8 h-8 border-2 border-white/20 border-t-white/60 rounded-full animate-spin mb-3" /><span className="text-[11px] text-white/30">{loadingBg ? 'Cargando plano...' : 'Cargando elementos...'}</span></div>}
+          {(loadingMap || loadingBg) && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#1e1e2a]/80 backdrop-blur-sm pointer-events-none"><PageSpinner /><span className="text-[11px] text-white/30">{loadingBg ? 'Cargando plano...' : 'Cargando elementos...'}</span></div>}
           {toastMsg && <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-lg pointer-events-none z-20">{toastMsg}</div>}
           {tool === 'node' && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[11px] px-3 py-1.5 rounded-lg z-20">Clic para colocar un kiosco</div>}
           {tool === 'bathroom' && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[11px] px-3 py-1.5 rounded-lg z-20">Clic para colocar un baño — Piso: {FLOOR_LABELS[selectedFloor]}</div>}

@@ -34,27 +34,22 @@
   de solo-lectura en el otro; corregir el default.
   Archivos: `app/panel/banners/page.tsx` (~13, ~90, ~192), `app/panel/solicitudes/page.tsx` (~277-279).
 
-- [~] 🔴 **No hay componentes compartidos Confirm/Toast/Modal/Spinner/EmptyState.**
+- [x] 🔴 **No hay componentes compartidos Confirm/Toast/Modal/Spinner/EmptyState.**
   → Hecho: creados `app/components/toast.tsx` (`toast.success/error/info` +
   `<Toaster/>`), `app/components/confirm-dialog.tsx` (`confirmDialog()` que
-  devuelve `Promise<boolean>` + `<ConfirmHost/>`) y `app/components/PageSpinner.tsx`,
-  todos con tokens de tema (light/dark). `<Toaster/>` y `<ConfirmHost/>` montados
-  en ambos layouts. Migrados TODOS los `alert()`/`confirm()` nativos del panel y el
-  cliente (≈70 alert + ≈18 confirm en 15 archivos): errores→`toast.error`,
-  avisos→`toast.info`, y se añadió `toast.success` tras guardados/eliminaciones que
-  antes no daban feedback. El doble-`confirm()` de pausar campaña quedó en un solo
-  diálogo. `mapa`/`promociones`/`equipo`/`aliados` conservan su feedback propio pero
-  ya usan los diálogos compartidos.
-  _Pendiente:_ (a) crear `Modal`/`EmptyState` base; (b) cambiar los ~19 spinners
-  inline a `<PageSpinner/>`; (c) `login` mantiene 1 `alert()` (está fuera de los
-  layouts, no tiene host montado).
+  devuelve `Promise<boolean>` + `<ConfirmHost/>`), `app/components/PageSpinner.tsx`,
+  `app/components/Modal.tsx` y `app/components/EmptyState.tsx`,
+  todos con tokens de tema (light/dark). `<Toaster/>` y `<ConfirmHost/>` se han movido a
+  `app/layout.tsx` para ser globales. Migrados TODOS los `alert()`/`confirm()` nativos del panel y el
+  cliente (incluyendo el de `login`). Todos los spinners inline (aprox. ~29 instancias)
+  han sido migrados a `<PageSpinner/>`.
 
 ### Cliente
 
-- [ ] 🔴 **Pagos/abonos gestionables desde 3 páginas.** `AbonoModal` embebido en
+- [x] 🔴 **Pagos/abonos gestionables desde 3 páginas.** `AbonoModal` embebido en
   `pagos` (~666), `planes` (~441) y `dashboard` (~1046); el mismo abono se reporta
-  desde tres sitios. → `pagos` como único hub; en dashboard/planes una tira de
-  estado que enlace a `/cliente/pagos`.
+  desde tres sitios. → Hecho: `pagos` ahora es el único hub; en dashboard/planes se
+  reemplazó el modal por un link `Ir a Pagos`.
 
 - [ ] 🔴 **Dos backends de renovación divergentes.** "Renovar plan" (`planes`) usa
   RPC `request_plan_atomic` (valida slots/solape); el alta de pago en `pagos` hace
@@ -62,22 +57,22 @@
   renovación por `request_plan_atomic`.
   Archivos: `app/cliente/planes/page.tsx` (~269), `app/cliente/pagos/page.tsx` (~216).
 
-- [ ] 🔴 **El tutorial contradice la app.** `tutorial` indica pagar por email a
+- [x] 🔴 **El tutorial contradice la app.** `tutorial` indica pagar por email a
   `anavidirectorios@gmail.com` y hardcodea cuentas bancarias (RIF/Bs/USD) que
-  duplican `payment-fields.tsx`, mientras existe el flujo interno con tasa BCV. →
-  Un solo canal; el tutorial debe apuntar a `/cliente/pagos` y leer los datos
-  bancarios de la misma fuente que `payment-fields`.
-  Archivos: `app/cliente/tutorial/page.tsx` (~112-163).
+  duplican `payment-fields.tsx`, mientras existe el flujo interno con tasa BCV. → Hecho:
+  Un solo canal; el tutorial ahora redirige a `/cliente/pagos` ("Facturación centralizada")
+  y lee los datos bancarios desde la constante `COMPANY_BANK_ACCOUNTS` en
+  `payment-fields.tsx`.
+  Archivos: `app/cliente/tutorial/page.tsx`, `app/cliente/payment-fields.tsx`.
 
-- [~] 🔴 **El dashboard del cliente duplica Planes/Pagos.** → Avance: el
+- [x] 🔴 **El dashboard del cliente duplica Planes/Pagos.** → Hecho: el
   vencimiento de contrato pasó de **4 lugares a 2** en el dashboard — se quitaron
   los tiles "Estado contrato" y "Próximo vencimiento" del grid de métricas (ahora
   el grid es solo rendimiento); la tarjeta **"Plan vigente"** queda como única
   fuente del estado del plan y la alerta ≤7 días como overlay urgente. Además se
   añadió una fila de **Accesos rápidos** (Publicar promoción · Registrar pago ·
-  Ver canjes · Mi plan) para que el dueño sepa a dónde ir. _Pendiente:_ la alerta
-  de `pagos` sigue aparte (es el hub de facturación, ok) y consolidar `AbonoModal`
-  (ver ítem de pagos en 3 páginas).
+  Ver canjes · Mi plan) para que el dueño sepa a dónde ir. Se consolidó `AbonoModal`
+  (reemplazado por enlace a `/cliente/pagos`).
   Archivo: `app/cliente/dashboard/page.tsx`.
 
 ---
@@ -132,10 +127,10 @@
   de detalle de solo-lectura; `categorias`/`services`/`kioscos`/`planes`/`banners`/
   `cupons` saltan directo al form. → Estandarizar: clic → detalle → "Editar".
 
-- [ ] 🟡 **Búsqueda/paginación dispares.** `clientes` (1263 líneas) renderiza la
+- [x] 🟡 **Búsqueda/paginación dispares.** `clientes` (1263 líneas) renderiza la
   lista completa sin paginación; `aliados` solo busca dentro del modal de alta.
-  (`tiendas` sí pagina bien con `pg.paginated` — no tocar.) → Añadir paginación a
-  `clientes` y búsqueda a `aliados`.
+  (`tiendas` sí pagina bien con `pg.paginated` — no tocar.) → Hecho: añadida
+  paginación con `Pagination` a `clientes` y buscador global al listado en `aliados`.
 
 - [x] 🟡 **`alert()` mezclado con el sistema de banners propio** en `promociones`
   y CSV del dashboard cliente. → Hecho: `promociones` usa los diálogos compartidos
@@ -159,9 +154,10 @@
     `notifyUnreadChanged()` y el layout re-consulta. Ambas páginas muestran
     `toast.error` si falla el marcado.
 
-- [ ] 🟡 **Filtro de rango del dashboard cliente** solo gobierna parte de las
+- [x] 🟡 **Filtro de rango del dashboard cliente** solo gobierna parte de las
   tarjetas (campaigns/impressions/searches/coupons); `requests` y `redeemed` se
-  cargan sin rango. → Aplicar el rango a todo o aclarar visualmente qué cubre.
+  cargan sin rango. → Hecho: Se aplicó el filtro a los canjes (`redeemed`) y se
+  aclaró visualmente que las solicitudes pendientes son históricas.
   Archivo: `app/cliente/dashboard/page.tsx`.
 
 - [ ] 🟡 **Cobertura de auditoría incompleta.** De 15 `AuditEntityType` declarados,

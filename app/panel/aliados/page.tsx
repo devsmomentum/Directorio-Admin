@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { logAdminAction } from '../../../lib/audit';
@@ -37,6 +38,7 @@ export default function AliadosPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [search, setSearch] = useState('');
+  const [modalSearch, setModalSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
@@ -98,10 +100,13 @@ export default function AliadosPage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const allies = useMemo(() => stores.filter(s => s.is_ally), [stores]);
+  const allies = useMemo(
+    () => stores.filter(s => s.is_ally && s.name.toLowerCase().includes(search.toLowerCase())),
+    [stores, search]
+  );
   const nonAllies = useMemo(
-    () => stores.filter(s => !s.is_ally && s.name.toLowerCase().includes(search.toLowerCase())),
-    [stores, search],
+    () => stores.filter(s => !s.is_ally && s.name.toLowerCase().includes(modalSearch.toLowerCase())),
+    [stores, modalSearch],
   );
 
   // Slots usados por campañas activas de TODOS (pagos + aliados).
@@ -250,7 +255,7 @@ export default function AliadosPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+        <PageSpinner />
       </div>
     );
   }
@@ -283,6 +288,17 @@ export default function AliadosPage() {
           ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
           : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>{feedback.msg}</div>
       )}
+
+      <div className="relative">
+        <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar aliado por nombre o id comercial..."
+          className="w-full bg-[#111] border border-white/5 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/10 transition-colors"
+        />
+      </div>
 
       {/* Resumen general */}
       <div className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-wrap items-center gap-x-8 gap-y-3">
@@ -529,7 +545,7 @@ export default function AliadosPage() {
             </div>
             <div className="p-5 space-y-3">
               <input
-                autoFocus value={search} onChange={e => setSearch(e.target.value)}
+                autoFocus value={modalSearch} onChange={e => setModalSearch(e.target.value)}
                 placeholder="Buscar tienda…"
                 className="w-full text-sm bg-[#0a0a0a] border border-white/10 text-white/80 rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500"
               />

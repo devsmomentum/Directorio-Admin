@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
 import {
@@ -9,7 +10,6 @@ import {
   emptyPaymentState,
   buildPaymentPayload,
 } from '../payment-fields';
-import { AbonoModal, AbonoRequest } from '../abono-modal';
 import { PLAN_GRADIENT as PLAN_COLORS, isFlashPlan } from '../../../lib/plans';
 import { ErrorState } from '../../components/ErrorState';
 import { PageSpinner } from '../../components/PageSpinner';
@@ -35,7 +35,6 @@ export default function ClientePlanesPage() {
   const [widgetErr, setWidgetErr] = useState<string | null>(null);
 
   // Widget de abono a una solicitud existente con saldo pendiente
-  const [abonoRequest, setAbonoRequest] = useState<AbonoRequest | null>(null);
 
   const [pendingTxCount, setPendingTxCount] = useState(0);
 
@@ -422,17 +421,12 @@ export default function ClientePlanesPage() {
                     </p>
                   </div>
                   {outstanding > 0 && (
-                    <button
-                      onClick={() => setAbonoRequest({
-                        id: r.id,
-                        plan_key: r.plan_key,
-                        total_amount_usd: r.total_amount_usd,
-                        paid_amount_usd: r.paid_amount_usd,
-                      })}
-                      className="shrink-0 text-sm font-semibold bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-100 rounded-lg px-4 py-2"
+                    <Link
+                      href="/cliente/pagos"
+                      className="shrink-0 text-sm font-semibold bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-100 rounded-lg px-4 py-2 text-center"
                     >
-                      Reportar abono
-                    </button>
+                      Ir a Pagos para abonar
+                    </Link>
                   )}
                 </div>
               </div>
@@ -441,18 +435,6 @@ export default function ClientePlanesPage() {
         </div>
       )}
 
-      <AbonoModal
-        request={abonoRequest}
-        onClose={() => setAbonoRequest(null)}
-        onSuccess={async (msg) => {
-          setFeedback({ type: 'ok', msg });
-          const { data } = await supabase.from('plan_requests')
-            .select('id, plan_key, status, effective_date, total_amount_usd, paid_amount_usd, months_requested, created_at')
-            .eq('store_id', store!.id)
-            .order('created_at', { ascending: false });
-          setRequests(data || []);
-        }}
-      />
 
 
       {feedback && (

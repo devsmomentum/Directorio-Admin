@@ -1,5 +1,7 @@
 'use client';
 
+import Pagination, { usePagination } from '../../components/Pagination';
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { uploadPrivateDoc, openPrivateDoc, downloadPrivateDoc, fileExt } from '../../../lib/storage';
@@ -549,11 +551,13 @@ export default function ClientesPage() {
       (c.telefono_personal ?? '').toLowerCase().includes(q)
     );
   }, [clients, search]);
+  const pg = usePagination(filtered);
+
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+        <PageSpinner />
       </div>
     );
   }
@@ -619,7 +623,7 @@ export default function ClientesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(c => (
+                {pg.paginated.map(c => (
                   <tr key={c.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] group">
                     <td className="px-5 py-3.5">
                       <button
@@ -705,7 +709,7 @@ export default function ClientesPage() {
           <div className="flex flex-col gap-3 md:hidden">
             {filtered.length === 0 ? (
               <p className="text-center text-white/30 text-sm py-8">No hay coincidencias con la búsqueda.</p>
-            ) : filtered.map(c => (
+            ) : pg.paginated.map(c => (
               <div key={c.id} className="bg-[#111] border border-white/5 rounded-xl p-4 space-y-3">
                 {/* Header: nombre + acciones */}
                 <div className="flex items-start justify-between gap-3">
@@ -794,6 +798,18 @@ export default function ClientesPage() {
             ))}
           </div>
         </>
+      )}
+
+      {pg.totalPages > 1 && (
+        <Pagination
+          page={pg.page}
+          totalPages={pg.totalPages}
+          total={pg.total}
+          perPage={pg.perPage}
+          label="clientes"
+          onPageChange={pg.setPage}
+          onPerPageChange={pg.changePerPage}
+        />
       )}
 
       {showForm && (

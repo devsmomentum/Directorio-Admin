@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeScript } from "./components/ThemeScript";
+import { Toaster } from "./components/toast";
+import { ConfirmHost } from "./components/confirm-dialog";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +34,11 @@ export default function RootLayout({
       <head>
         <ThemeScript />
       </head>
-      <body className="min-h-full flex flex-col bg-bg text-fg">{children}</body>
+      <body className="min-h-full flex flex-col bg-bg text-fg">
+        {children}
+        <Toaster />
+        <ConfirmHost />
+      </body>
     </html>
   );
 }

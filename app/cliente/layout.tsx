@@ -1,5 +1,6 @@
 'use client';
 
+import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -7,8 +8,6 @@ import { supabase } from '../../lib/supabase';
 import { ClienteStore, ClienteStoreContext, StoreRole } from './store-context';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { MallHubLogo } from '../components/MallHubLogo';
-import { Toaster } from '../components/toast';
-import { ConfirmHost } from '../components/confirm-dialog';
 
 type ClienteProfile = {
   id: string;
@@ -305,13 +304,13 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
           }`}
         >
           {/* logo */}
-          <div className="relative h-20 shrink-0 flex items-center border-b border-line px-6">
+          <div className="relative h-14 shrink-0 flex items-center border-b border-line px-5">
             <div className="brand-rule absolute inset-x-0 top-0" />
-            <MallHubLogo markSize={40} wordSize="md" subtitle="Portal comercio" />
+            <MallHubLogo markSize={32} wordSize="sm" subtitle="Portal comercio" />
           </div>
 
-          {/* Tienda activa — identidad del comercio */}
-          <div className="border-b border-line px-4 py-4">
+          {/* Tienda activa — compacta */}
+          <div className="border-b border-line px-4 py-3">
             {stores.length === 0 ? (
               <p
                 className="rounded-xl border px-3 py-2.5 text-[11px] font-medium"
@@ -323,82 +322,75 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
               >
                 ⚠ Sin tiendas vinculadas
               </p>
-            ) : (
-              <div className="holo relative overflow-hidden rounded-2xl p-3.5">
-                <div className="scanline" />
-                <div className="relative flex items-center gap-3">
-                  <div className="brand-cliente glow-cliente flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
-                    <svg className="h-5 w-5 text-fg-on-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                    </svg>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-fg-faint">Tienda activa</p>
-                    <p className="truncate text-[15px] font-bold leading-tight text-fg">
-                      {selectedStore?.name ?? '—'}
-                    </p>
-                  </div>
+            ) : stores.length === 1 ? (
+              /* Una sola tienda: nombre + badges inline */
+              <div className="flex items-center gap-2.5">
+                <div className="brand-cliente glow-cliente flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
+                  <svg className="h-4 w-4 text-fg-on-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                  </svg>
                 </div>
-
-                {(selectedStore?.plan_type || selectedStore?.is_ally) && (
-                  <div className="relative mt-2.5 flex flex-wrap items-center gap-1.5">
-                    {selectedStore?.plan_type && (
-                      <span className="rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
-                        {String(selectedStore.plan_type).replace(/_/g, ' ')}
-                      </span>
-                    )}
-                    {selectedStore?.is_ally && (
-                      <span
-                        className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-cliente"
-                        style={{ background: 'color-mix(in oklab, var(--brand-cliente-from) 16%, transparent)' }}
-                      >
-                        ★ Aliado
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {stores.length > 1 && (
-                  <div className="relative mt-3">
-                    <label className="mb-1 block font-mono text-[9px] uppercase tracking-[0.2em] text-fg-faint">
-                      Cambiar de tienda
-                    </label>
-                    <select
-                      value={selectedId ?? ''}
-                      onChange={(e) => handleSelect(e.target.value)}
-                      className="w-full rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-sm text-fg focus:outline-none focus:ring-2"
-                      style={{ '--tw-ring-color': 'var(--brand-cliente-from)' } as React.CSSProperties}
-                    >
-                      {stores.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                    <p className="mt-1.5 text-[10px] text-fg-subtle">{stores.length} tiendas vinculadas</p>
-                  </div>
-                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-fg leading-tight">{selectedStore?.name ?? '—'}</p>
+                  {(selectedStore?.plan_type || selectedStore?.is_ally) && (
+                    <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                      {selectedStore.plan_type && (
+                        <span className="rounded-full border border-line bg-surface px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-fg-muted">
+                          {String(selectedStore.plan_type).replace(/_/g, ' ')}
+                        </span>
+                      )}
+                      {selectedStore.is_ally && (
+                        <span
+                          className="rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-brand-cliente"
+                          style={{ background: 'color-mix(in oklab, var(--brand-cliente-from) 16%, transparent)' }}
+                        >
+                          ★ Aliado
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* Múltiples tiendas: select compacto */
+              <div className="flex items-center gap-2.5">
+                <div className="brand-cliente glow-cliente flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
+                  <svg className="h-4 w-4 text-fg-on-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                  </svg>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <select
+                    value={selectedId ?? ''}
+                    onChange={(e) => handleSelect(e.target.value)}
+                    className="w-full rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm font-semibold text-fg focus:outline-none focus:ring-2"
+                    style={{ '--tw-ring-color': 'var(--brand-cliente-from)' } as React.CSSProperties}
+                  >
+                    {stores.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  {(selectedStore?.plan_type || selectedStore?.is_ally) && (
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                      {selectedStore.plan_type && (
+                        <span className="rounded-full border border-line bg-surface px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-fg-muted">
+                          {String(selectedStore.plan_type).replace(/_/g, ' ')}
+                        </span>
+                      )}
+                      {selectedStore.is_ally && (
+                        <span
+                          className="rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-brand-cliente"
+                          style={{ background: 'color-mix(in oklab, var(--brand-cliente-from) 16%, transparent)' }}
+                        >
+                          ★ Aliado
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
-
-          {/* perfil */}
-          {profile && (
-            <div className="border-b border-line px-4 pb-4">
-              <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-2/60 p-3">
-                <div className="brand-cliente flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-fg-on-brand">
-                  {initials}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-fg">
-                    {profile.full_name || <span className="italic text-fg-faint">Sin nombre</span>}
-                  </p>
-                  <p className="truncate text-[11px] text-fg-subtle">{profile.email}</p>
-                </div>
-                <span className="shrink-0 rounded-full border border-line px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-fg-subtle">
-                  {role === 'owner' ? 'Dueño' : role === 'seller' ? 'Vendedor' : 'Publicista'}
-                </span>
-              </div>
-            </div>
-          )}
 
           {/* nav agrupado por objetivo */}
           <nav className="flex-1 space-y-4 overflow-y-auto p-3">
@@ -465,35 +457,68 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
         </aside>
 
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* topbar — visible en todos los tamaños */}
-          <header className="h-20 shrink-0 flex items-center justify-between border-b border-line bg-surface px-6 md:px-8">
+          {/* topbar */}
+          <header className="h-14 shrink-0 flex items-center border-b border-line bg-surface px-4 md:px-6">
+            {/* Móvil: hamburguesa */}
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label="Abrir menú"
-              className="rounded-lg border border-line p-2 text-fg-muted hover:text-fg md:hidden"
+              className="rounded-lg border border-line p-1.5 text-fg-muted hover:text-fg md:hidden"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <span className="max-w-[55%] truncate text-sm font-bold text-fg md:hidden">{selectedStore?.name ?? 'Portal comercio'}</span>
-            <div className="flex items-center gap-2 md:ml-auto">
+
+            {/* Móvil: nombre de tienda centrado */}
+            <span className="flex-1 truncate text-center text-sm font-bold text-fg md:hidden">
+              {selectedStore?.name ?? 'Portal comercio'}
+            </span>
+
+            {/* Spacer para empujar todo a la derecha en desktop */}
+            <div className="hidden md:block flex-1" />
+
+            {/* Bloque derecho: usuario + acciones */}
+            <div className="flex items-center gap-3">
+              {/* Identidad del usuario (solo desktop) */}
+              {profile && (
+                <div className="hidden md:flex items-center gap-2 mr-1">
+                  <div className="brand-cliente flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-fg-on-brand">
+                    {initials}
+                  </div>
+                  <p className="max-w-[160px] truncate text-sm font-medium text-fg leading-tight">
+                    {profile.full_name || <span className="italic text-fg-faint">Sin nombre</span>}
+                  </p>
+                  <span className="rounded-full border border-line px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-fg-subtle">
+                    {role === 'owner' ? 'Dueño' : role === 'seller' ? 'Vendedor' : 'Publicista'}
+                  </span>
+                </div>
+              )}
+
+              {/* Separador vertical (solo desktop, solo si hay perfil) */}
+              {profile && (
+                <div className="hidden md:block w-px h-5 bg-line" />
+              )}
+
+              {/* Notificaciones */}
               {role === 'owner' && (
                 <Link
                   href="/cliente/notificaciones"
-                  className="relative rounded-lg border border-line p-2 text-fg-muted transition-colors hover:text-fg"
+                  className="relative rounded-lg border border-line p-1.5 text-fg-muted transition-colors hover:text-fg"
                   aria-label={`Notificaciones${unreadNotifications > 0 ? `, ${unreadNotifications} sin leer` : ''}`}
                 >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                   </svg>
                   {unreadNotifications > 0 && (
-                    <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-warning px-1 text-[10px] font-bold text-white ring-2 ring-surface">
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-warning px-1 text-[9px] font-bold text-white ring-2 ring-surface">
                       {unreadNotifications > 99 ? '99+' : unreadNotifications}
                     </span>
                   )}
                 </Link>
               )}
+
+              {/* Tema */}
               <ThemeToggle />
             </div>
           </header>
@@ -502,15 +527,13 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
             <div className="mx-auto max-w-[1600px] p-6 md:p-8">
               {isRoutePending ? (
                 <div className="flex h-full min-h-[40vh] items-center justify-center">
-                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-[color:var(--brand-cliente-from)]" />
+                  <PageSpinner />
                 </div>
               ) : children}
             </div>
           </main>
         </div>
       </div>
-      <Toaster />
-      <ConfirmHost />
     </ClienteStoreContext.Provider>
   );
 }
