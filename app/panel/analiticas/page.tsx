@@ -603,7 +603,7 @@ export default function AnalyticsDashboard() {
             <div className="flex items-start justify-between flex-wrap gap-3">
               <div>
                 <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium">Campañas: impresiones</h3>
-                <p className="text-white/20 text-xs mt-1">Reproducciones registradas por el Ad-Server en kioscos (tabla <code className="text-white/40">ad_impressions</code>).</p>
+                <p className="text-white/20 text-xs mt-1">Reproducciones registradas por el Ad-Server en kioscos.</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={handleExportImpressions} className="flex items-center gap-1.5 text-xs text-emerald-400/60 hover:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 rounded-lg px-3 py-2 transition-colors">

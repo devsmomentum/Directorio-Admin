@@ -12,7 +12,7 @@ import { validateKioskVideo } from '../../../lib/videoValidation';
 import Pagination, { usePagination } from '../../components/Pagination';
 import { toast } from '../../components/toast';
 import { confirmDialog } from '../../components/confirm-dialog';
-import KioskAssignment from './KioskAssignment';
+// import KioskAssignment from './KioskAssignment';
 
 function getDaysUntilExpiry(endDate: string | null): number | null {
   if (!endDate) return null;
@@ -930,7 +930,23 @@ function CampaniasAdminInner() {
       )}
 
       {/* Tab: Kiosco assignment */}
-      {activeTab === 'kioscos' && <KioskAssignment />}
+      {activeTab === 'kioscos' && (
+        <div className="bg-[#111] border border-white/5 rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-3 min-h-[300px]">
+          <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center border border-orange-500/20 mb-2">
+            <svg className="w-6 h-6 text-orange-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <h3 className="text-white font-semibold text-base">Asignación por Kiosco en Desarrollo</h3>
+          <p className="text-white/40 text-xs max-w-sm leading-relaxed">
+            Esta sección se encuentra actualmente en desarrollo. Próximamente se habilitará para permitir configurar overrides específicos de campañas por kiosco.
+          </p>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20">
+            Próximamente
+          </span>
+        </div>
+      )}
 
       {/* Tab: Loop Activo */}
       {activeTab === 'loop' && (() => {
