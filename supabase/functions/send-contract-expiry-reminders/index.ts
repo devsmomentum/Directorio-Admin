@@ -18,7 +18,7 @@
 //
 // Email: Resend (https://resend.com). Requiere secrets:
 //   RESEND_API_KEY      — API key
-//   RESEND_FROM         — remitente verificado ("Millennium Mall <noreply@…>")
+//   RESEND_FROM         — remitente verificado ("Mall Hub <noreply@…>")
 //   CRON_SECRET         — clave compartida con pg_cron
 //   PUBLIC_APP_URL      — base del portal del cliente (link "Renovar plan")
 
@@ -28,7 +28,7 @@ const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const CRON_SECRET               = Deno.env.get('CRON_SECRET') ?? ''
 const RESEND_API_KEY            = Deno.env.get('RESEND_API_KEY') ?? ''
-const RESEND_FROM               = Deno.env.get('RESEND_FROM')    ?? 'Millennium Mall <noreply@morna.tech>'
+const RESEND_FROM               = Deno.env.get('RESEND_FROM')    ?? 'Mall Hub <noreply@morna.tech>'
 const PUBLIC_APP_URL            = (Deno.env.get('PUBLIC_APP_URL') ?? 'https://mallhub.morna.tech').replace(/\/$/, '')
 
 type Candidate = {
@@ -165,7 +165,7 @@ function renderText(c: Candidate): string {
     ``,
     `Renueva ahora: ${link}`,
     ``,
-    `— Millennium Mall`,
+    `— Mall Hub`,
   ].join('\n')
 }
 
@@ -185,7 +185,7 @@ function renderHtml(c: Candidate): string {
 </head>
 <body style="margin:0;padding:0;background:#050505;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#ffffff;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
-    ${escapeHtml(headline)} — renueva tu plan en Millennium Mall.
+    ${escapeHtml(headline)} — renueva tu plan en Mall Hub.
   </div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#050505;">
     <tr><td align="center" style="padding:32px 16px;">
@@ -227,7 +227,7 @@ function renderHtml(c: Candidate): string {
         </td></tr>
       </table>
       <p style="margin:16px 0 0 0;font-size:11px;color:rgba(255,255,255,0.35);">
-        Millennium Mall · ${new Date().getFullYear()}
+        Mall Hub · ${new Date().getFullYear()}
       </p>
     </td></tr>
   </table>

@@ -258,7 +258,7 @@ Deno.serve(async (req: Request) => {
 
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
   const resendFrom =
-    Deno.env.get("RESEND_FROM") ?? "Millennium Mall <noreply@morna.tech>";
+    Deno.env.get("RESEND_FROM") ?? "Mall Hub <noreply@morna.tech>";
 
   if (!resendApiKey) {
     console.error("[reserve-flash-coupon] RESEND_API_KEY missing");

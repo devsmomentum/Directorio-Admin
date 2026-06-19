@@ -138,7 +138,7 @@ function buildMessage(c: Candidate): string {
     : `vence en *${c.days_remaining} días* (${expiry})`
 
   return [
-    `🏪 *Millennium Mall — Recordatorio de plan*`,
+    `🏪 *Mall Hub — Recordatorio de plan*`,
     ``,
     `${greeting}`,
     ``,
@@ -149,7 +149,7 @@ function buildMessage(c: Candidate): string {
     `👉 Renueva aquí: ${link}`,
     ``,
     `Si ya realizaste la renovación, ignora este mensaje.`,
-    `— Millennium Mall`,
+    `— Mall Hub`,
   ].join('\n')
 }
 

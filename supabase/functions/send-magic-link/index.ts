@@ -272,7 +272,7 @@ async function handle(req: Request): Promise<Response> {
 
     const chatId = toChatId(phoneRaw)
     const message =
-      `Bienvenido a MallHub.\n` +
+      `Bienvenido a Mall Hub.\n` +
       `Abre este enlace en tu teléfono para activar tu cuenta y definir tu contraseña ` +
       `(expira en 1 hora):\n${safeLink}\n\n` +
       `Si no fuiste tú quien lo solicitó, ignora este mensaje.`
