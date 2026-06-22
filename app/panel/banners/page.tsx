@@ -89,7 +89,7 @@ export default function BannersAdminPage() {
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState('');
   const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
-  const [uiPosition, setUiPosition] = useState('home_hero');
+  const [uiPosition, setUiPosition] = useState<string>(UI_POSITIONS[0]);
   const [slotPosition, setSlotPosition] = useState(1);
   const [isActive, setIsActive] = useState(true);
   const [campaignId, setCampaignId] = useState('');
@@ -177,7 +177,7 @@ export default function BannersAdminPage() {
 
   const resetForm = () => {
     setEditingId(null); setMediaFile(null); setMediaPreview('');
-    setMediaType('image'); setUiPosition('home_hero'); setSlotPosition(1);
+    setMediaType('image'); setUiPosition(UI_POSITIONS[0]); setSlotPosition(1);
     setIsActive(true); setCampaignId(''); setStartDate(''); setEndDate('');
     setStoreId(''); setStoreSearch(''); setStoreDropdownOpen(false);
     setShowForm(false);
@@ -483,7 +483,7 @@ export default function BannersAdminPage() {
                     </label>
                     <input type="file" accept="image/*,video/*" onChange={handleFileChange}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white/70 file:text-xs" />
-                    <p className="text-[10px] text-white/20 mt-1">Imagen máx 2 MB · Video máx 15 MB · Recomendado <span className="text-white/40">1080 × 192 px (5.625:1)</span> — el video recorta a la franja con <code className="text-white/30">cover</code>; la imagen se muestra completa y deja bordes negros si no es 5.625:1.</p>
+                    <p className="text-[10px] text-white/20 mt-1">Imagen máx 2 MB · Video máx 15 MB · Recomendado <span className="text-white/40">1920 × 342 px (5.625:1)</span> — ambos tipos recortan con <code className="text-white/30">cover</code>; centra el contenido importante.</p>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button type="button" onClick={resetForm}

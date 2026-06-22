@@ -7,6 +7,7 @@ import Pagination, { usePagination } from '../../components/Pagination';
 import { PLAN_COLOR_PARTS as PLAN_COLORS, DEFAULT_PLAN_COLOR as DEFAULT_COLOR } from '../../../lib/plans';
 import { toast } from '../../components/toast';
 import { confirmDialog } from '../../components/confirm-dialog';
+import { logAdminAction } from '../../../lib/audit';
 
 // Planes that apply to stores and/or coupons - managed in the store_plans table
 // Falls back to inline editable plan definitions if no dedicated table exists
@@ -138,9 +139,11 @@ export default function PlanesCRUD() {
           .update({ ...updatePayload, updated_at: new Date().toISOString() })
           .eq('id', editingId);
         if (error) throw error;
+        await logAdminAction({ action_type: 'EDITAR', entity_type: 'plan', entity_id: editingId, entity_name: planName });
       } else {
-        const { error } = await supabase.from('plans').insert([payload]);
+        const { data: inserted, error } = await supabase.from('plans').insert([payload]).select('id').single();
         if (error) throw error;
+        await logAdminAction({ action_type: 'CREAR', entity_type: 'plan', entity_id: inserted?.id, entity_name: planName });
       }
       resetForm();
       fetchPlans();
@@ -157,6 +160,7 @@ export default function PlanesCRUD() {
     if (!ok) return;
     const { error } = await supabase.from('plans').delete().eq('id', id);
     if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
+    await logAdminAction({ action_type: 'ELIMINAR', entity_type: 'plan', entity_id: id, entity_name: plans.find(p => p.id === id)?.name });
     fetchPlans();
     toast.success('Plan eliminado.');
   };
@@ -164,6 +168,7 @@ export default function PlanesCRUD() {
   const handleToggleActive = async (id: string, current: boolean) => {
     const { error } = await supabase.from('plans').update({ is_active: !current }).eq('id', id);
     if (error) { toast.error('Error: ' + error.message); return; }
+    await logAdminAction({ action_type: current ? 'DESACTIVAR' : 'ACTIVAR', entity_type: 'plan', entity_id: id, entity_name: plans.find(p => p.id === id)?.name });
     setPlans(prev => prev.map(p => p.id === id ? { ...p, is_active: !current } : p));
   };
 

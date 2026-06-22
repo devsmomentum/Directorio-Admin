@@ -269,8 +269,11 @@ export default function MapaEditorPage() {
 
       const bathroomsRes = await supabase.from('bathrooms').select('*').eq('floor_level', selectedFloor);
       setBathrooms(bathroomsRes.data || []);
-    } catch {
-      // Silenciar errores de tablas inexistentes
+    } catch (err: any) {
+      // Las tablas opcionales (map_polygons/map_routes/bathrooms) pueden no
+      // existir aún; aun así dejamos rastro para no perder fallos reales (red,
+      // permisos, tablas core).
+      console.error('Error al cargar datos del mapa:', err?.message ?? err);
     }
     setLoadingMap(false);
   }, [selectedFloor]);

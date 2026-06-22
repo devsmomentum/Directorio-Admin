@@ -4,14 +4,36 @@ import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../../lib/supabase';
+import { ErrorState } from '../../components/ErrorState';
+
+interface Kiosk {
+  id: string;
+  name: string | null;
+  location: string | null;
+  hardware_id: string | null;
+  last_ping: string | null;
+}
+
+interface AdminNotification {
+  id: string;
+  read_at: string | null;
+  created_at: string;
+}
+
+interface ContractAlert {
+  id: string;
+  name: string;
+  contract_expiry_date: string;
+}
 
 export default function DashboardPage() {
-  const [kiosks, setKiosks] = useState<any[]>([]);
+  const [kiosks, setKiosks] = useState<Kiosk[]>([]);
   const [stores, setStores] = useState<number>(0);
   const [campaigns, setCampaigns] = useState<number>(0);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [contractsAlert, setContractsAlert] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+  const [contractsAlert, setContractsAlert] = useState<ContractAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -37,11 +59,22 @@ export default function DashboardPage() {
         .limit(10),
     ]);
 
-    if (kiosksRes.data) setKiosks(kiosksRes.data);
+    const anyError =
+      kiosksRes.error || storesRes.error || campaignsRes.error || notifRes.error || contractsRes.error;
+    if (anyError) {
+      console.error('Error al cargar el dashboard de inicio:', anyError.message);
+      setLoadError(true);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    if (kiosksRes.data) setKiosks(kiosksRes.data as Kiosk[]);
     if (storesRes.count != null) setStores(storesRes.count);
     if (campaignsRes.count != null) setCampaigns(campaignsRes.count);
-    if (notifRes.data) setNotifications(notifRes.data);
-    if (contractsRes.data) setContractsAlert(contractsRes.data);
+    if (notifRes.data) setNotifications(notifRes.data as AdminNotification[]);
+    if (contractsRes.data) setContractsAlert(contractsRes.data as ContractAlert[]);
+    setLoadError(false);
     setLoading(false);
     setRefreshing(false);
   };
@@ -70,6 +103,16 @@ export default function DashboardPage() {
       <div className="flex items-center justify-center h-full">
         <PageSpinner />
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ErrorState
+        title="No se pudo cargar el monitoreo"
+        message="Ocurrió un error al leer el estado de los kioscos. Revisa tu conexión e inténtalo de nuevo."
+        onRetry={fetchData}
+      />
     );
   }
 

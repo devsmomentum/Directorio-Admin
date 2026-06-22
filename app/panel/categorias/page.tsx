@@ -6,6 +6,7 @@ import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 import { toast } from '../../components/toast';
 import { confirmDialog } from '../../components/confirm-dialog';
+import { logAdminAction } from '../../../lib/audit';
 
 export default function CategoriasCRUD() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -44,9 +45,11 @@ export default function CategoriasCRUD() {
       if (editingId) {
         const { error } = await supabase.from('categories').update(categoryData).eq('id', editingId);
         if (error) throw error;
+        await logAdminAction({ action_type: 'EDITAR', entity_type: 'categoría', entity_id: editingId, entity_name: name });
       } else {
-        const { error } = await supabase.from('categories').insert([categoryData]);
+        const { data: inserted, error } = await supabase.from('categories').insert([categoryData]).select('id').single();
         if (error) throw error;
+        await logAdminAction({ action_type: 'CREAR', entity_type: 'categoría', entity_id: inserted?.id, entity_name: name });
       }
       resetForm();
       fetchCategories();
@@ -75,6 +78,7 @@ export default function CategoriasCRUD() {
     if (!ok) return;
     const { error } = await supabase.from('categories').delete().eq('id', id);
     if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
+    await logAdminAction({ action_type: 'ELIMINAR', entity_type: 'categoría', entity_id: id, entity_name: categories.find(c => c.id === id)?.name });
     fetchCategories();
     toast.success('Categoría eliminada.');
   };

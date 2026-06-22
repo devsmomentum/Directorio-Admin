@@ -4,9 +4,12 @@ import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
+import { ErrorState } from '../../components/ErrorState';
+import type { AdminAuditLog } from '../../../lib/audit';
 
 export default function AuditDashboard() {
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<AdminAuditLog[]>([]);
+  const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchAdmin, setSearchAdmin] = useState('');
@@ -29,9 +32,11 @@ export default function AuditDashboard() {
         .order('created_at', { ascending: sortOrder === 'asc' });
 
       if (error) throw error;
-      if (data) setLogs(data);
+      setLogs((data ?? []) as AdminAuditLog[]);
+      setLoadError(false);
     } catch (err: any) {
       console.error('Error fetching audit logs:', err.message);
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -182,6 +187,16 @@ export default function AuditDashboard() {
       <div className="flex items-center justify-center h-[50vh]">
         <PageSpinner />
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ErrorState
+        title="No se pudo cargar la auditoría"
+        message="Ocurrió un error al leer los registros. Revisa tu conexión e inténtalo de nuevo."
+        onRetry={fetchLogs}
+      />
     );
   }
 

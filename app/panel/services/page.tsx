@@ -6,6 +6,7 @@ import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 import { toast } from '../../components/toast';
 import { confirmDialog } from '../../components/confirm-dialog';
+import { logAdminAction } from '../../../lib/audit';
 
 interface Service {
   id: string;
@@ -65,6 +66,7 @@ export default function ServicesAdminPage() {
     if (!ok) return;
     const { error } = await supabase.from('services').delete().eq('id', id);
     if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
+    await logAdminAction({ action_type: 'ELIMINAR', entity_type: 'servicio', entity_id: id, entity_name: services.find(s => s.id === id)?.title });
     fetchServices();
     toast.success('Servicio eliminado.');
   };
@@ -75,6 +77,7 @@ export default function ServicesAdminPage() {
       toast.error('Error al cambiar estado: ' + error.message);
       return;
     }
+    await logAdminAction({ action_type: current ? 'DESACTIVAR' : 'ACTIVAR', entity_type: 'servicio', entity_id: id, entity_name: services.find(s => s.id === id)?.title });
     setServices(prev => prev.map(s => s.id === id ? { ...s, is_active: !current } : s));
   };
 
@@ -101,9 +104,11 @@ export default function ServicesAdminPage() {
         if (publicUrl) updateData.image_url = publicUrl;
         const { error } = await supabase.from('services').update(updateData).eq('id', editingId);
         if (error) throw error;
+        await logAdminAction({ action_type: 'EDITAR', entity_type: 'servicio', entity_id: editingId, entity_name: title });
       } else {
-        const { error } = await supabase.from('services').insert({ title, provider, description, image_url: publicUrl });
+        const { data: inserted, error } = await supabase.from('services').insert({ title, provider, description, image_url: publicUrl }).select('id').single();
         if (error) throw error;
+        await logAdminAction({ action_type: 'CREAR', entity_type: 'servicio', entity_id: inserted?.id, entity_name: title });
       }
 
       resetForm();

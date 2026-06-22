@@ -6,6 +6,7 @@ import { supabase } from '../../../lib/supabase';
 import Pagination, { usePagination } from '../../components/Pagination';
 import { toast } from '../../components/toast';
 import { confirmDialog } from '../../components/confirm-dialog';
+import { logAdminAction } from '../../../lib/audit';
 
 export default function KioscosCRUD() {
   const [kiosks, setKiosks] = useState<any[]>([]);
@@ -57,17 +58,19 @@ export default function KioscosCRUD() {
         .eq('id', editingId);
 
       if (error) { toast.error('Error al actualizar: ' + error.message); setSubmitting(false); return; }
+      await logAdminAction({ action_type: 'EDITAR', entity_type: 'kiosco', entity_id: editingId, entity_name: name });
       toast.success('Kiosco actualizado.');
     } else {
-      const { error } = await supabase.from('kiosks').insert([{
+      const { data: inserted, error } = await supabase.from('kiosks').insert([{
         name,
         location,
         mall_id: mallId || null,
         status: 'offline',
         hardware_id: null
-      }]);
+      }]).select('id').single();
 
       if (error) { toast.error('Error al crear: ' + error.message); setSubmitting(false); return; }
+      await logAdminAction({ action_type: 'CREAR', entity_type: 'kiosco', entity_id: inserted?.id, entity_name: name });
       toast.success('Kiosco creado.');
     }
 
@@ -103,6 +106,7 @@ export default function KioscosCRUD() {
     if (!ok) return;
     const { error } = await supabase.from('kiosks').update({ hardware_id: null, status: 'offline' }).eq('id', id);
     if (error) { toast.error('No se pudo desvincular: ' + error.message); return; }
+    await logAdminAction({ action_type: 'DESVINCULAR', entity_type: 'kiosco', entity_id: id, entity_name: kiosks.find(k => k.id === id)?.name });
     fetchKiosks();
     toast.success('Hardware desvinculado.');
   };
@@ -117,6 +121,7 @@ export default function KioscosCRUD() {
     if (!ok) return;
     const { error } = await supabase.from('kiosks').delete().eq('id', id);
     if (error) { toast.error('No se pudo eliminar: ' + error.message); return; }
+    await logAdminAction({ action_type: 'ELIMINAR', entity_type: 'kiosco', entity_id: id, entity_name: kiosks.find(k => k.id === id)?.name });
     fetchKiosks();
     toast.success('Kiosco eliminado.');
   };

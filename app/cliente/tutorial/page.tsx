@@ -65,10 +65,10 @@ export default function ClienteTutorialPage() {
             <h4 className="text-white font-bold mb-1">Franja del menú kiosco</h4>
             <p className="text-[10px] text-white/40 mt-0.5">Exclusivo plan Diamante</p>
             <div className="space-y-2 mt-4">
-              <Spec label="Resolución" value="1080 × 192 px (≈ 5.625:1)" />
-              <Spec label="Formato" value=".PNG o .JPG" />
-              <Spec label="Peso máx." value="2 MB" />
-              <Spec label="Nota" value="Recorte cover, texto centrado" />
+              <Spec label="Resolución" value="1920 × 342 px (≈ 5.625:1)" />
+              <Spec label="Formato" value=".MP4 (H.264) · .PNG · .JPG" />
+              <Spec label="Peso máx." value="15 MB video · 2 MB imagen" />
+              <Spec label="Nota" value="Cover: texto y logos centrados" />
             </div>
           </div>
 

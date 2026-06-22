@@ -26,13 +26,13 @@
   línea, o al menos un badge "N pendientes" que enlace a `/solicitudes`.
   Archivos: `app/panel/{campanias,banners,cupons,solicitudes}/page.tsx`.
 
-- [ ] 🔴 **Posición de banner asignada en dos lugares y sobrescrita en silencio.**
+- [~] 🔴 **Posición de banner asignada en dos lugares y sobrescrita en silencio.**
   `banners` deja elegir posición al crear, pero el RPC de aprobación en
-  `solicitudes` la reasigna sin avisar. Además `banners` arranca con
-  `uiPosition='home_hero'` cuando `UI_POSITIONS` solo es `['top','bottom']`. →
-  Slot/posición autoritativo en un solo lugar (recomendado: al aprobar),
-  de solo-lectura en el otro; corregir el default.
-  Archivos: `app/panel/banners/page.tsx` (~13, ~90, ~192), `app/panel/solicitudes/page.tsx` (~277-279).
+  `solicitudes` la reasigna sin avisar. → _Hecho parcial:_ corregido el default
+  inválido — `uiPosition` ahora arranca en `UI_POSITIONS[0]` (`'top'`) en vez del
+  inexistente `'home_hero'`. _Pendiente (decisión de producto):_ hacer la posición
+  autoritativa en un solo lugar (recomendado: al aprobar) y de solo-lectura en el otro.
+  Archivos: `app/panel/banners/page.tsx` (~16, ~92, ~180), `app/panel/solicitudes/page.tsx` (~277-279).
 
 - [x] 🔴 **No hay componentes compartidos Confirm/Toast/Modal/Spinner/EmptyState.**
   → Hecho: creados `app/components/toast.tsx` (`toast.success/error/info` +
@@ -160,14 +160,20 @@
   aclaró visualmente que las solicitudes pendientes son históricas.
   Archivo: `app/cliente/dashboard/page.tsx`.
 
-- [ ] 🟡 **Cobertura de auditoría incompleta.** De 15 `AuditEntityType` declarados,
-  6 nunca se registran: `kiosco`, `categoría`, `plan`, `servicio`,
-  `gasto_operativo`, `solicitud`. → Añadir `logAdminAction` en esas mutaciones o
-  quitar los tipos no usados. (Verificado: 9/15 sí se registran.)
+- [x] 🟡 **Cobertura de auditoría incompleta.** De 15 `AuditEntityType` declarados,
+  6 no se registraban. → Hecho: añadido `logAdminAction` en `kioscos`
+  (CREAR/EDITAR/ELIMINAR/DESVINCULAR), `categorias` (CREAR/EDITAR/ELIMINAR),
+  `planes` (CREAR/EDITAR/ELIMINAR/ACTIVAR/DESACTIVAR) y `services`
+  (CREAR/EDITAR/ELIMINAR/ACTIVAR/DESACTIVAR). Los tipos muertos `gasto_operativo`
+  (sin CRUD en el panel) y `solicitud` (las aprobaciones ya loguean como su entidad
+  destino) se eliminaron de `AuditEntityType` en `lib/audit.ts`.
 
-- [ ] 🟡 **Errores silenciados en admin.** `mapa` ignora fallos de tablas
-  inexistentes con `catch {}` (~270); `inicio` usa `any[]` en varios estados
-  (~8-12) y `auditoria` (~8). → Mostrar estado de error y tipar.
+- [x] 🟡 **Errores silenciados en admin.** → Hecho: `inicio` y `auditoria` ahora
+  detectan el `.error` de Supabase y muestran `<ErrorState/>` con "Reintentar";
+  sus estados pasaron de `any[]` a interfaces tipadas (`Kiosk`/`AdminNotification`/
+  `ContractAlert` en `inicio`; `AdminAuditLog` compartido desde `lib/audit.ts` en
+  `auditoria`). El `catch {}` vacío de `mapa` ahora loguea el error (las tablas
+  opcionales pueden no existir, pero ya no se tragan fallos reales).
 
 ---
 
@@ -187,23 +193,32 @@
 - [x] 🟢 **`cliente/planes`:** input de ciclos sin tope → `max=12` + clamp.
 - [x] 🟢 **`cliente/cuenta`:** tres nombres para un destino (nav "Mi Tienda", eyebrow
   "Mi cuenta", h2 "Mis Tiendas") → nav unificado a "Mi cuenta".
-- [ ] 🟢 **Código muerto adicional _(confirmar)_:**
-  - `tiendas`: `clientsError` capturado nunca recuperado; `contractCountByStore`
-    calculado y nunca mostrado; `detailStore` sin UI de detalle.
+- [ ] 🟢 **Código muerto adicional** (verificado 2026-06-22):
+  - ~~`tiendas`: `clientsError`~~ **FALSO POSITIVO** — sí se muestra (`tiendas:983`).
+  - ~~`tiendas`: `contractCountByStore`~~ **FALSO POSITIVO** — sí se renderiza como
+    badge "C" en la tabla (`tiendas:1423`).
+  - `tiendas`: `detailStore` — `StoreDetailModal` existe pero nunca se abre desde
+    la lista (no hay `setDetailStore` en las filas). **CONFIRMADO** pero se decidió
+    dejarlo (relacionado con el ítem ver-vs-editar).
   - `campanias`: `slot_limit_group`/`slotLimitGroup` guardado en BD nunca leído.
+    **CONFIRMADO** (`campanias:64,365`) — pendiente decisión: quitar el write o exponerlo.
   - `cliente/dashboard`: `summaryMetrics()`/`SUMMARY_COLUMNS` solo usados en export,
-    métricas en pantalla se recalculan inline.
+    métricas en pantalla se recalculan inline. **CONFIRMADO** (duplicación, no muerto).
   - `cliente/promociones`: parámetro `activeConflict` en `persistCampaign` sin uso.
-  - `mapa`: estado `showRoutesPanel` nunca leído.
+    **CONFIRMADO** (`promociones:540`) — pendiente quitar el parámetro.
+  - ~~`mapa`: `showRoutesPanel`~~ **FALSO POSITIVO** — sí se lee en render (`mapa:537`).
 - [ ] 🟢 **Campos guardados pero no expuestos _(confirmar)_:** `campanias`
   (`slot_limit_group`, `priority_level`, `target_frequency`); `cupons` (`category`
   texto libre sin selector, `campaign_id` nunca mostrado); método de pago `cash_bs`
   manejado en código pero nunca ofrecido en UI.
-- [ ] 🟢 **Inconsistencia de claves de plan _(confirmar)_:** `finanzas` usa
-  `PROMO_FLASH` mientras otros usan `FLASH_COUPON_DIARIO/SEMANAL`. → Confirmar la
-  verdad en BD y unificar (encaja con `lib/plans.ts`).
-- [ ] 🟢 **Tokens de tema:** `abrir`/`bienvenida` y `mapa` (colores de canvas,
-  `inicio` spinner `border-pink-500`) hardcodean hex en vez de tokens. → Tokenizar.
+- [ ] 🟢 **Inconsistencia de claves de plan** (verificado 2026-06-22): `finanzas:43`
+  usa `PROMO_FLASH`, que `lib/plans.ts:24` documenta y soporta como **alias legacy**
+  todavía presente en datos. No está roto; queda como oportunidad de migrar a
+  `FLASH_COUPON_DIARIO/SEMANAL`, no como bug.
+- [ ] 🟢 **Tokens de tema** (verificado 2026-06-22): los hex del `mapa` son colores de
+  `<canvas>` (`strokeStyle`/`fillStyle`, `mapa:21-22,55,65,191-243`) — no son clases
+  CSS, así que tokenizarlos es marginal/no aplica directamente. Quedan los `bg-[#111]`
+  de `abrir`/`inicio`, pero `theme.css` ya los remapea en light/dark. Prioridad baja.
 
 ---
 

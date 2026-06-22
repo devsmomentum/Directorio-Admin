@@ -5,16 +5,10 @@ import { useState } from 'react';
 // Replica el layout real del K2 Pro (1080×1920 portrait).
 //
 // Comportamiento Flutter verificado en screen_ad_banners.dart + safe_network_image.dart:
-//   VIDEO → SizedBox.expand + FittedBox(BoxFit.cover)
-//           El video LLENA toda la franja (ancho y alto). CSS: object-fit cover.
-//   IMAGEN → SafeNetworkImage envuelve la Image en un AnimatedSwitcher (fadeIn);
-//            su Stack pasa constraints SUELTAS, así que la Image se dimensiona
-//            conservando su aspect-ratio DENTRO de la franja (efecto contain),
-//            centrada sobre el fondo negro del Container. El BoxFit.cover nunca
-//            recorta porque la caja resultante ya tiene el AR de la imagen.
-//            → Una imagen que no sea 5.625:1 (1080×192) muestra bordes negros
-//            a los lados (o arriba/abajo si es ultra-panorámica).
-//            CSS: object-fit contain sobre fondo negro.
+//   VIDEO → SizedBox.expand + FittedBox(BoxFit.cover) → CSS: object-fit cover.
+//   IMAGEN → SafeNetworkImage(fit: BoxFit.cover)      → CSS: object-fit cover.
+//   Ambos recortan el exceso; contenido importante debe ir centrado en la franja.
+//   Dimensión recomendada: 1920 × 342 px (ratio 5.625:1).
 //
 // AppColors Flutter: background #000 · surface #111 · primary #0707DD · secondary #74BD26
 
@@ -77,18 +71,13 @@ export default function K2BannerPreview({
       );
     }
 
-    // Imagen: en el K2 la franja muestra la imagen completa conservando su
-    // aspect-ratio, centrada sobre negro (ver nota del encabezado). Solo un
-    // archivo 5.625:1 llena la franja sin bordes.
     return (
-      <div className="w-full h-full" style={{ background: '#000' }}>
-        <img
-          src={src}
-          alt=""
-          className="w-full h-full object-contain"
-          onError={() => setMediaErr(true)}
-        />
-      </div>
+      <img
+        src={src}
+        alt=""
+        className="w-full h-full object-cover"
+        onError={() => setMediaErr(true)}
+      />
     );
   }
 

@@ -23,10 +23,21 @@ export type AuditEntityType =
   | 'categoría'
   | 'plan'
   | 'servicio'
-  | 'gasto_operativo'
   | 'pago'
-  | 'solicitud'
   | 'configuracion';
+
+/** Fila de `admin_audit_logs` tal como se lee en el panel de Auditoría. */
+export interface AdminAuditLog {
+  id: string;
+  admin_id: string;
+  admin_email: string;
+  action_type: AuditActionType;
+  entity_type: AuditEntityType;
+  entity_id: string | null;
+  entity_name: string | null;
+  details: Record<string, any> | null;
+  created_at: string;
+}
 
 export interface AuditActionPayload {
   action_type: AuditActionType;
