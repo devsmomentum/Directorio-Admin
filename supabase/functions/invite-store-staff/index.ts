@@ -23,6 +23,10 @@
 //     phone?: string,            // requerido si channel='whatsapp'
 //     redirectTo?: string,
 //     profile?: { full_name?, cedula_numero?, telefono_personal? } }
+//
+// WhatsApp: Green API. Requiere secrets:
+//   GREEN_API_ID_INSTANCE    — ID de la instancia
+//   GREEN_API_TOKEN_INSTANCE — Token de la instancia
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -30,9 +34,8 @@ const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const SUPABASE_ANON_KEY         = Deno.env.get('SUPABASE_ANON_KEY')!
 
-const SUPERAPI_URL    = Deno.env.get('SUPERAPI_URL')    ?? 'https://v4.iasuperapi.com'
-const SUPERAPI_TOKEN  = Deno.env.get('SUPERAPI_TOKEN')  ?? ''
-const SUPERAPI_CLIENT = Deno.env.get('SUPERAPI_CLIENT_ID') ?? ''
+const GREEN_API_ID_INSTANCE    = Deno.env.get('GREEN_API_ID_INSTANCE')    ?? ''
+const GREEN_API_TOKEN_INSTANCE = Deno.env.get('GREEN_API_TOKEN_INSTANCE') ?? ''
 
 const PUBLIC_APP_URL = 'https://mallhub.morna.tech'.replace(/\/$/, '')
 
@@ -156,8 +159,8 @@ async function handle(req: Request): Promise<Response> {
     return respond({ error: `generateLink: ${genErr?.message ?? 'sin action_link'}` }, 500)
   }
   const actionLink = linkData.properties.action_link
-  if (!SUPERAPI_TOKEN) {
-    return respond({ error: 'SuperAPI no configurado (falta SUPERAPI_TOKEN)', action_link: actionLink }, 500)
+  if (!GREEN_API_ID_INSTANCE || !GREEN_API_TOKEN_INSTANCE) {
+    return respond({ error: 'Green API no configurado (faltan credenciales)', action_link: actionLink }, 500)
   }
   // Envolver en /abrir para que el prefetch de WhatsApp no consuma el link single-use.
   const safeLink = appOrigin ? `${appOrigin}/abrir?next=${encodeURIComponent(actionLink)}` : actionLink
@@ -168,17 +171,16 @@ async function handle(req: Request): Promise<Response> {
     `Abre este enlace en tu teléfono para activar tu cuenta y definir tu contraseña ` +
     `(expira en 1 hora):\n${safeLink}\n\n` +
     `Si no esperabas esto, ignora este mensaje.`
-  const payload: Record<string, unknown> = { chatId, message }
-  if (SUPERAPI_CLIENT) payload.client = SUPERAPI_CLIENT
 
-  const waRes = await fetch(`${SUPERAPI_URL.replace(/\/$/, '')}/api/v1/send-message`, {
+  const waUrl = `https://api.green-api.com/waInstance${GREEN_API_ID_INSTANCE}/sendMessage/${GREEN_API_TOKEN_INSTANCE}`
+  const waRes = await fetch(waUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPERAPI_TOKEN}` },
-    body: JSON.stringify(payload),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chatId, message }),
   })
   const waJson: any = await waRes.json().catch(() => ({}))
-  if (!waRes.ok || waJson?.error === true) {
-    return respond({ error: `SuperAPI ${waRes.status}: ${waJson?.message ?? 'envío fallido'}`, action_link: actionLink }, 502)
+  if (!waRes.ok || !waJson?.idMessage) {
+    return respond({ error: `Green API ${waRes.status}: ${waJson?.message ?? 'envío fallido o número inválido'}`, action_link: actionLink }, 502)
   }
   return respond({ ok: true, channel: 'whatsapp', chatId, email, store_role: storeRole })
 }

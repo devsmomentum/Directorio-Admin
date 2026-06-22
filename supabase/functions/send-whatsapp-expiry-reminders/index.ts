@@ -12,22 +12,22 @@
 //
 // Auth: lo llama pg_cron con header `x-cron-secret`. verify_jwt=false.
 //
-// WhatsApp: SuperAPI (https://v4.iasuperapi.com). Requiere secrets:
-//   SUPERAPI_TOKEN      — API key de SuperAPI
-//   SUPERAPI_CLIENT_ID  — (opcional) ID de cliente SuperAPI
-//   SUPERAPI_URL        — (opcional) override de URL base
-//   CRON_SECRET         — clave compartida con pg_cron
-//   PUBLIC_APP_URL      — base del portal del cliente (link "Renovar plan")
+// WhatsApp: Green API (https://green-api.com). Requiere secrets:
+//   GREEN_API_ID_INSTANCE     — ID de la instancia provisto por el trabajo
+//   GREEN_API_TOKEN_INSTANCE  — Token de la instancia provisto por el trabajo
+//   CRON_SECRET               — clave compartida con pg_cron
+//   PUBLIC_APP_URL            — base del portal del cliente (link "Renovar plan")
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const CRON_SECRET               = Deno.env.get('CRON_SECRET') ?? ''
-const SUPERAPI_URL              = (Deno.env.get('SUPERAPI_URL') ?? 'https://v4.iasuperapi.com').replace(/\/$/, '')
-const SUPERAPI_TOKEN            = Deno.env.get('SUPERAPI_TOKEN') ?? ''
-const SUPERAPI_CLIENT           = Deno.env.get('SUPERAPI_CLIENT_ID') ?? ''
 const PUBLIC_APP_URL            = (Deno.env.get('PUBLIC_APP_URL') ?? 'https://mallhub.morna.tech').replace(/\/$/, '')
+
+// Credenciales de Green API
+const GREEN_API_ID_INSTANCE    = Deno.env.get('GREEN_API_ID_INSTANCE') ?? ''
+const GREEN_API_TOKEN_INSTANCE = Deno.env.get('GREEN_API_TOKEN_INSTANCE') ?? ''
 
 type Candidate = {
   store_id:             string
@@ -50,8 +50,9 @@ Deno.serve(async (req: Request) => {
   const incoming = req.headers.get('x-cron-secret') ?? ''
   if (CRON_SECRET && incoming !== CRON_SECRET) return respond({ error: 'Unauthorized' }, 401)
 
-  if (!SUPERAPI_TOKEN) {
-    return respond({ error: 'SUPERAPI_TOKEN no configurado' }, 500)
+  // Validación de llaves de Green API
+  if (!GREEN_API_ID_INSTANCE || !GREEN_API_TOKEN_INSTANCE) {
+    return respond({ error: 'GREEN_API_ID_INSTANCE o GREEN_API_TOKEN_INSTANCE no configurados' }, 500)
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -108,21 +109,25 @@ async function sendWhatsApp(c: Candidate): Promise<void> {
   const chatId  = toChatId(c.recipient_phone)
   const message = buildMessage(c)
 
-  const payload: Record<string, unknown> = { chatId, message }
-  if (SUPERAPI_CLIENT) payload.client = SUPERAPI_CLIENT
+  // Formato de URL de Green API: https://api.green-api.com/waInstance{{idInstance}}/{{method}}/{{apiTokenInstance}}
+  const url = `https://api.green-api.com/waInstance${GREEN_API_ID_INSTANCE}/sendMessage/${GREEN_API_TOKEN_INSTANCE}`
 
-  const res = await fetch(`${SUPERAPI_URL}/api/v1/send-message`, {
+  const payload = { chatId, message }
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${SUPERAPI_TOKEN}`,
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
   })
 
   const json: any = await res.json().catch(() => ({}))
-  if (!res.ok || json?.error === true) {
-    throw new Error(`SuperAPI ${res.status}: ${json?.message ?? 'envío fallido'}`)
+  
+  // Green API devuelve un "idMessage" si la petición es exitosa. 
+  // Si no es un estado 2xx o no viene idMessage, lanzamos un error.
+  if (!res.ok || !json?.idMessage) {
+    throw new Error(`Green API ${res.status}: ${json?.message ?? 'envío fallido o número no registrado'}`)
   }
 }
 
@@ -159,7 +164,7 @@ function formatDate(iso: string): string {
   return `${d}/${m}/${y}`
 }
 
-// SuperAPI espera chatId en formato "<E.164 sin '+'>@c.us".
+// Green API usa exactamente el mismo formato que SuperAPI: "<E.164 sin '+'>@c.us"
 // Ej.: "0414-123-4567" → "584141234567@c.us"
 function toChatId(raw: string): string {
   let digits = raw.replace(/\D+/g, '')
