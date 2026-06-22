@@ -2039,9 +2039,9 @@ export default function ClientePromocionesPage() {
                     {sortedBanners.length}
                   </span>
                 </div>
-                <span className="text-[10px] text-white/30">Vertical · 80:192</span>
+                <span className="text-[10px] text-white/30">Horizontal · 1080×192 (5.625:1)</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {sortedBanners.map(b => (
                   <BannerCard
                     key={`b-${b.id}`}
@@ -2278,14 +2278,14 @@ function CouponCard({ c, onEdit, onDelete, today, redeemedCount }: { c: any; onE
   const active = c.amount_available > 0 && (!c.end_date || c.end_date >= new Date().toISOString());
   const approval = APPROVAL_CHIP[c.approval_status || 'approved'] || APPROVAL_CHIP.approved;
   return (
-    <div className="bg-[#0F0F0F] border border-white/5 rounded-xl overflow-hidden">
+    <div className="bg-[#0F0F0F] border border-amber-500/20 rounded-xl overflow-hidden">
       <div className="aspect-[4/3] bg-black flex items-center justify-center relative">
         {c.image_url ? (
           <img src={c.image_url} alt={c.title} className="w-full h-full object-cover" />
         ) : (
           <span className="text-white/20 text-xs">Sin imagen</span>
         )}
-        <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-black/70 text-white border border-white/20 px-1.5 py-0.5 rounded">
+        <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-amber-500/30 text-amber-100 border border-amber-400/40 px-1.5 py-0.5 rounded backdrop-blur-sm">
           🎟️ CUPÓN
         </span>
         <span className={`absolute top-2 right-2 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border ${approval.cls}`}>
@@ -2364,7 +2364,7 @@ function CampaignCard({ c, onEdit, onDelete, onToggleActive, onShowMetrics, toda
   // revisión). Pendientes/rechazadas no tienen toggle: aún no están aprobadas.
   const isApproved = (c.approval_status || 'approved') === 'approved';
   return (
-    <div className="bg-[#0F0F0F] border border-white/5 rounded-xl overflow-hidden">
+    <div className="bg-[#0F0F0F] border border-violet-500/20 rounded-xl overflow-hidden">
       <div className="aspect-[9/16] bg-black flex items-center justify-center relative">
         {c.media_type === 'video' && c.media_url ? (
           <video
@@ -2383,7 +2383,7 @@ function CampaignCard({ c, onEdit, onDelete, onToggleActive, onShowMetrics, toda
         ) : (
           <span className="text-white/20 text-xs">Sin media</span>
         )}
-        <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-black/70 text-white border border-white/20 px-1.5 py-0.5 rounded">
+        <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-violet-500/30 text-violet-100 border border-violet-400/40 px-1.5 py-0.5 rounded backdrop-blur-sm">
           📺 CAMPAÑA
         </span>
         <span className={`absolute top-2 right-2 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border ${approval.cls}`}>
@@ -2473,8 +2473,8 @@ function BannerCard({
   const isApproved = (b.approval_status || 'approved') === 'approved';
 
   return (
-    <div className="bg-[#0F0F0F] border border-white/5 rounded-xl overflow-hidden">
-      <div className="aspect-[80/192] max-h-[300px] bg-black flex items-center justify-center relative">
+    <div className="bg-[#0F0F0F] border border-sky-500/20 rounded-xl overflow-hidden">
+      <div className="aspect-[1080/192] bg-black flex items-center justify-center relative">
         {b.media_type === 'video' && b.media_url ? (
           <video
             key={b.media_url}
@@ -2492,7 +2492,7 @@ function BannerCard({
         ) : (
           <span className="text-white/20 text-xs">Sin media</span>
         )}
-        <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-black/70 text-white border border-white/20 px-1.5 py-0.5 rounded">
+        <span className="absolute top-2 left-2 text-[9px] font-bold tracking-wider bg-sky-500/30 text-sky-100 border border-sky-400/40 px-1.5 py-0.5 rounded backdrop-blur-sm">
           🖼️ BANNER
         </span>
         <span className={`absolute top-2 right-2 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border ${approval.cls}`}>

@@ -138,11 +138,10 @@ export default function BannersAdminPage() {
   const fetchData = async () => {
     setRefreshing(true);
     const [bannersRes, campsRes, storesRes] = await Promise.all([
-      supabase
-        .from('banners')
-        .select('*, ad_campaigns(brand_name), stores(id, name, logo_url, plan_type)')
-        .order('ui_position')
-        .order('slot_position', { ascending: true }),
+      // Vía RPC con nombre neutral: la URL /rest/v1/banners la bloquean los
+      // adblockers (EasyList) con ERR_BLOCKED_BY_CLIENT. El RPC es SECURITY
+      // INVOKER, así que la RLS y los triggers siguen aplicando igual.
+      supabase.rpc('directorio_paneles_list'),
       supabase.from('ad_campaigns').select('id, brand_name').order('brand_name'),
       // Solo tiendas DIAMANTE pueden tener banner (regla del PDF "PLANES DIRECTORIOS").
       supabase
@@ -201,8 +200,8 @@ export default function BannersAdminPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const isVideo = file.type.startsWith('video/');
-    if (file.size > (isVideo ? 15 : 2) * 1024 * 1024) {
-      toast.error(`Máximo ${isVideo ? '15 MB (video)' : '2 MB (imagen)'}.`);
+    if (isVideo && file.size > 15 * 1024 * 1024) {
+      toast.error('Máximo 15 MB (video).');
       e.target.value = ''; return;
     }
     // Compatibilidad con el decoder del kiosco K2 (rechaza 4K / HEVC / Level alto).
@@ -219,16 +218,12 @@ export default function BannersAdminPage() {
     e.preventDefault();
     if (!editingId && !mediaFile) { toast.error('Sube un archivo multimedia.'); return; }
 
-    // Tienda DIAMANTE es obligatoria — el slot del banner solo se vende dentro
-    // de ese plan. Validamos en cliente para feedback inmediato; el trigger
-    // `enforce_banner_diamante` lo refuerza en BD.
-    if (!storeId) {
-      toast.error('Vincula una tienda con plan DIAMANTE antes de guardar el banner.');
-      return;
-    }
-    const storeStillDiamante = diamanteStores.some(s => s.id === storeId);
-    if (!storeStillDiamante) {
-      toast.error('La tienda seleccionada ya no tiene plan DIAMANTE. Elige otra tienda DIAMANTE activa.');
+    // La tienda es OPCIONAL: un banner sin tienda es un "banner propio" del
+    // directorio que coloca el admin para promocionar los espacios. Si se
+    // vincula una tienda, debe seguir siendo DIAMANTE (lo refuerza el trigger
+    // `enforce_banner_diamante` en BD).
+    if (storeId && !diamanteStores.some(s => s.id === storeId)) {
+      toast.error('La tienda seleccionada ya no tiene plan DIAMANTE. Elige otra tienda DIAMANTE activa o deja el banner sin tienda (banner propio).');
       return;
     }
 
@@ -241,10 +236,12 @@ export default function BannersAdminPage() {
         toast.error(`La posición "${uiPosition}" ya tiene un banner activo. Pausa el actual o elige otra posición.`);
         return;
       }
-      const storeOccupied = banners.some(b => b.store_id === storeId && b.is_active && b.id !== editingId);
-      if (storeOccupied) {
-        toast.error('Esta tienda ya tiene un banner activo. Pausa el actual antes de activar otro.');
-        return;
+      if (storeId) {
+        const storeOccupied = banners.some(b => b.store_id === storeId && b.is_active && b.id !== editingId);
+        if (storeOccupied) {
+          toast.error('Esta tienda ya tiene un banner activo. Pausa el actual antes de activar otro.');
+          return;
+        }
       }
     }
 
@@ -264,21 +261,20 @@ export default function BannersAdminPage() {
         const { data: pubData } = supabase.storage.from('publicidad').getPublicUrl(path);
         finalUrl = pubData.publicUrl;
       }
-      const payload: any = {
-        ui_position: uiPosition, slot_position: slotPosition,
-        media_url: finalUrl, media_type: mediaType, is_active: isActive,
-        store_id: storeId,
-        campaign_id: campaignId || null,
-        start_date: startDate ? new Date(startDate).toISOString() : null,
-        end_date: endDate ? new Date(endDate).toISOString() : null,
-      };
-      if (editingId) {
-        const { error } = await supabase.from('banners').update(payload).eq('id', editingId);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('banners').insert([payload]);
-        if (error) throw error;
-      }
+      // Guardado vía RPC neutral (esquiva el adblocker que bloquea /banners).
+      const { error } = await supabase.rpc('directorio_paneles_save', {
+        p_id: editingId,
+        p_ui_position: uiPosition,
+        p_slot_position: slotPosition,
+        p_media_url: finalUrl,
+        p_media_type: mediaType,
+        p_is_active: isActive,
+        p_store_id: storeId || null,
+        p_campaign_id: campaignId || null,
+        p_start_date: startDate ? new Date(startDate).toISOString() : null,
+        p_end_date: endDate ? new Date(endDate).toISOString() : null,
+      });
+      if (error) throw error;
       resetForm(); fetchData();
       toast.success(editingId ? 'Banner actualizado.' : 'Banner creado.');
     } catch (err: any) { toast.error(`Error: ${err.message}`); }
@@ -288,7 +284,7 @@ export default function BannersAdminPage() {
   const handleDelete = async (id: string) => {
     const ok = await confirmDialog({ title: 'Eliminar banner', message: '¿Seguro que deseas eliminar este banner? Esta acción no se puede deshacer.', confirmLabel: 'Eliminar', tone: 'danger' });
     if (!ok) return;
-    const { error } = await supabase.from('banners').delete().eq('id', id);
+    const { error } = await supabase.rpc('directorio_paneles_delete', { p_id: id });
     if (error) { toast.error(error.message); return; }
     fetchData();
     toast.success('Banner eliminado.');
@@ -312,7 +308,7 @@ export default function BannersAdminPage() {
         }
       }
     }
-    const { error } = await supabase.from('banners').update({ is_active: !current }).eq('id', id);
+    const { error } = await supabase.rpc('directorio_paneles_set_active', { p_id: id, p_active: !current });
     if (error) { toast.error(error.message); return; }
     setBanners(prev => prev.map(b => b.id === id ? { ...b, is_active: !current } : b));
   };
@@ -341,9 +337,7 @@ export default function BannersAdminPage() {
           </button>
           <button
             onClick={() => { resetForm(); setShowForm(true); }}
-            disabled={diamanteStores.length === 0}
-            title={diamanteStores.length === 0 ? 'No hay tiendas DIAMANTE: asigna el plan DIAMANTE a una tienda antes de crear banners' : undefined}
-            className="flex items-center gap-2 text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg px-4 py-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-500/10">
+            className="flex items-center gap-2 text-sm font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg px-4 py-2 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
             Nuevo Banner
           </button>
@@ -363,87 +357,97 @@ export default function BannersAdminPage() {
               </div>
               <div className="flex gap-6 items-start">
                 <form onSubmit={handleSave} className="flex-1 space-y-3 min-w-0">
-                  {/* Tienda DIAMANTE — obligatoria */}
+                  {/* Tienda DIAMANTE — OPCIONAL. Sin tienda = banner propio del directorio. */}
                   <div className="relative" ref={storeBoxRef}>
                     <label className="flex items-center justify-between text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
-                      <span>Tienda DIAMANTE <span className="text-cyan-400 normal-case tracking-normal">*</span></span>
+                      <span>Tienda DIAMANTE <span className="text-white/30 normal-case tracking-normal">(opcional)</span></span>
                       <span className="text-[10px] text-white/25 normal-case tracking-normal">
                         {diamanteStores.length} disponibles
                       </span>
                     </label>
-                    {diamanteStores.length === 0 && !editingStoreFallback ? (
-                      <div className="bg-red-500/5 border border-red-500/20 rounded-lg px-3 py-2.5 text-xs text-red-300">
-                        No hay tiendas con plan DIAMANTE. Asigna el plan a una tienda
-                        antes de crear un banner (Directorio → Tiendas → editar → plan DIAMANTE).
-                      </div>
-                    ) : (
-                      <>
-                        <div
-                          role="combobox"
-                          aria-expanded={storeDropdownOpen}
-                          aria-haspopup="listbox"
-                          tabIndex={0}
-                          onClick={() => { if (!storeDropdownOpen) setStoreSearch(''); setStoreDropdownOpen(!storeDropdownOpen); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStoreDropdownOpen(o => !o); } }}
-                          className={`flex items-center justify-between w-full bg-[#0A0A0A] border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
-                            storeId ? 'border-emerald-500/30' : 'border-white/10 hover:border-white/20'
-                          }`}
-                        >
-                          <span className={`truncate ${selectedStore || editingStoreFallback ? 'text-white' : 'text-white/40'}`}>
-                            {selectedStore?.name
-                              || (editingStoreFallback
-                                ? `${editingStoreFallback.name} (ya no es DIAMANTE)`
-                                : 'Seleccionar tienda DIAMANTE...')}
-                          </span>
-                          <svg className={`w-4 h-4 text-white/30 transition-transform shrink-0 ${storeDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    <div
+                      role="combobox"
+                      aria-expanded={storeDropdownOpen}
+                      aria-haspopup="listbox"
+                      tabIndex={0}
+                      onClick={() => { if (!storeDropdownOpen) setStoreSearch(''); setStoreDropdownOpen(!storeDropdownOpen); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStoreDropdownOpen(o => !o); } }}
+                      className={`flex items-center justify-between w-full bg-[#0A0A0A] border rounded-lg px-3 py-2 text-sm cursor-pointer transition-colors ${
+                        storeId ? 'border-emerald-500/30' : 'border-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      <span className={`truncate ${selectedStore || editingStoreFallback ? 'text-white' : 'text-white/50'}`}>
+                        {selectedStore?.name
+                          || (editingStoreFallback
+                            ? `${editingStoreFallback.name} (ya no es DIAMANTE)`
+                            : 'Banner propio (sin tienda)')}
+                      </span>
+                      <svg className={`w-4 h-4 text-white/30 transition-transform shrink-0 ${storeDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                    </div>
+                    {storeDropdownOpen && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
+                        <div className="p-2 border-b border-white/5">
+                          <input
+                            type="text"
+                            autoFocus
+                            value={storeSearch}
+                            onChange={e => setStoreSearch(e.target.value)}
+                            placeholder="Buscar tienda DIAMANTE..."
+                            className="w-full bg-[#0A0A0A] border border-white/5 rounded-md px-2 py-1.5 text-xs text-white focus:outline-none"
+                          />
                         </div>
-                        {storeDropdownOpen && (
-                          <div className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-xl z-50 overflow-hidden">
-                            <div className="p-2 border-b border-white/5">
-                              <input
-                                type="text"
-                                autoFocus
-                                value={storeSearch}
-                                onChange={e => setStoreSearch(e.target.value)}
-                                placeholder="Buscar tienda DIAMANTE..."
-                                className="w-full bg-[#0A0A0A] border border-white/5 rounded-md px-2 py-1.5 text-xs text-white focus:outline-none"
-                              />
+                        <div className="max-h-48 overflow-y-auto" role="listbox">
+                          {/* Opción banner propio (sin tienda) */}
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={!storeId}
+                            onClick={() => { setStoreId(''); setStoreSearch(''); setStoreDropdownOpen(false); }}
+                            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-white/5 transition-colors border-b border-white/5 ${
+                              !storeId ? 'bg-emerald-500/10 text-emerald-300' : 'text-white/70'
+                            }`}
+                          >
+                            <span className="w-5 h-5 rounded bg-white/10 text-white/60 text-[11px] flex items-center justify-center shrink-0">★</span>
+                            <span className="truncate">Banner propio (sin tienda)</span>
+                          </button>
+                          {filteredDiamanteStores.length === 0 ? (
+                            <div className="px-3 py-3 text-xs text-white/30 text-center">
+                              {diamanteStores.length === 0 ? 'No hay tiendas DIAMANTE' : 'Sin coincidencias'}
                             </div>
-                            <div className="max-h-48 overflow-y-auto" role="listbox">
-                              {filteredDiamanteStores.length === 0 ? (
-                                <div className="px-3 py-3 text-xs text-white/30 text-center">Sin coincidencias</div>
-                              ) : filteredDiamanteStores.map(s => (
-                                <button
-                                  type="button"
-                                  key={s.id}
-                                  role="option"
-                                  aria-selected={s.id === storeId}
-                                  onClick={() => {
-                                    setStoreId(s.id);
-                                    setStoreSearch(s.name);
-                                    setStoreDropdownOpen(false);
-                                  }}
-                                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-white/5 transition-colors ${
-                                    s.id === storeId ? 'bg-emerald-500/10 text-emerald-300' : 'text-white'
-                                  }`}
-                                >
-                                  {s.logo_url ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={s.logo_url} alt="" className="w-5 h-5 rounded object-cover bg-[#0A0A0A] shrink-0" onError={(ev) => { (ev.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                                  ) : (
-                                    <span className="w-5 h-5 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-semibold flex items-center justify-center shrink-0">
-                                      {(s.name[0] || '?').toUpperCase()}
-                                    </span>
-                                  )}
-                                  <span className="truncate">{s.name}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        <p className="text-[10px] text-white/25 mt-1">Sólo tiendas con plan DIAMANTE pueden tener banner activo.</p>
-                      </>
+                          ) : filteredDiamanteStores.map(s => (
+                            <button
+                              type="button"
+                              key={s.id}
+                              role="option"
+                              aria-selected={s.id === storeId}
+                              onClick={() => {
+                                setStoreId(s.id);
+                                setStoreSearch(s.name);
+                                setStoreDropdownOpen(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-white/5 transition-colors ${
+                                s.id === storeId ? 'bg-emerald-500/10 text-emerald-300' : 'text-white'
+                              }`}
+                            >
+                              {s.logo_url ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={s.logo_url} alt="" className="w-5 h-5 rounded object-cover bg-[#0A0A0A] shrink-0" onError={(ev) => { (ev.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                              ) : (
+                                <span className="w-5 h-5 rounded bg-cyan-500/15 text-cyan-300 text-[9px] font-semibold flex items-center justify-center shrink-0">
+                                  {(s.name[0] || '?').toUpperCase()}
+                                </span>
+                              )}
+                              <span className="truncate">{s.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     )}
+                    <p className="text-[10px] text-white/25 mt-1">
+                      {storeId
+                        ? 'Sólo tiendas con plan DIAMANTE pueden tener banner activo.'
+                        : 'Banner propio del directorio para promocionar los espacios (no requiere tienda).'}
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -483,17 +487,16 @@ export default function BannersAdminPage() {
                     </label>
                     <input type="file" accept="image/*,video/*" onChange={handleFileChange}
                       className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-white/10 file:text-white/70 file:text-xs" />
-                    <p className="text-[10px] text-white/20 mt-1">Imagen máx 2 MB · Video máx 15 MB · Recomendado <span className="text-white/40">1920 × 342 px (5.625:1)</span> — ambos tipos recortan con <code className="text-white/30">cover</code>; centra el contenido importante.</p>
+                    <p className="text-[10px] text-white/20 mt-1">Video máx 15 MB · Recomendado <span className="text-white/40">1920 × 342 px (5.625:1)</span> — ambos tipos recortan con <code className="text-white/30">cover</code>; centra el contenido importante.</p>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button type="button" onClick={resetForm}
                       className="flex-1 py-2 text-sm bg-white/5 hover:bg-white/10 text-white/50 rounded-lg transition-colors">
                       Cancelar
                     </button>
-                    <button type="submit" disabled={isSaving || !storeId}
-                      title={!storeId ? 'Vincula una tienda DIAMANTE para habilitar el guardado' : undefined}
+                    <button type="submit" disabled={isSaving}
                       className="flex-1 py-2 text-sm bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                      {isSaving ? 'Guardando...' : !storeId ? 'Falta tienda DIAMANTE' : 'Guardar banner'}
+                      {isSaving ? 'Guardando...' : 'Guardar banner'}
                     </button>
                   </div>
                 </form>
@@ -578,7 +581,11 @@ export default function BannersAdminPage() {
                       )}
                     </div>
                   ) : (
-                    <p className="text-amber-400 text-xs mb-1">⚠ Banner sin tienda vinculada</p>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-5 h-5 rounded bg-white/10 text-white/60 text-[11px] flex items-center justify-center shrink-0">★</span>
+                      <span className="text-white/70 text-xs">Banner propio del directorio</span>
+                      <span className="text-white/40 bg-white/5 text-[9px] font-semibold tracking-wider px-1.5 py-0.5 rounded">SIN TIENDA</span>
+                    </div>
                   )}
                   {b.ad_campaigns?.brand_name && (
                     <p className="text-white/40 text-[10px] mb-1">Campaña: {b.ad_campaigns.brand_name}</p>

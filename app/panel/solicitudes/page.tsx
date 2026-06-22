@@ -255,15 +255,23 @@ export default function SolicitudesPanelPage() {
   // previsualización del modal, para que el preview muestre el slot real.
   //  - position: posición final (vacío si 'auto' y no hay libre).
   //  - ownActive: banner(s) activo(s) de la MISMA tienda (se reemplazan en silencio).
-  //  - displaced: banner activo de OTRA tienda en esa posición (requiere advertencia).
-  //  - noFreeSlot: 'auto' sin ningún slot libre.
+  //  - displaced: banner activo de OTRA tienda QUE PAGA en esa posición (requiere advertencia).
+  //  - houseDisplaced: banner propio del directorio (store_id NULL = relleno) en esa
+  //    posición; cede EN SILENCIO ante un cliente que paga, sin advertencia.
+  //  - noFreeSlot: 'auto' sin ningún slot libre (el relleno no cuenta como ocupado).
   const resolveBannerSlot = (row: any, chosen: string) => {
     const live = (b: any) =>
       b.is_active && (!b.end_date || new Date(b.end_date).getTime() >= Date.now());
     const others = banners.filter(b => b.id !== row.id && live(b));
+    // Solo una tienda DISTINTA que paga ocupa el slot de verdad; el banner propio
+    // (relleno, sin store_id) no bloquea: cede ante el que paga.
     const occByOther: Record<string, any> = {};
-    others.filter(b => b.store_id !== row.store_id).forEach(b => { occByOther[b.ui_position] = b; });
-    const ownActive = others.filter(b => b.store_id === row.store_id);
+    others.filter(b => b.store_id && b.store_id !== row.store_id)
+      .forEach(b => { occByOther[b.ui_position] = b; });
+    // Banner propio del directorio que estorba en una posición → desactivar en silencio.
+    const houseByPos: Record<string, any> = {};
+    others.filter(b => !b.store_id).forEach(b => { houseByPos[b.ui_position] = b; });
+    const ownActive = others.filter(b => b.store_id && b.store_id === row.store_id);
 
     let position = chosen;
     let noFreeSlot = false;
@@ -272,7 +280,8 @@ export default function SolicitudesPanelPage() {
       if (!position) noFreeSlot = true;
     }
     const displaced = position ? occByOther[position] : undefined;
-    return { position, ownActive, displaced, noFreeSlot };
+    const houseDisplaced = position ? houseByPos[position] : undefined;
+    return { position, ownActive, displaced, houseDisplaced, noFreeSlot };
   };
 
   const approveBanner = async (row: any) => {
@@ -281,7 +290,7 @@ export default function SolicitudesPanelPage() {
     // la PROPIA tienda se reemplaza en silencio (1 por tienda). SOLO se muestra
     // advertencia si la posición elegida ya tiene el banner de OTRA tienda
     // (desplazarlo es una decisión deliberada).
-    const { position, ownActive, displaced, noFreeSlot } = resolveBannerSlot(row, approvalPosition);
+    const { position, ownActive, displaced, houseDisplaced, noFreeSlot } = resolveBannerSlot(row, approvalPosition);
 
     if (approvalPosition === 'auto' && noFreeSlot) {
       setFeedback({ type: 'err', msg: 'No hay posición libre. Elige "top" o "bottom" manualmente para reemplazar el banner de otra tienda (te pediremos confirmación).' });
@@ -307,10 +316,12 @@ export default function SolicitudesPanelPage() {
 
     setBusy(true); setFeedback(null);
 
-    // Desactivar: el banner propio (reemplazo silencioso) + el de otra tienda
-    // que el admin haya decidido desplazar (con advertencia previa).
+    // Desactivar en silencio: el banner de la propia tienda (reemplazo) y el
+    // banner propio del directorio (relleno que cede ante el que paga). Más el
+    // de OTRA tienda que paga, solo si el admin confirmó la advertencia arriba.
     const toDeactivate = [
       ...ownActive.map(b => b.id),
+      ...(houseDisplaced ? [houseDisplaced.id] : []),
       ...(displaced ? [displaced.id] : []),
     ];
     if (toDeactivate.length > 0) {

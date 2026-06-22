@@ -286,8 +286,7 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
     <ClienteStoreContext.Provider value={ctxValue}>
       <div className="relative flex h-screen overflow-hidden bg-bg text-fg">
         <div aria-hidden className="bg-grid pointer-events-none absolute inset-0 opacity-[0.04]" />
-        <div className="halo-cliente pointer-events-none absolute -top-32 right-0 h-[440px] w-[640px] opacity-70" />
-        <div className="halo-admin pointer-events-none absolute -bottom-40 left-1/3 h-[420px] w-[560px] opacity-40" />
+        <div aria-hidden className="halo-cliente pointer-events-none absolute -top-32 right-0 h-[440px] w-[640px] opacity-70" />
 
         {/* Drawer móvil */}
         {sidebarOpen && (
