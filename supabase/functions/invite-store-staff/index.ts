@@ -162,6 +162,23 @@ async function handle(req: Request): Promise<Response> {
   if (!GREEN_API_ID_INSTANCE || !GREEN_API_TOKEN_INSTANCE) {
     return respond({ error: 'Green API no configurado (faltan credenciales)', action_link: actionLink }, 500)
   }
+  // Validar estado de la instancia en Green API antes de enviar
+  const stateUrl = `https://api.green-api.com/waInstance${GREEN_API_ID_INSTANCE}/getStateInstance/${GREEN_API_TOKEN_INSTANCE}`
+  console.log('[invite-store-staff] GET stateInstance from Green API')
+  const stateRes = await fetch(stateUrl).catch((e) => {
+    console.error('[invite-store-staff] error fetching stateInstance', e)
+    return null
+  })
+  if (stateRes && stateRes.ok) {
+    const stateJson = await stateRes.json().catch(() => ({}))
+    console.log('[invite-store-staff] Green API stateInstance ->', stateJson)
+    if (stateJson?.stateInstance !== 'authorized') {
+      return respond({
+        error: `La instancia de Green API no está activa (estado: ${stateJson?.stateInstance ?? 'desconocido'}). Por favor, escanea el código QR en la consola de Green API.`,
+        action_link: actionLink,
+      }, 400)
+    }
+  }
   // Envolver en /abrir para que el prefetch de WhatsApp no consuma el link single-use.
   const safeLink = appOrigin ? `${appOrigin}/abrir?next=${encodeURIComponent(actionLink)}` : actionLink
   const chatId = toChatId(phoneRaw)
@@ -169,7 +186,7 @@ async function handle(req: Request): Promise<Response> {
   const message =
     `Te invitaron como ${roleLabel} en una tienda de Mall Hub.\n` +
     `Abre este enlace en tu teléfono para activar tu cuenta y definir tu contraseña ` +
-    `(expira en 1 hora):\n${safeLink}\n\n` +
+    `(expira en 6 horas):\n${safeLink}\n\n` +
     `Si no esperabas esto, ignora este mensaje.`
 
   const waUrl = `https://api.green-api.com/waInstance${GREEN_API_ID_INSTANCE}/sendMessage/${GREEN_API_TOKEN_INSTANCE}`

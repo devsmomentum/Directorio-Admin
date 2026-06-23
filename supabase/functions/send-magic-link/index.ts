@@ -215,6 +215,24 @@ async function handle(req: Request): Promise<Response> {
     }, 500)
   }
 
+  // 5.5 Validar estado de la instancia en Green API antes de enviar
+  const stateUrl = `https://api.green-api.com/waInstance${GREEN_API_ID_INSTANCE}/getStateInstance/${GREEN_API_TOKEN_INSTANCE}`
+  console.log('[send-magic-link] step5.5: GET stateInstance from Green API')
+  const stateRes = await fetch(stateUrl).catch((e) => {
+    console.error('[send-magic-link] error fetching stateInstance', e)
+    return null
+  })
+  if (stateRes && stateRes.ok) {
+    const stateJson = await stateRes.json().catch(() => ({}))
+    console.log('[send-magic-link] Green API stateInstance ->', stateJson)
+    if (stateJson?.stateInstance !== 'authorized') {
+      return respond({
+        error: `La instancia de Green API no está activa (estado: ${stateJson?.stateInstance ?? 'desconocido'}). Por favor, escanea el código QR en la consola de Green API.`,
+        action_link: actionLink,
+      }, 400)
+    }
+  }
+
   const safeLink = appOrigin
     ? `${appOrigin}/abrir?next=${encodeURIComponent(actionLink)}`
     : actionLink
