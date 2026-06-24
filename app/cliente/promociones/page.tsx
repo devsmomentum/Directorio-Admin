@@ -14,6 +14,9 @@ import { toast } from '../../components/toast';
 import { confirmDialog as confirmModal } from '../../components/confirm-dialog';
 
 const APPROVAL_CHIP: Record<string, { label: string; cls: string }> = {
+  // 'draft' = guardada sin plan: inactiva y FUERA de revisión. Pasa a 'pending'
+  // cuando la tienda tiene plan vigente y el dueño la activa.
+  draft:    { label: 'BORRADOR',    cls: 'text-slate-300 bg-slate-500/15 border-slate-500/30' },
   pending:  { label: 'EN REVISIÓN', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/30' },
   approved: { label: 'APROBADA',    cls: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30' },
   rejected: { label: 'RECHAZADA',   cls: 'text-red-300 bg-red-500/15 border-red-500/30' },
@@ -63,8 +66,17 @@ export default function ClientePromocionesPage() {
   const [couponRedeemedMap, setCouponRedeemedMap] = useState<Record<string, number>>({});
   const [flashPlanStockCap, setFlashPlanStockCap] = useState<number>(COUPON_STOCK_CAP);
   const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [filter, setFilter] = useState<FilterKind>('all');
+
+  const showError = (msg: string) => {
+    void confirmModal({
+      title: 'Aviso',
+      message: msg,
+      confirmLabel: 'Entendido',
+      hideCancel: true,
+      tone: 'danger'
+    });
+  };
 
   const [form, setForm] = useState<FormKind>(null);
 
@@ -132,6 +144,10 @@ export default function ClientePromocionesPage() {
 
   const planActive = !!store?.plan_type
     && (!store.contract_expiry_date || store.contract_expiry_date >= today);
+  // Los banners son exclusivos del plan DIAMANTE vigente. Sin él, el banner se
+  // guarda como borrador (inactivo, fuera de revisión).
+  const bannerPlanActive = store?.plan_type === 'DIAMANTE'
+    && (!store.contract_expiry_date || store.contract_expiry_date >= today);
   const flashActive = !!store?.flash_coupon_plan
     && (!store.flash_coupon_expiry_date || store.flash_coupon_expiry_date >= today);
 
@@ -143,13 +159,13 @@ export default function ClientePromocionesPage() {
   const allyCampaignLimit = isAlly ? Math.max(1, store?.ally_campaign_limit ?? 1) : 1;
 
   const canFlashCoupon = allyFlash || flashActive;
-  const canCampaign = isAlly || (planActive && !!store?.plan_type && CAMPAIGN_CAPABLE.has(store.plan_type));
-  const canBanner = planActive && store?.plan_type === 'DIAMANTE';
-  const canCreateCoupon = canFlashCoupon;
+  const canCampaign = true; // Se permite subir sin plan, se guardan inactivas
+  const canBanner = true; // Se permite subir sin plan, se guardan inactivas
+  const canCreateCoupon = true; // Se permite subir sin plan
 
   // Aliado sin addon flash de pago usa la semántica generosa (SEMANAL).
   const couponPlanType = useMemo(
-    () => store?.flash_coupon_plan || (allyFlash ? 'FLASH_COUPON_SEMANAL' : ''),
+    () => store?.flash_coupon_plan || (allyFlash ? 'FLASH_COUPON_SEMANAL' : null),
     [store, allyFlash],
   );
 
@@ -199,12 +215,12 @@ export default function ClientePromocionesPage() {
         }
       }
     }
-    setCoupons(mineCoupons.data || []);
+    setCoupons((mineCoupons.data || []).filter(c => !c.image_url?.startsWith('deleted_')));
     setCouponLeadsMap(leadsMap);
     setCouponRedeemedMap(redeemedMap);
     setFlashBrandIds(new Set((gallery.data || []).map((c: any) => c.store_id).filter(Boolean)));
-    setCampaigns(camps);
-    setBanners(mineBanners.data || []);
+    setCampaigns(camps.filter(c => !c.media_url?.startsWith('deleted_')));
+    setBanners((mineBanners.data || []).filter(b => !b.media_url?.startsWith('deleted_')));
     const planCap = (flashPlan as any)?.data?.coupon_stock_cap;
     setFlashPlanStockCap(planCap ?? COUPON_STOCK_CAP);
 
@@ -251,7 +267,17 @@ export default function ClientePromocionesPage() {
     setAIsActive(true);
     setAAudioEnabled(false);
   };
-  const openCreateBanner = () => {
+  const openCreateBanner = async () => {
+    if (banners.length >= 3) {
+      await confirmModal({
+        title: 'Límite alcanzado',
+        message: 'Has alcanzado el límite de 3 banners permitidos por usuario. Debes eliminar uno existente para poder subir otro nuevo.',
+        confirmLabel: 'Entendido',
+        hideCancel: true,
+        tone: 'danger'
+      });
+      return;
+    }
     resetBannerForm();
     setForm('banner');
   };
@@ -286,15 +312,31 @@ export default function ClientePromocionesPage() {
     resetBannerForm();
   };
 
-  const openCreateCoupon = () => {
-    if (!canFlashCoupon) {
-      setFeedback({ type: 'err', msg: 'Necesitas el plan Cupones Flash activo para crear cupones.' });
+  const openCreateCoupon = async () => {
+    if (coupons.length >= 3) {
+      await confirmModal({
+        title: 'Límite alcanzado',
+        message: 'Has alcanzado el límite de 3 cupones permitidos por usuario. Debes eliminar uno existente para poder subir otro nuevo.',
+        confirmLabel: 'Entendido',
+        hideCancel: true,
+        tone: 'danger'
+      });
       return;
     }
     resetCouponForm();
     setForm('coupon');
   };
-  const openCreateCampaign = () => {
+  const openCreateCampaign = async () => {
+    if (campaigns.length >= 3) {
+      await confirmModal({
+        title: 'Límite alcanzado',
+        message: 'Has alcanzado el límite de 3 campañas permitidas por usuario. Debes eliminar una existente para poder subir otra nueva.',
+        confirmLabel: 'Entendido',
+        hideCancel: true,
+        tone: 'danger'
+      });
+      return;
+    }
     resetCampaignForm();
     setForm('campaign');
   };
@@ -328,7 +370,7 @@ export default function ClientePromocionesPage() {
   const handleImage = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 500 * 1024) { toast.error('La imagen debe pesar menos de 500 KB.'); e.target.value = ''; return; }
+    if (f.size > 150 * 1024 * 1024) { showError('La imagen debe pesar menos de 150 MB.'); e.target.value = ''; return; }
     setCImageFile(f);
     setCImageUrl(URL.createObjectURL(f));
   };
@@ -336,9 +378,9 @@ export default function ClientePromocionesPage() {
     const f = e.target.files?.[0];
     if (!f) return;
     const isVideo = f.type.startsWith('video/');
-    const limitBytes = isVideo ? 120 * 1024 * 1024 : 50 * 1024 * 1024;
+    const limitBytes = 150 * 1024 * 1024;
     if (f.size > limitBytes) {
-      toast.error(`El archivo debe pesar menos de ${isVideo ? '120 MB' : '50 MB'}.`);
+      showError('El archivo debe pesar menos de 150 MB.');
       e.target.value = '';
       return;
     }
@@ -346,7 +388,7 @@ export default function ClientePromocionesPage() {
     // los bloqueamos aquí para que el cliente no descubra el fallo en el equipo.
     if (f.type.startsWith('video/')) {
       const check = await validateKioskVideo(f);
-      if (!check.ok) { toast.error(check.message || 'El video no es válido.'); e.target.value = ''; return; }
+      if (!check.ok) { showError(check.message || 'El video no es válido.'); e.target.value = ''; return; }
     }
     setAMediaFile(f);
     setAMediaType(f.type.startsWith('video/') ? 'video' : 'image');
@@ -356,67 +398,63 @@ export default function ClientePromocionesPage() {
   const submitCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!store) return;
-    if (!canFlashCoupon) {
-      setFeedback({ type: 'err', msg: 'Necesitas el plan Cupones Flash activo para publicar cupones.' });
-      return;
-    }
+    // Sin addon Flash vigente (ni aliado flash) el cupón se guarda como BORRADOR:
+    // inactivo, sin plan_type y FUERA de revisión. Pasa a revisión cuando la
+    // tienda tiene addon flash y se edita el cupón con un plan flash.
+    const isDraft = !canFlashCoupon;
+    const effectivePlanType = isDraft ? null : (couponPlanType || null);
     const planType = couponPlanType;
-    if (!planType) {
-      setFeedback({ type: 'err', msg: 'No se detecta tu addon Flash. Recarga la página.' });
-      return;
-    }
-    if (!cEndDate) { setFeedback({ type: 'err', msg: 'Indica la fecha de vencimiento.' }); return; }
+    if (flashActive && !cEndDate) { showError('Indica la fecha de vencimiento para activar el cupón.'); return; }
     const planExpiry = store.flash_coupon_expiry_date;
     if (planExpiry && cEndDate > planExpiry) {
-      setFeedback({
-        type: 'err',
-        msg: `El cupón no puede vencer después de tu plan Cupones Flash (${planExpiry}).`,
-      });
+      showError(`El cupón no puede vencer después de tu plan Cupones Flash (${planExpiry}).`);
+
       return;
     }
     const discountNum = parseFloat(cDiscount);
     if (!cDiscount || isNaN(discountNum) || discountNum <= 0 || discountNum > 100) {
-      setFeedback({ type: 'err', msg: 'Ingresa un descuento entre 1 y 100%.' });
+      showError('Ingresa un descuento entre 1 y 100%.');
       return;
     }
     const stockNum = parseInt(cStock, 10);
     if (!cStock || isNaN(stockNum) || stockNum <= 0) {
-      setFeedback({ type: 'err', msg: 'Ingresa un stock mayor a 0.' });
+      showError('Ingresa un stock mayor a 0.');
       return;
     }
-    // Tope de inventario por tienda: disponible + canjeados no puede pasar de
-    // flashPlanStockCap. Excluimos el cupón en edición para no contarlo dos veces.
-    // (El trigger del servidor es la barrera definitiva.)
-    const usedExcludingThis = coupons
-      .filter(c => c.id !== cEditingId
-        && FLASH_PLANS.has(c.plan_type)
-        && c.approval_status !== 'rejected'
-        && (!c.end_date || c.end_date >= new Date().toISOString()))
-      .reduce((s, c) => s + (Number(c.amount_available) || 0) + (couponLeadsMap[c.id] || 0), 0);
-    if (usedExcludingThis + stockNum > flashPlanStockCap) {
-      const left = Math.max(0, flashPlanStockCap - usedExcludingThis);
-      setFeedback({
-        type: 'err',
-        msg: `Superas el tope de ${flashPlanStockCap} cupones de tu tienda. Ya tienes ${usedExcludingThis} en stock vigente (incluye canjeados); puedes publicar hasta ${left} más.`,
-      });
-      return;
-    }
-
-    const isNewBrand = !flashBrandIds.has(store.id);
-    if (isNewBrand && !cEditingId && flashBrandIds.size >= FLASH_GALLERY_MAX) {
-      setFeedback({ type: 'err', msg: `Galería Flash llena (${flashBrandIds.size}/${FLASH_GALLERY_MAX} cupones).` });
-      return;
-    }
-    const limit = FLASH_PERIOD_LIMITS[planType];
-    if (limit) {
-      const issued = flashIssuedInWindow(planType);
-      if (issued >= limit.max) {
-        setFeedback({ type: 'err', msg: `Ya lanzaste ${issued}/${limit.max} cupones en este ${limit.label}.` });
+    // Los límites de inventario, galería y ventana de Flash solo aplican a cupones
+    // flash reales; un borrador (sin plan) no consume cupo ni cuenta en la galería.
+    if (canFlashCoupon) {
+      // Tope de inventario por tienda: disponible + canjeados no puede pasar de
+      // flashPlanStockCap. Excluimos el cupón en edición para no contarlo dos veces.
+      // (El trigger del servidor es la barrera definitiva.)
+      const usedExcludingThis = coupons
+        .filter(c => c.id !== cEditingId
+          && FLASH_PLANS.has(c.plan_type)
+          && c.approval_status !== 'rejected'
+          && (!c.end_date || c.end_date >= new Date().toISOString()))
+        .reduce((s, c) => s + (Number(c.amount_available) || 0) + (couponLeadsMap[c.id] || 0), 0);
+      if (usedExcludingThis + stockNum > flashPlanStockCap) {
+        const left = Math.max(0, flashPlanStockCap - usedExcludingThis);
+        showError(`Superas el tope de ${flashPlanStockCap} cupones de tu tienda. Ya tienes ${usedExcludingThis} en stock vigente (incluye canjeados); puedes publicar hasta ${left} más.`,);
         return;
+      }
+
+      const isNewBrand = !flashBrandIds.has(store.id);
+      if (isNewBrand && !cEditingId && flashBrandIds.size >= FLASH_GALLERY_MAX) {
+        showError(`Galería Flash llena (${flashBrandIds.size}/${FLASH_GALLERY_MAX} cupones).`);
+        return;
+      }
+      const limit = planType ? FLASH_PERIOD_LIMITS[planType] : undefined;
+      if (limit && planType) {
+        const issued = flashIssuedInWindow(planType);
+        if (issued >= limit.max) {
+          showError(`Ya lanzaste ${issued}/${limit.max} cupones en este ${limit.label}.`);
+          return;
+        }
       }
     }
 
-    setSubmitting(true); setFeedback(null);
+    setSubmitting(true);
     try {
       const previousImageUrl = cEditingId
         ? coupons.find(c => c.id === cEditingId)?.image_url ?? null
@@ -432,45 +470,53 @@ export default function ClientePromocionesPage() {
         finalImageUrl = supabase.storage.from('publicidad').getPublicUrl(path).data.publicUrl;
       }
 
+      const wasDraftCoupon = cEditingId
+        ? coupons.find(c => c.id === cEditingId)?.approval_status === 'draft'
+        : false;
+
       if (cEditingId) {
         const { error } = await supabase.from('coupons')
           .update({
-            title: cTitle, plan_type: planType, category: cCategory,
+            title: cTitle, plan_type: effectivePlanType, category: cCategory,
             discount_percent: discountNum, amount_available: stockNum,
             image_url: finalImageUrl || null,
-            start_date: new Date(cStartDate).toISOString(),
-            end_date: new Date(cEndDate).toISOString(),
+            start_date: cStartDate ? new Date(cStartDate).toISOString() : null,
+            end_date: cEndDate ? new Date(cEndDate).toISOString() : null,
           })
           .eq('id', cEditingId);
         if (error) throw error;
         if (cImageFile && previousImageUrl && previousImageUrl !== finalImageUrl) {
           await removePublicidadFile(previousImageUrl);
         }
-        setFeedback({ type: 'ok', msg: 'Cupón actualizado. Quedó en revisión por el administrador antes de volver a aparecer en el K2.' });
+        toast.success(isDraft
+          ? 'Borrador de cupón actualizado. No se envía a revisión hasta que tengas el plan Cupones Flash activo.'
+          : wasDraftCoupon
+          ? 'Cupón activado y enviado a revisión. Aparecerá en el K2 cuando el administrador lo apruebe.'
+          : 'Cupón actualizado. Quedó en revisión por el administrador antes de volver a aparecer en el K2.');
       } else {
         const code = `CUPON-${(store.name || 'STORE').substring(0, 3).toUpperCase()}-${Date.now().toString().slice(7)}`;
-        // Declaración explícita: este flujo siempre va a revisión. El trigger
-        // también lo fuerza para dueños reales (defense-in-depth); aquí lo
-        // declaramos para cubrir el caso del admin que sube desde el portal
-        // cliente sin estar vinculado a user_stores.
+        // Sin addon Flash vigente el cupón se guarda como borrador (inactivo, fuera
+        // de revisión). Con addon flash entra a revisión (pending), como siempre.
         const { error } = await supabase.from('coupons').insert([{
           store_id: store.id,
-          title: cTitle, plan_type: planType, category: cCategory,
+          title: cTitle, plan_type: effectivePlanType, category: cCategory,
           discount_percent: discountNum, amount_available: stockNum,
           image_url: finalImageUrl || null,
-          start_date: new Date(cStartDate).toISOString(),
-          end_date: new Date(cEndDate).toISOString(),
+          start_date: cStartDate ? new Date(cStartDate).toISOString() : null,
+          end_date: cEndDate ? new Date(cEndDate).toISOString() : null,
           code,
-          approval_status: 'pending',
+          approval_status: isDraft ? 'draft' : 'pending',
           is_active: false,
         }]);
         if (error) throw error;
-        setFeedback({ type: 'ok', msg: 'Cupón enviado a revisión. Aparecerá en el K2 cuando el administrador lo apruebe.' });
+        toast.success(isDraft
+          ? 'Cupón guardado como borrador (inactivo). No se envía a revisión hasta que actives el plan Cupones Flash y lo edites.'
+          : 'Cupón enviado a revisión. Aparecerá en el K2 cuando el administrador lo apruebe.');
       }
       closeForm();
       fetchData();
     } catch (err: any) {
-      setFeedback({ type: 'err', msg: err.message || 'Error al guardar.' });
+      showError(err.message || 'Error al guardar.');
     } finally {
       setSubmitting(false);
     }
@@ -486,33 +532,33 @@ export default function ClientePromocionesPage() {
   const submitCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!store) return;
-    if (!canCampaign) { setFeedback({ type: 'err', msg: 'Tu plan no permite campañas.' }); return; }
-    if (!aBrandName.trim()) { setFeedback({ type: 'err', msg: 'Indica el nombre de la campaña.' }); return; }
-    if (!aEditingId && !aMediaFile) { setFeedback({ type: 'err', msg: 'Sube el archivo (video o imagen).' }); return; }
-    if (store.contract_expiry_date) {
+    if (!canCampaign) { showError('Tu plan no permite campañas.'); return; }
+    if (!aBrandName.trim()) { showError('Indica el nombre de la campaña.'); return; }
+    if (!aEditingId && !aMediaFile) { showError('Sube el archivo (video o imagen).'); return; }
+    // Las fechas solo se piden con un plan activo: sin plan la campaña se guarda
+    // inactiva y el rango se define al activar el plan. (contract_expiry_date es
+    // legacy y puede existir sin plan vigente, por eso gating con planActive.)
+    if (planActive) {
       if (!aEndDate) {
-        setFeedback({ type: 'err', msg: 'Indica la fecha de fin de la campaña.' });
+        showError('Indica la fecha de fin de la campaña.');
         return;
       }
-      if (aEndDate > store.contract_expiry_date) {
-        setFeedback({ type: 'err', msg: `La campaña no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).` });
+      if (store.contract_expiry_date && aEndDate > store.contract_expiry_date) {
+        showError(`La campaña no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).`);
         return;
       }
     }
     // Reactivar (dejar activa) una campaña con la fecha de fin ya vencida no la
     // pondría en el loop. Exigimos un fin futuro al reactivarla desde edición.
     if (aIsActive && aEndDate && aEndDate < today) {
-      setFeedback({ type: 'err', msg: 'El rango de fechas ya venció. Indica una fecha de fin futura para reactivar la campaña.' });
+      showError('El rango de fechas ya venció. Indica una fecha de fin futura para reactivar la campaña.');
       return;
     }
 
     // Aliados: bloquear si el loop está lleno (todos los slots ocupados).
     if (isAlly && !aEditingId) {
       if (loopSlotsUsed >= loopMaxSlots) {
-        setFeedback({
-          type: 'err',
-          msg: `El loop publicitario está lleno (${loopSlotsUsed}/${loopMaxSlots} slots ocupados). Tu campaña quedará pendiente hasta que el administrador libere un slot.`,
-        });
+        showError(`El loop publicitario está lleno (${loopSlotsUsed}/${loopMaxSlots} slots ocupados). Tu campaña quedará pendiente hasta que el administrador libere un slot.`,);
         return;
       }
     }
@@ -540,7 +586,7 @@ export default function ClientePromocionesPage() {
     activeConflict?: any,
   ) => {
     if (!store) return;
-    setSubmitting(true); setFeedback(null);
+    setSubmitting(true);
     try {
       const previousMediaUrl = aEditingId
         ? campaigns.find(c => c.id === aEditingId)?.media_url ?? null
@@ -568,7 +614,7 @@ export default function ClientePromocionesPage() {
             brand_name: aBrandName, description: aDescription,
             media_url: finalMediaUrl, media_type: finalMediaType,
             duration_seconds: CAMPAIGN_DURATION_SECONDS,
-            start_date: aStartDate, end_date: aEndDate || null,
+            start_date: aStartDate || null, end_date: aEndDate || null,
             is_active: aIsActive,
             // El audio solo aplica a video; una imagen nunca suena.
             audio_enabled: finalMediaType === 'video' ? aAudioEnabled : false,
@@ -584,6 +630,7 @@ export default function ClientePromocionesPage() {
         //    re-revisión. Editar una campaña activa NO debe obligar a pausarla
         //    primero — simplemente queda en revisión.
         //  • Si solo se tocó is_active/audio/fechas, sigue 'approved'.
+        const wasDraft = campaigns.find(c => c.id === aEditingId)?.approval_status === 'draft';
         const wentToReview = updated?.approval_status === 'pending';
         // Solo es un error real cuando la campaña NO fue a revisión y aun así
         // el guard revirtió is_active: p.ej. reactivar una pausada chocando con
@@ -600,12 +647,11 @@ export default function ClientePromocionesPage() {
         if (aMediaFile && previousMediaUrl && previousMediaUrl !== finalMediaUrl) {
           await removePublicidadFile(previousMediaUrl);
         }
-        setFeedback({
-          type: 'ok',
-          msg: wentToReview
-            ? 'Campaña actualizada. Como cambiaste su contenido, quedó en revisión por el administrador antes de volver al loop.'
-            : 'Campaña actualizada.',
-        });
+        toast.success(wasDraft && wentToReview
+          ? 'Campaña activada y enviada a revisión. El administrador la aprobará para que entre al loop.'
+          : wentToReview
+          ? 'Campaña actualizada. Como cambiaste su contenido, quedó en revisión por el administrador antes de volver al loop.'
+          : 'Campaña actualizada.');
       } else {
         // Si reemplazamos: desactivar TODAS las activas de la tienda primero.
         // Una tienda puede tener >1 activa (p.ej. creada desde admin), así que
@@ -639,15 +685,18 @@ export default function ClientePromocionesPage() {
         // En todos los modos, la nueva campaña entra a revisión: aunque la
         // anterior se haya desactivado o no exista, la nueva no se publica
         // hasta que el admin la apruebe.
-        let startDate = aStartDate;
+        let startDate = aStartDate || null;
         let endDate: string | null = aEndDate || null;
         if (mode === 'queue') {
           startDate = qStartDate;
           endDate = qEndDate || null;
         }
 
-        // Declaración explícita del flujo: pending + inactivo. Cubre el caso
-        // del admin que sube desde el portal cliente sin estar en user_stores.
+        // Sin plan vigente la campaña se guarda como BORRADOR (inactiva, fuera de
+        // revisión): no notifica al admin ni aparece en Solicitudes. Pasa a
+        // revisión cuando la tienda tiene plan y el dueño la activa (la edita).
+        // Con plan vigente entra directo a revisión (pending), como siempre.
+        const draft = !planActive;
         const { error } = await supabase.from('ad_campaigns').insert([{
           brand_name: aBrandName,
           description: aDescription,
@@ -656,32 +705,30 @@ export default function ClientePromocionesPage() {
           duration_seconds: CAMPAIGN_DURATION_SECONDS,
           start_date: startDate,
           end_date: endDate,
-          // El aliado no tiene plan_type pago; sus campañas suenan como Oro.
-          plan_type: store.plan_type ?? (isAlly ? 'ORO' : null),
+          plan_type: store.plan_type || null,
           store_id: store.id,
           is_active: false,
-          approval_status: 'pending',
+          approval_status: draft ? 'draft' : 'pending',
           // El audio solo aplica a video; una imagen nunca suena.
           audio_enabled: finalMediaType === 'video' ? aAudioEnabled : false,
         }]);
         if (error) throw error;
 
-        if (mode === 'replace') {
-          setFeedback({ type: 'ok', msg: 'Campaña anterior desactivada. La nueva queda en revisión por el administrador y entrará al loop al aprobarse.' });
+        if (draft) {
+          toast.success('Campaña guardada como borrador (inactiva). No se envía a revisión hasta que tengas un plan vigente y la actives desde el listado.');
+        } else if (mode === 'replace') {
+          toast.success('Campaña anterior desactivada. La nueva queda en revisión por el administrador y entrará al loop al aprobarse.');
         } else if (mode === 'queue') {
-          setFeedback({
-            type: 'ok',
-            msg: `Campaña programada del ${qStartDate} al ${qEndDate || '—'}. Queda en revisión por el administrador.`,
-          });
+          toast.success(`Campaña programada del ${qStartDate} al ${qEndDate || '—'}. Queda en revisión por el administrador.`);
         } else {
-          setFeedback({ type: 'ok', msg: 'Campaña enviada a revisión. Entrará al loop cuando el administrador la apruebe.' });
+          toast.success('Campaña enviada a revisión. Entrará al loop cuando el administrador la apruebe.');
         }
       }
       setConflict(null);
       closeForm();
       fetchData();
     } catch (err: any) {
-      setFeedback({ type: 'err', msg: err.message || 'Error al guardar.' });
+      showError(err.message || 'Error al guardar.');
     } finally {
       setSubmitting(false);
     }
@@ -689,18 +736,18 @@ export default function ClientePromocionesPage() {
 
   const deleteCoupon = async (c: any) => {
     if (!(await confirmModal({ title: 'Eliminar cupón', message: `¿Eliminar el cupón "${c.title}"?`, confirmLabel: 'Eliminar', tone: 'danger' }))) return;
-    const { error } = await supabase.from('coupons').delete().eq('id', c.id);
-    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    const { error } = await supabase.from('coupons').update({ image_url: 'deleted_' + c.id }).eq('id', c.id);
+    if (error) { showError(error.message); return; }
     await removePublicidadFile(c.image_url);
-    setFeedback({ type: 'ok', msg: 'Cupón eliminado.' });
+    toast.success('Cupón eliminado.');
     fetchData();
   };
   const deleteCampaign = async (c: any) => {
     if (!(await confirmModal({ title: 'Eliminar campaña', message: `¿Eliminar la campaña "${c.brand_name}"?`, confirmLabel: 'Eliminar', tone: 'danger' }))) return;
-    const { error } = await supabase.from('ad_campaigns').delete().eq('id', c.id);
-    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    const { error } = await supabase.from('ad_campaigns').update({ is_active: false, media_url: 'deleted_' + c.id }).eq('id', c.id);
+    if (error) { showError(error.message); return; }
     await removePublicidadFile(c.media_url);
-    setFeedback({ type: 'ok', msg: 'Campaña eliminada.' });
+    toast.success('Campaña eliminada.');
     fetchData();
   };
 
@@ -712,7 +759,7 @@ export default function ClientePromocionesPage() {
   // (p.ej. duration_seconds o start_date normalizados) mandándola a 'pending'.
   const toggleCampaignActive = async (c: any, next: boolean) => {
     if (next && !planActive) {
-      setFeedback({ type: 'err', msg: 'Tu plan está vencido — renueva para volver a activar campañas.' });
+      showError('Tu plan está vencido — renueva para volver a activar campañas.');
       return;
     }
     // Reactivar una campaña ya vencida (end_date pasada) no tiene sentido con su
@@ -724,7 +771,6 @@ export default function ClientePromocionesPage() {
       setReactivate(c);
       return;
     }
-    setFeedback(null);
     // Pedimos el row de vuelta: el guard puede revertir la transición sin
     // lanzar error (plan vencido / ya hay otra activa). Si is_active no quedó
     // como pedimos, el guard nos bloqueó.
@@ -733,29 +779,23 @@ export default function ClientePromocionesPage() {
       .eq('id', c.id)
       .select('id, is_active, approval_status')
       .single();
-    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    if (error) { showError(error.message); return; }
     if (!updated) {
-      setFeedback({ type: 'err', msg: 'No se encontró la campaña o no tienes permiso para cambiarla.' });
+      showError('No se encontró la campaña o no tienes permiso para cambiarla.');
       return;
     }
     if (updated.is_active !== next) {
-      setFeedback({
-        type: 'err',
-        msg: next
-          ? (planActive
-              ? 'No se pudo reactivar: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
-              : 'No se pudo reactivar: tu plan está vencido. Renueva para volver a activar campañas.')
-          : 'No se pudo pausar la campaña. Revisa permisos.',
-      });
+      toast.error(next
+        ? (planActive
+            ? 'No se pudo reactivar: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
+            : 'No se pudo reactivar: tu plan está vencido. Renueva para volver a activar campañas.')
+        : 'No se pudo pausar la campaña. Revisa permisos.');
       fetchData();
       return;
     }
-    setFeedback({
-      type: 'ok',
-      msg: next
-        ? 'Campaña reactivada — volvió al loop sin pasar de nuevo por revisión.'
-        : 'Campaña pausada. Se liberó tu slot en el loop.',
-    });
+    toast.success(next
+      ? 'Campaña reactivada — volvió al loop sin pasar de nuevo por revisión.'
+      : 'Campaña pausada. Se liberó tu slot en el loop.');
     fetchData();
   };
 
@@ -764,33 +804,30 @@ export default function ClientePromocionesPage() {
   // conserva approval_status='approved' y vuelve al loop sin revisión del admin.
   const reactivateWithDates = async () => {
     if (!reactivate || !store) return;
-    if (!rEndDate) { setFeedback({ type: 'err', msg: 'Indica la nueva fecha de fin de la campaña.' }); return; }
-    if (rStartDate && rEndDate < rStartDate) { setFeedback({ type: 'err', msg: 'La fecha de fin no puede ser anterior al inicio.' }); return; }
-    if (rEndDate < today) { setFeedback({ type: 'err', msg: 'La fecha de fin debe ser futura para que la campaña vuelva al loop.' }); return; }
+    if (!rEndDate) { showError('Indica la nueva fecha de fin de la campaña.'); return; }
+    if (rStartDate && rEndDate < rStartDate) { showError('La fecha de fin no puede ser anterior al inicio.'); return; }
+    if (rEndDate < today) { showError('La fecha de fin debe ser futura para que la campaña vuelva al loop.'); return; }
     if (store.contract_expiry_date && rEndDate > store.contract_expiry_date) {
-      setFeedback({ type: 'err', msg: `La campaña no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).` });
+      showError(`La campaña no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).`);
       return;
     }
-    setSubmitting(true); setFeedback(null);
+    setSubmitting(true);
     const { data: updated, error } = await supabase.from('ad_campaigns')
       .update({ start_date: rStartDate || today, end_date: rEndDate, is_active: true })
       .eq('id', reactivate.id)
       .select('id, is_active, approval_status')
       .single();
     setSubmitting(false);
-    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    if (error) { showError(error.message); return; }
     if (!updated || !updated.is_active) {
-      setFeedback({
-        type: 'err',
-        msg: planActive
-          ? 'No se pudo reactivar: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
-          : 'No se pudo reactivar: tu plan está vencido. Renueva para volver a activar campañas.',
-      });
+      toast.error(planActive
+        ? 'No se pudo reactivar: ya tienes otra campaña activa en el loop. Pausa la otra primero.'
+        : 'No se pudo reactivar: tu plan está vencido. Renueva para volver a activar campañas.');
       setReactivate(null);
       fetchData();
       return;
     }
-    setFeedback({ type: 'ok', msg: 'Campaña reactivada con su nuevo rango de fechas — volvió al loop sin pasar de nuevo por revisión.' });
+    toast.success('Campaña reactivada con su nuevo rango de fechas — volvió al loop sin pasar de nuevo por revisión.');
     setReactivate(null);
     fetchData();
   };
@@ -799,13 +836,13 @@ export default function ClientePromocionesPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const isVideo = file.type.startsWith('video/');
-    if (file.size > 100 * 1024 * 1024) {
-      toast.error('El archivo debe pesar menos de 100 MB.');
+    if (file.size > 150 * 1024 * 1024) {
+      showError('El archivo debe pesar menos de 150 MB.');
       e.target.value = ''; return;
     }
     if (isVideo) {
       const check = await validateKioskVideo(file);
-      if (!check.ok) { toast.error(check.message || 'El video no es válido.'); e.target.value = ''; return; }
+      if (!check.ok) { showError(check.message || 'El video no es válido.'); e.target.value = ''; return; }
     }
     setBMediaFile(file);
     setBMediaType(isVideo ? 'video' : 'image');
@@ -815,10 +852,12 @@ export default function ClientePromocionesPage() {
   const handleSaveBanner = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!store) return;
-    if (!bEditingId && !bMediaFile) { setFeedback({ type: 'err', msg: 'Sube un archivo para el banner.' }); return; }
-    if (!bEndDate) { setFeedback({ type: 'err', msg: 'Indica la fecha de fin del banner.' }); return; }
+    if (!bEditingId && !bMediaFile) { showError('Sube un archivo para el banner.'); return; }
+    // Sin plan DIAMANTE vigente el banner se guarda inactivo y sin fecha; el rango
+    // se pide al activar el plan.
+    if (bannerPlanActive && !bEndDate) { showError('Indica la fecha de fin del banner.'); return; }
     if (store.contract_expiry_date && bEndDate > store.contract_expiry_date) {
-      setFeedback({ type: 'err', msg: `El banner no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).` });
+      showError(`El banner no puede pasar de la vigencia de tu plan (${store.contract_expiry_date}).`);
       return;
     }
 
@@ -845,7 +884,7 @@ export default function ClientePromocionesPage() {
       if (!ok) return;
     }
 
-    setSubmitting(true); setFeedback(null);
+    setSubmitting(true);
     try {
       const previousMediaUrl = bEditingId
         ? banners.find(b => b.id === bEditingId)?.media_url ?? null
@@ -872,7 +911,7 @@ export default function ClientePromocionesPage() {
             media_url: finalMediaUrl,
             media_type: finalMediaType,
             start_date: bStartDate ? new Date(bStartDate).toISOString() : null,
-            end_date: new Date(bEndDate).toISOString(),
+            end_date: bEndDate ? new Date(bEndDate).toISOString() : null,
             store_id: store.id,
           })
           .eq('id', bEditingId)
@@ -884,35 +923,42 @@ export default function ClientePromocionesPage() {
           await removePublicidadFile(previousMediaUrl);
         }
 
+        const wasDraftBanner = banners.find(b => b.id === bEditingId)?.approval_status === 'draft';
         const wentToReview = updated?.approval_status === 'pending';
-        setFeedback({
-          type: 'ok',
-          msg: wentToReview
-            ? 'Banner actualizado. Como cambiaste el archivo, quedó en revisión por el administrador.'
-            : 'Banner actualizado.',
-        });
+        const stillDraft = updated?.approval_status === 'draft';
+        toast.success(stillDraft
+          ? 'Borrador de banner actualizado. No se envía a revisión hasta que tengas un plan DIAMANTE vigente.'
+          : wasDraftBanner && wentToReview
+          ? 'Banner activado y enviado a revisión. El administrador asignará el slot y lo publicará al aprobarlo.'
+          : wentToReview
+          ? 'Banner actualizado. Como cambiaste el archivo, quedó en revisión por el administrador.'
+          : 'Banner actualizado.');
       } else {
         // Nuevo banner: el admin asignará ui_position y slot_position al aprobarlo.
+        // Sin plan DIAMANTE vigente, el trigger lo guarda como borrador (draft);
+        // con DIAMANTE vigente entra a revisión (pending).
         const { error } = await supabase.from('banners').insert([{
           media_url: finalMediaUrl,
           media_type: finalMediaType,
           start_date: bStartDate ? new Date(bStartDate).toISOString() : null,
-          end_date: new Date(bEndDate).toISOString(),
+          end_date: bEndDate ? new Date(bEndDate).toISOString() : null,
           store_id: store.id,
           ui_position: 'top',
           slot_position: null,
           is_active: false,
-          approval_status: 'pending',
+          approval_status: bannerPlanActive ? 'pending' : 'draft',
         }]);
         if (error) throw error;
 
-        setFeedback({ type: 'ok', msg: 'Banner enviado a revisión. El administrador asignará el slot y lo publicará al aprobarlo.' });
+        toast.success(bannerPlanActive
+          ? 'Banner enviado a revisión. El administrador asignará el slot y lo publicará al aprobarlo.'
+          : 'Banner guardado como borrador (inactivo). No se envía a revisión hasta que tengas un plan DIAMANTE vigente y lo edites.');
       }
 
       closeForm();
       fetchData();
     } catch (err: any) {
-      setFeedback({ type: 'err', msg: err.message || 'Error al guardar el banner.' });
+      showError(err.message || 'Error al guardar el banner.');
     } finally {
       setSubmitting(false);
     }
@@ -920,43 +966,36 @@ export default function ClientePromocionesPage() {
 
   const deleteBanner = async (b: any) => {
     if (!(await confirmModal({ title: 'Eliminar banner', message: `¿Eliminar el banner de la posición "${b.ui_position}"?`, confirmLabel: 'Eliminar', tone: 'danger' }))) return;
-    const { error } = await supabase.from('banners').delete().eq('id', b.id);
-    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    const { error } = await supabase.from('banners').update({ is_active: false, media_url: 'deleted_' + b.id }).eq('id', b.id);
+    if (error) { showError(error.message); return; }
     await removePublicidadFile(b.media_url);
-    setFeedback({ type: 'ok', msg: 'Banner eliminado.' });
+    toast.success('Banner eliminado.');
     fetchData();
   };
 
   const toggleBannerActive = async (b: any, next: boolean) => {
     if (next && !planActive) {
-      setFeedback({ type: 'err', msg: 'Tu plan está vencido — renueva para volver a activar banners.' });
+      showError('Tu plan está vencido — renueva para volver a activar banners.');
       return;
     }
-    setFeedback(null);
     const { data: updated, error } = await supabase.from('banners')
       .update({ is_active: next })
       .eq('id', b.id)
       .select('id, is_active, approval_status')
       .single();
-    if (error) { setFeedback({ type: 'err', msg: error.message }); return; }
+    if (error) { showError(error.message); return; }
     if (!updated) {
-      setFeedback({ type: 'err', msg: 'No se encontró el banner o no tienes permiso para cambiarlo.' });
+      showError('No se encontró el banner o no tienes permiso para cambiarlo.');
       return;
     }
     if (updated.is_active !== next) {
-      setFeedback({
-        type: 'err',
-        msg: next
-          ? 'No se pudo reactivar: tu plan venció o el banner no está aprobado.'
-          : 'No se pudo pausar el banner. Revisa permisos.',
-      });
+      toast.error(next
+        ? 'No se pudo reactivar: tu plan venció o el banner no está aprobado.'
+        : 'No se pudo pausar el banner. Revisa permisos.');
       fetchData();
       return;
     }
-    setFeedback({
-      type: 'ok',
-      msg: next ? 'Banner reactivado.' : 'Banner pausado.',
-    });
+    toast.success(next ? 'Banner reactivado.' : 'Banner pausado.');
     fetchData();
   };
 
@@ -974,8 +1013,6 @@ export default function ClientePromocionesPage() {
       </div>
     );
   }
-
-  const noCapability = !canCreateCoupon && !canCampaign && !canBanner;
 
   const items: Array<{ kind: 'coupon' | 'campaign' | 'banner'; data: any; created: string }> = [
     ...coupons.map(c => ({ kind: 'coupon' as const, data: c, created: c.created_at })),
@@ -1028,26 +1065,11 @@ export default function ClientePromocionesPage() {
         </div>
         <button
           onClick={() => setForm('pick')}
-          disabled={noCapability}
           className="shrink-0 text-sm font-semibold bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-lg px-4 py-2.5 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed self-start"
         >
           + Nueva promoción
         </button>
       </div>
-
-      {noCapability && (
-        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 flex items-start gap-2.5">
-          <svg className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <div className="text-xs text-amber-200/90 leading-relaxed flex-1">
-            <p>Tu tienda no tiene un plan activo que permita cupones ni campañas. Los cupones requieren el plan Cupones Flash.</p>
-            <Link href="/cliente/planes" className="inline-block mt-1 text-amber-300 underline">
-              Ver catálogo de planes →
-            </Link>
-          </div>
-        </div>
-      )}
 
       {isAlly && (() => {
         const loopFull = loopSlotsUsed >= loopMaxSlots;
@@ -1172,13 +1194,6 @@ export default function ClientePromocionesPage() {
         </div>
       )}
 
-      {feedback && (
-        <div className={`rounded-lg p-3 text-sm border ${feedback.type === 'ok'
-          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-          : 'bg-red-500/10 border-red-500/30 text-red-400'
-          }`}>{feedback.msg}</div>
-      )}
-
       <div className="flex items-center gap-2 flex-wrap">
         {(['all', 'coupons', 'campaigns', 'banners'] as FilterKind[]).map(k => {
           const active = filter === k;
@@ -1266,7 +1281,7 @@ export default function ClientePromocionesPage() {
             </div>
             <form onSubmit={submitCoupon} className="px-6 py-5 space-y-4">
               <div className="bg-pink-500/[0.06] border border-pink-500/25 rounded-lg p-3 text-[11px] text-pink-100/90 leading-snug">
-                ⚡ Cupón Flash · Plan {PLAN_LABELS[couponPlanType] || couponPlanType || '—'}.
+                ⚡ Cupón Flash · Plan {(couponPlanType && PLAN_LABELS[couponPlanType]) || couponPlanType || '—'}.
                 Aparece en la galería pública con rotación 1 cupón por tienda.
               </div>
 
@@ -1299,6 +1314,8 @@ export default function ClientePromocionesPage() {
                 </div>
               </div>
 
+              {flashActive ? (
+              <>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio</label>
@@ -1340,6 +1357,14 @@ export default function ClientePromocionesPage() {
                   Tu plan Cupones Flash vence el {store!.flash_coupon_expiry_date}. El cupón no puede pasar de esa fecha.
                 </p>
               )}
+              </>
+              ) : (
+                <div className="bg-white/[0.03] border border-white/10 rounded-lg px-3 py-2.5">
+                  <p className="text-[11px] text-white/50 leading-snug">
+                    Sin un plan de Cupones Flash activo el cupón se guarda <strong className="text-white/70">inactivo</strong>. Las fechas de inicio y vencimiento se definen al activar tu plan, cuando lo pongas en marcha.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
@@ -1347,7 +1372,7 @@ export default function ClientePromocionesPage() {
                 </label>
                 <input type="file" accept="image/*" onChange={handleImage}
                   className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-white/10 file:text-white/60" />
-                <p className="text-[10px] text-white/20 mt-1">JPG/PNG · Máx 500 KB · Recomendado <span className="text-white/40">1200 × 900 px (4:3)</span>. El kiosco recorta a 4:3 con <code className="text-white/30">cover</code>; mantén el contenido importante centrado.</p>
+                <p className="text-[10px] text-white/20 mt-1">JPG/PNG · Máx 150 MB · Recomendado <span className="text-white/40">1200 × 900 px (4:3)</span>. El kiosco recorta a 4:3 con <code className="text-white/30">cover</code>; mantén el contenido importante centrado.</p>
                 {cImageUrl && (
                   <img src={cImageUrl} alt="preview" className="mt-2 w-40 aspect-[4/3] rounded-lg object-cover bg-black" />
                 )}
@@ -1372,8 +1397,17 @@ export default function ClientePromocionesPage() {
       {form === 'campaign' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeForm} />
-          <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[92vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between">
+          <div className="relative bg-[#0E0E0E] border border-white/10 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[92vh]">
+            {submitting && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl bg-black/75 backdrop-blur-sm">
+                <svg className="h-9 w-9 animate-spin text-cyan-400" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                <span className="text-sm font-medium text-white/80 tracking-wide">Guardando campaña…</span>
+              </div>
+            )}
+            <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between shrink-0">
               <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                 <span>📺</span>
                 {aEditingId ? 'Editar campaña' : 'Nueva campaña'}
@@ -1382,15 +1416,7 @@ export default function ClientePromocionesPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            {/* Feedback DENTRO del modal: el banner global vive detrás de este
-                overlay (z-50), así que un error al guardar quedaba invisible.
-                Aquí el cliente sí ve por qué falló. */}
-            {feedback && (
-              <div className={`mx-6 mt-4 rounded-lg p-3 text-sm border ${feedback.type === 'ok'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-red-500/10 border-red-500/40 text-red-300'
-                }`}>{feedback.msg}</div>
-            )}
+            <div className="overflow-y-auto flex-1">
             <form onSubmit={submitCampaign} className="px-6 py-5 space-y-4">
               <div>
                 <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Nombre de la campaña</label>
@@ -1409,7 +1435,7 @@ export default function ClientePromocionesPage() {
                 </label>
                 <input type="file" accept="video/*,image/*" onChange={handleMedia}
                   className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-[7px] text-sm text-white/50 file:mr-2 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-white/10 file:text-white/60" />
-                <p className="text-[10px] text-white/20 mt-1">Video MP4/WebM (máx 120 MB) o imagen JPG/PNG (máx 50 MB) · Recomendado <span className="text-white/40">1080 × 1920 px (9:16 vertical)</span>. El kiosco lo muestra a pantalla completa con <code className="text-white/30">cover</code>.</p>
+                <p className="text-[10px] text-white/20 mt-1">Video MP4/WebM o imagen JPG/PNG (máx 150 MB) · Recomendado <span className="text-white/40">1080 × 1920 px (9:16 vertical)</span>. El kiosco lo muestra a pantalla completa con <code className="text-white/30">cover</code>.</p>
 
                 {aMediaUrl && (
                   <div className="mt-3 flex items-start gap-3">
@@ -1473,24 +1499,34 @@ export default function ClientePromocionesPage() {
                   Duración fija: <span className="text-white font-semibold">{CAMPAIGN_DURATION_SECONDS} segundos</span> por reproducción en el loop.
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio</label>
-                  <input type="date" required value={aStartDate} min={today} max={store!.contract_expiry_date || undefined}
-                    onChange={(e) => setAStartDate(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+              {planActive ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Inicio</label>
+                      <input type="date" required value={aStartDate} min={today} max={store!.contract_expiry_date || undefined}
+                        onChange={(e) => setAStartDate(e.target.value)}
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fin</label>
+                      <input type="date" required value={aEndDate} min={aStartDate || today} max={store!.contract_expiry_date || undefined}
+                        onChange={(e) => setAEndDate(e.target.value)}
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                    </div>
+                  </div>
+                  {store!.contract_expiry_date && (
+                    <p className="text-[10px] text-white/40 -mt-2">
+                      Tu plan vence el {store!.contract_expiry_date}. La campaña no puede pasar de esa fecha.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="bg-white/[0.03] border border-white/10 rounded-lg px-3 py-2.5">
+                  <p className="text-[11px] text-white/50 leading-snug">
+                    Sin un plan activo la campaña se guarda <strong className="text-white/70">inactiva</strong>. Las fechas de inicio y fin se definen al activar tu plan, cuando la pongas en marcha.
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Fin</label>
-                  <input type="date" value={aEndDate} min={aStartDate || today} max={store!.contract_expiry_date || undefined}
-                    onChange={(e) => setAEndDate(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
-                </div>
-              </div>
-              {store!.contract_expiry_date && (
-                <p className="text-[10px] text-white/40 -mt-2">
-                  Tu plan vence el {store!.contract_expiry_date}. La campaña no puede pasar de esa fecha.
-                </p>
               )}
 
               {aEditingId && (() => {
@@ -1575,6 +1611,7 @@ export default function ClientePromocionesPage() {
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
       )}
@@ -1649,36 +1686,46 @@ export default function ClientePromocionesPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">Inicio</label>
-                  <input
-                    type="date"
-                    required
-                    value={bStartDate}
-                    min={today}
-                    max={store!.contract_expiry_date || undefined}
-                    onChange={(e) => setBStartDate(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
-                  />
+              {bannerPlanActive ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">Inicio</label>
+                      <input
+                        type="date"
+                        required
+                        value={bStartDate}
+                        min={today}
+                        max={store!.contract_expiry_date || undefined}
+                        onChange={(e) => setBStartDate(e.target.value)}
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">Fin</label>
+                      <input
+                        type="date"
+                        required
+                        value={bEndDate}
+                        min={bStartDate || today}
+                        max={store!.contract_expiry_date || undefined}
+                        onChange={(e) => setBEndDate(e.target.value)}
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                  </div>
+                  {store!.contract_expiry_date && (
+                    <p className="text-[10px] text-white/40 -mt-2">
+                      Tu plan vence el {store!.contract_expiry_date}. El banner no puede pasar de esa fecha.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div className="bg-white/[0.03] border border-white/10 rounded-lg px-3 py-2.5">
+                  <p className="text-[11px] text-white/50 leading-snug">
+                    Sin un plan activo el banner se guarda <strong className="text-white/70">inactivo</strong>. Las fechas de inicio y fin se definen al activar tu plan, cuando lo pongas en marcha.
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-white/60 uppercase tracking-wider mb-1.5">Fin</label>
-                  <input
-                    type="date"
-                    required
-                    value={bEndDate}
-                    min={bStartDate || today}
-                    max={store!.contract_expiry_date || undefined}
-                    onChange={(e) => setBEndDate(e.target.value)}
-                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-              {store!.contract_expiry_date && (
-                <p className="text-[10px] text-white/40 -mt-2">
-                  Tu plan vence el {store!.contract_expiry_date}. El banner no puede pasar de esa fecha.
-                </p>
               )}
 
               <div className="pt-4 border-t border-white/10 flex gap-2">
@@ -2344,6 +2391,14 @@ function CouponCard({ c, onEdit, onDelete, today, redeemedCount }: { c: any; onE
             </span>
           </div>
         </div>
+        {c.approval_status === 'draft' && (
+          <button
+            onClick={() => onEdit(c)}
+            className="w-full text-[11px] font-semibold rounded-md py-1.5 border text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 mt-2"
+          >
+            Activar (requiere plan Cupones Flash)
+          </button>
+        )}
         <div className="flex gap-1.5 pt-2">
           <button onClick={() => onEdit(c)} className="flex-1 text-[11px] text-white/70 bg-white/5 hover:bg-white/10 rounded-md py-1.5">
             Editar
@@ -2439,6 +2494,14 @@ function CampaignCard({ c, onEdit, onDelete, onToggleActive, onShowMetrics, toda
                 }`}
             >
               {c.is_active ? 'Pausar' : 'Activar (sin re-aprobación)'}
+            </button>
+          )}
+          {c.approval_status === 'draft' && (
+            <button
+              onClick={() => onEdit(c)}
+              className="w-full text-[11px] font-semibold rounded-md py-1.5 border text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30"
+            >
+              Activar (requiere plan vigente)
             </button>
           )}
           <div className="flex gap-1.5">
@@ -2538,6 +2601,14 @@ function BannerCard({
                 }`}
             >
               {b.is_active ? 'Pausar' : 'Activar (sin re-aprobación)'}
+            </button>
+          )}
+          {b.approval_status === 'draft' && (
+            <button
+              onClick={() => onEdit(b)}
+              className="w-full text-[11px] font-semibold rounded-md py-1.5 border text-cyan-200 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30"
+            >
+              Activar (requiere plan DIAMANTE)
             </button>
           )}
           <div className="flex gap-1.5">

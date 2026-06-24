@@ -1,0 +1,3 @@
+ALTER TABLE public.ad_campaigns ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false;
+ALTER TABLE public.banners ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false;
+ALTER TABLE public.coupons ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false;

@@ -19,6 +19,7 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: 'danger' | 'default';
+  hideCancel?: boolean;
 }
 
 interface State {
@@ -61,7 +62,7 @@ function settle(value: boolean) {
 export function ConfirmHost() {
   const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   if (!current) return null;
-  const { title, message, confirmLabel, cancelLabel, tone } = current.opts;
+  const { title, message, confirmLabel, cancelLabel, tone, hideCancel } = current.opts;
   const danger = tone === 'danger';
   return (
     <div
@@ -83,12 +84,14 @@ export function ConfirmHost() {
           <p className="mt-2 text-sm text-fg-muted whitespace-pre-line">{message}</p>
         )}
         <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={() => settle(false)}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-fg-muted hover:text-fg hover:bg-glass transition-colors"
-          >
-            {cancelLabel || 'Cancelar'}
-          </button>
+          {!hideCancel && (
+            <button
+              onClick={() => settle(false)}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-fg-muted hover:text-fg hover:bg-glass transition-colors"
+            >
+              {cancelLabel || 'Cancelar'}
+            </button>
+          )}
           <button
             onClick={() => settle(true)}
             className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors ${
