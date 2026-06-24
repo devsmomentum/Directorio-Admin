@@ -21,6 +21,7 @@ type StaffRow = {
   user_id: string;
   email: string;
   full_name: string | null;
+  telefono_personal: string | null;
   store_role: 'seller' | 'advertiser';
   created_at: string;
 };
@@ -56,6 +57,11 @@ export default function ClienteEquipoPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+
+  // Reenvío de enlace por colaborador
+  const [resendOpenFor, setResendOpenFor] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resendPhone, setResendPhone] = useState('');
 
   // Formulario de invitación
   const [email, setEmail] = useState('');
@@ -119,7 +125,10 @@ export default function ClienteEquipoPage() {
         store_role: staffRole,
         channel,
         phone: channel === 'whatsapp' ? phone.trim() : undefined,
-        profile: { full_name: fullName.trim() || null },
+        profile: {
+          full_name: fullName.trim() || null,
+          telefono_personal: channel === 'whatsapp' ? phone.trim() : undefined,
+        },
       },
     });
     setSubmitting(false);
@@ -161,6 +170,48 @@ export default function ClienteEquipoPage() {
     }
     setStaff((prev) => prev.filter((s) => s.user_id !== row.user_id));
     setToast({ kind: 'ok', text: 'Miembro quitado del equipo.' });
+  };
+
+  const handleResend = async (row: StaffRow, ch: 'email' | 'whatsapp', phoneArg?: string) => {
+    if (!store) return;
+    if (ch === 'whatsapp' && (phoneArg ?? '').trim().length < 7) {
+      setToast({ kind: 'err', text: 'Ingresa un teléfono válido para reenviar por WhatsApp.' });
+      return;
+    }
+    setResendingId(row.user_id);
+    const { data, error } = await supabase.functions.invoke('invite-store-staff', {
+      body: {
+        email: row.email,
+        store_id: store.id,
+        store_role: row.store_role,
+        channel: ch,
+        phone: ch === 'whatsapp' ? (phoneArg ?? '').trim() : undefined,
+        profile: {
+          full_name: row.full_name,
+          telefono_personal: ch === 'whatsapp' ? (phoneArg ?? '').trim() : undefined,
+        },
+      },
+    });
+    setResendingId(null);
+
+    if (error || !(data as { ok?: boolean })?.ok) {
+      const msg = error ? await readFnError(error) : 'No se pudo reenviar el enlace.';
+      setToast({ kind: 'err', text: msg });
+      return;
+    }
+
+    setToast({
+      kind: 'ok',
+      text: `Enlace reenviado a ${row.email} por ${ch === 'email' ? 'correo' : 'WhatsApp'}.`,
+    });
+    if (ch === 'whatsapp') {
+      const saved = (phoneArg ?? '').trim();
+      setStaff((prev) =>
+        prev.map((s) => (s.user_id === row.user_id ? { ...s, telefono_personal: saved } : s)),
+      );
+    }
+    setResendOpenFor(null);
+    setResendPhone('');
   };
 
   const roleOptions = useMemo(() => (['seller', 'advertiser'] as const), []);
@@ -311,31 +362,81 @@ export default function ClienteEquipoPage() {
           </div>
         ) : (
           <div className="space-y-2">
-            {staff.map((row) => (
+            {staff.map((row) => {
+              const resendOpen = resendOpenFor === row.user_id;
+              const busy = resendingId === row.user_id;
+              return (
               <div
                 key={row.user_id}
-                className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 sm:flex-row sm:items-center"
+                className="rounded-xl border border-line bg-surface p-4"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-fg">
-                    {row.full_name || <span className="italic text-fg-faint">Sin nombre</span>}
-                  </p>
-                  <p className="truncate text-[13px] text-fg-muted">{row.email}</p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-fg">
+                      {row.full_name || <span className="italic text-fg-faint">Sin nombre</span>}
+                    </p>
+                    <p className="truncate text-[13px] text-fg-muted">{row.email}</p>
+                  </div>
+                  <span
+                    className="shrink-0 rounded-full border border-line bg-surface-2 px-3 py-1 text-[11px] font-semibold text-fg-muted"
+                  >
+                    {ROLE_LABEL[row.store_role] ?? row.store_role}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setResendPhone(resendOpen ? '' : (row.telefono_personal ?? ''));
+                      setResendOpenFor(resendOpen ? null : row.user_id);
+                    }}
+                    className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                      resendOpen
+                        ? 'border-[color:var(--brand-cliente-from)] bg-surface-2 text-fg'
+                        : 'border-line text-fg-muted hover:bg-surface-2'
+                    }`}
+                  >
+                    Reenviar enlace
+                  </button>
+                  <button
+                    onClick={() => handleRemove(row)}
+                    disabled={removingId === row.user_id}
+                    className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:border-[color:color-mix(in_oklab,var(--danger)_40%,transparent)] hover:text-[color:var(--danger)] disabled:opacity-50"
+                  >
+                    {removingId === row.user_id ? 'Quitando…' : 'Quitar'}
+                  </button>
                 </div>
-                <span
-                  className="shrink-0 rounded-full border border-line bg-surface-2 px-3 py-1 text-[11px] font-semibold text-fg-muted"
-                >
-                  {ROLE_LABEL[row.store_role] ?? row.store_role}
-                </span>
-                <button
-                  onClick={() => handleRemove(row)}
-                  disabled={removingId === row.user_id}
-                  className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:border-[color:color-mix(in_oklab,var(--danger)_40%,transparent)] hover:text-[color:var(--danger)] disabled:opacity-50"
-                >
-                  {removingId === row.user_id ? 'Quitando…' : 'Quitar'}
-                </button>
+
+                {resendOpen && (
+                  <div className="mt-3 flex flex-col gap-3 rounded-lg border border-line bg-surface-2 p-3 sm:flex-row sm:items-center">
+                    <span className="shrink-0 text-[12px] font-medium text-fg-subtle">
+                      Reenviar enlace por:
+                    </span>
+                    <button
+                      onClick={() => handleResend(row, 'email')}
+                      disabled={busy}
+                      className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium text-fg transition-colors hover:bg-surface-2 disabled:opacity-50"
+                    >
+                      {busy ? 'Enviando…' : 'Correo'}
+                    </button>
+                    <div className="flex flex-1 gap-2">
+                      <input
+                        value={resendPhone}
+                        onChange={(e) => setResendPhone(e.target.value.replace(/[^\d+\s-]/g, ''))}
+                        placeholder="Teléfono WhatsApp (0412-1234567)"
+                        inputMode="tel"
+                        className="input-brand flex-1"
+                      />
+                      <button
+                        onClick={() => handleResend(row, 'whatsapp', resendPhone)}
+                        disabled={busy}
+                        className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium text-fg transition-colors hover:bg-surface-2 disabled:opacity-50"
+                      >
+                        {busy ? 'Enviando…' : 'WhatsApp'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

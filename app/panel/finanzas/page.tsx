@@ -41,7 +41,12 @@ type Share = {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const PLAN_TYPES = ['DIAMANTE', 'ORO', 'IA_PERFORMANCE', 'PROMO_FLASH'];
-const PAYMENT_METHODS = ['Bancamiga Bs', 'Bancamiga USD', 'Efectivo', 'Binance', 'Otro'];
+const PAYMENT_METHODS = ['Bancamiga Bs', 'Bancamiga USD', 'Zelle', 'Efectivo', 'Binance', 'Otro'];
+
+// Pagos exonerados (acordados con Mall Hub): NO son ingreso. Se excluyen del
+// bruto, del reparto a aliados y de los gráficos por tienda; se reportan aparte
+// como "Total exonerado". El valor de amount_usd es el nominal del plan.
+const isExon = (p: { payment_method?: string | null }) => p.payment_method === 'exonerated';
 const EXPENSE_CATEGORIES = ['Abogada', 'Alcaldía', 'Seguro', 'Mantenimiento', 'Marketing', 'Personal', 'Otro'];
 
 
@@ -148,10 +153,14 @@ export default function FinanzasPage() {
     const dateOf = (p: PlanPayment) => p.payment_date || p.created_at.split('T')[0];
 
     const gross = periodPayments
-      .filter(p => p.status === 'completed')
+      .filter(p => p.status === 'completed' && !isExon(p))
       .reduce((s, p) => s + Number(p.amount_usd), 0);
     const pending = periodPayments
-      .filter(p => p.status !== 'completed')
+      .filter(p => p.status !== 'completed' && !isExon(p))
+      .reduce((s, p) => s + Number(p.amount_usd), 0);
+    // Exoneraciones aprobadas: valor nominal perdonado, fuera del ingreso.
+    const exonerated = periodPayments
+      .filter(p => p.status === 'completed' && isExon(p))
       .reduce((s, p) => s + Number(p.amount_usd), 0);
     const totalExpenses = periodExpenses.reduce((s, e) => s + Number(e.amount_usd), 0);
 
@@ -180,7 +189,7 @@ export default function FinanzasPage() {
       if (a >= b) continue;
 
       const grossSub = periodPayments
-        .filter(p => p.status === 'completed' && dateOf(p) >= a && dateOf(p) < b)
+        .filter(p => p.status === 'completed' && !isExon(p) && dateOf(p) >= a && dateOf(p) < b)
         .reduce((s, p) => s + Number(p.amount_usd), 0);
       const expSub = periodExpenses
         .filter(e => e.expense_date >= a && e.expense_date < b)
@@ -227,7 +236,7 @@ export default function FinanzasPage() {
     const remainder = distributable - netAllyTotal;
 
     return {
-      gross, pending, totalExpenses,
+      gross, pending, exonerated, totalExpenses,
       grossAllies, grossAllyTotal,
       distributable,
       netAllies, netAllyTotal,
@@ -340,6 +349,7 @@ export default function FinanzasPage() {
     const rows: string[][] = [
       ['Ingresos cobrados (pagos completados)', '', fmt(dist.gross)],
       ['Pagos pendientes (no incluidos)', '', fmt(dist.pending)],
+      ...(dist.exonerated > 0 ? [['Exonerado (acordado · no es ingreso)', '', fmt(dist.exonerated)]] : []),
       ...dist.grossAllies.map(a => [`− ${pctTxt(a.pct)} ${a.name} (aliado, sobre bruto)`, fmt(a.amount), '']),
       ['− Gastos operativos registrados', fmt(dist.totalExpenses), ''],
       ['Lo demás (tras % sobre bruto y gastos)', '', fmt(dist.distributable)],
@@ -436,8 +446,9 @@ export default function FinanzasPage() {
           <div className="bg-[#111] border border-white/5 rounded-xl p-5">
             <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Distribución del período</h3>
             <div className="space-y-0.5">
-              <WRow label="Ingresos cobrados" sub={`${periodPayments.filter(p => p.status === 'completed').length} pagos completados`} amount={dist.gross} color="text-white" isTotal />
+              <WRow label="Ingresos cobrados" sub={`${periodPayments.filter(p => p.status === 'completed' && !isExon(p)).length} pagos completados`} amount={dist.gross} color="text-white" isTotal />
               {dist.pending > 0 && <WRow label="Pagos pendientes (excluidos)" amount={dist.pending} color="text-white/20" indent />}
+              {dist.exonerated > 0 && <WRow label="Exonerado (acordado · no es ingreso)" amount={dist.exonerated} color="text-amber-300/60" indent />}
               {dist.grossAllies.map(a => (
                 <WRow key={`g-${a.name}`} label={`− ${pctTxt(a.pct)} ${a.name} (aliado · sobre bruto)`} amount={-a.amount} color="text-purple-300" indent />
               ))}
@@ -622,6 +633,7 @@ export default function FinanzasPage() {
                 {[
                   { label: 'Ingresos cobrados', value: dist.gross, color: 'text-white', bold: false },
                   { label: 'Pagos pendientes (excluidos del cálculo)', value: dist.pending, color: 'text-yellow-400', bold: false },
+                  ...(dist.exonerated > 0 ? [{ label: 'Exonerado (acordado · no es ingreso)', value: dist.exonerated, color: 'text-amber-300/70', bold: false }] : []),
                   ...dist.grossAllies.map(a => ({ label: `− ${pctTxt(a.pct)} ${a.name} (aliado, sobre bruto)`, value: -a.amount, color: 'text-purple-300', bold: false })),
                   { label: '− Gastos operativos registrados', value: -dist.totalExpenses, color: 'text-red-400', bold: false },
                   { label: 'Lo demás (a repartir)', value: dist.distributable, color: dist.distributable >= 0 ? 'text-emerald-400' : 'text-red-400', bold: true },
@@ -645,7 +657,7 @@ export default function FinanzasPage() {
               <h3 className="text-[11px] text-white/30 uppercase tracking-wider font-medium mb-4">Ingresos por tienda (período)</h3>
               {(() => {
                 const byStore: Record<string, number> = {};
-                periodPayments.filter(p => p.status === 'completed').forEach(p => {
+                periodPayments.filter(p => p.status === 'completed' && !isExon(p)).forEach(p => {
                   const name = storeName(p.store_id);
                   byStore[name] = (byStore[name] || 0) + Number(p.amount_usd);
                 });

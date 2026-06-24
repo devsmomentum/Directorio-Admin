@@ -179,13 +179,18 @@ export default function ClientePagosPage() {
     }
     setFormErr(null);
 
-    const built = buildPaymentPayload(payment);
+    // Costo de la renovación: precio del plan × ciclos. En exoneración el monto
+    // se fija a este total (nominal) para que, al validar el admin, el contrato
+    // se extienda igual que un pago real; pero queda excluido de los ingresos.
+    const renewalTotal = Math.round(Number(activePlan.price_usd || 0) * months * 100) / 100;
+    const built = buildPaymentPayload(payment, renewalTotal);
     if (built.error || !built.payload) {
       setFormErr(built.error || 'Datos de pago incompletos.');
       return;
     }
     const p = built.payload;
-    const amountUsd = p.amountUsd ?? 0;
+    const isExon = p.method === 'exonerated';
+    const amountUsd = isExon ? renewalTotal : (p.amountUsd ?? 0);
     if (amountUsd <= 0 && (p.amountBs ?? 0) <= 0) {
       setFormErr('Indica el monto pagado.');
       return;
@@ -195,6 +200,7 @@ export default function ClientePagosPage() {
     const { data: { user } } = await supabase.auth.getUser();
     const itemName = `Renovación ${activePlan.name} · ${store.name} · ${computedPeriod.label} · ${months} ciclo(s)`;
     const notesParts = [
+      isExon ? `Motivo exoneración: ${p.notes}` : null,
       p.reference ? `Ref: ${p.reference}` : null,
       p.bank ? `Banco/Plataforma: ${p.bank}` : null,
       p.amountBs != null ? `Bs ${p.amountBs.toLocaleString('es-VE')}` : null,
@@ -208,6 +214,10 @@ export default function ClientePagosPage() {
         item_name: itemName,
         amount_usd: amountUsd > 0 ? amountUsd : null,
         amount_bs: p.amountBs,
+      payment_method: p.method,
+      // La exoneración debe pasar por validación del admin (extiende el
+      // contrato al aprobarla), por eso queda 'pending' explícitamente.
+      ...(isExon ? { status: 'pending' } : {}),
       months_paid: months,
       notes: notesParts || null,
       payment_date: today,

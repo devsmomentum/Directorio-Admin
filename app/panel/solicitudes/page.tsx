@@ -14,6 +14,8 @@ const METHOD_LABEL: Record<string, string> = {
   transfer_usd: 'Transferencia USD',
   cash_usd: 'Efectivo USD',
   cash_bs: 'Efectivo Bs',
+  zelle: 'Zelle',
+  exonerated: 'Pago exonerado',
   bancamiga_bs: 'Bancamiga · Bs',
   bancamiga_usd: 'Bancamiga · USD',
   binance: 'Binance',
@@ -609,6 +611,7 @@ function PaymentDetailModal({
 }) {
   const store = storesById[row.store_id];
   const isPaymentPending = (row.status ?? 'pending') === 'pending';
+  const isExon = row.payment_method === 'exonerated';
   const linked = row.plan_request_id ? requestById[row.plan_request_id] : null;
   const total = Number(linked?.total_amount_usd ?? 0);
   const paid  = Number(linked?.paid_amount_usd ?? 0);
@@ -617,6 +620,19 @@ function PaymentDetailModal({
   return (
     <ModalShell title="Pago" subtitle={store?.name || '—'} idHint={row.id} busy={busy} onClose={onClose}>
       <div className="px-6 py-5 space-y-4 text-sm">
+        {isExon && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+            <p className="text-amber-300 text-[11px] font-semibold uppercase tracking-wider mb-1">
+              🤝 Pago exonerado — acordado con Mall Hub
+            </p>
+            <p className="text-white/70 text-[11px] leading-relaxed">
+              No se recibió dinero. El monto mostrado es el valor nominal del plan (referencia).
+              Al aprobar, el plan se activa <strong className="text-amber-200">sin costo</strong> y
+              esta transacción <strong className="text-amber-200">no se cuenta como ingreso</strong> en
+              Finanzas. Verifica el motivo antes de aprobar.
+            </p>
+          </div>
+        )}
         <DetailRow label="Concepto">
           <span className="text-white/80">{row.item_name}</span>
         </DetailRow>
@@ -675,8 +691,8 @@ function PaymentDetailModal({
             rejectReason={rejectReason}
             setRejectReason={setRejectReason}
             busy={busy}
-            approveLabel="Aprobar pago"
-            rejectLabel="Rechazar pago"
+            approveLabel={isExon ? 'Aprobar exoneración' : 'Aprobar pago'}
+            rejectLabel={isExon ? 'Rechazar exoneración' : 'Rechazar pago'}
             onApprove={onApprove}
             onReject={onReject}
           />

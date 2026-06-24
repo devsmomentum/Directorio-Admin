@@ -43,7 +43,9 @@ export function AbonoModal({ request, onClose, onSuccess }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
-    const built = buildPaymentPayload(payment);
+    // En exoneración el monto se fija al saldo pendiente (el backend lo fuerza
+    // igualmente); para los demás métodos es lo que reporta el cliente.
+    const built = buildPaymentPayload(payment, outstanding);
     if (built.error || !built.payload) {
       setErr(built.error || 'Datos de pago incompletos.');
       return;
@@ -59,6 +61,7 @@ export function AbonoModal({ request, onClose, onSuccess }: Props) {
       return;
     }
     setSubmitting(true);
+    const baseNotes = `Abono a solicitud ${request.plan_key}`;
     const { error } = await supabase.rpc('report_additional_payment_atomic', {
       p_request_id:        request.id,
       p_payment_method:    p.method,
@@ -67,7 +70,7 @@ export function AbonoModal({ request, onClose, onSuccess }: Props) {
       p_amount_bs:         p.amountBs,
       p_amount_usd:        p.amountUsd ?? 0,
       p_bcv_rate:          p.bcvRate,
-      p_notes:             `Abono a solicitud ${request.plan_key}`,
+      p_notes:             p.notes ? `${baseNotes} · Motivo exoneración: ${p.notes}` : baseNotes,
     });
     setSubmitting(false);
     if (error) { setErr(error.message); return; }

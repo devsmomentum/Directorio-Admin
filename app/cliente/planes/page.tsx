@@ -262,6 +262,7 @@ export default function ClientePlanesPage() {
     }
 
     setSubmitting(true);
+    const baseNotes = `Solicitud ${widgetPlan.name} · ${store.name} · ${months} ciclo(s)`;
     const { data, error } = await supabase.rpc('request_plan_atomic', {
       p_store_id:          store.id,
       p_plan_key:          widgetPlan.plan_key,
@@ -272,7 +273,7 @@ export default function ClientePlanesPage() {
       p_amount_bs:         p.amountBs,
       p_amount_usd:        p.amountUsd ?? totalUsd,
       p_bcv_rate:          p.bcvRate,
-      p_notes:             `Solicitud ${widgetPlan.name} · ${store.name} · ${months} ciclo(s)`,
+      p_notes:             p.notes ? `${baseNotes} · Motivo exoneración: ${p.notes}` : baseNotes,
     });
     setSubmitting(false);
 

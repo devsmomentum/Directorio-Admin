@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
-export type PaymentMethod = 'transfer_bs' | 'transfer_usd' | 'cash_usd' | 'cash_bs';
+export type PaymentMethod =
+  | 'transfer_bs'
+  | 'transfer_usd'
+  | 'cash_usd'
+  | 'cash_bs'
+  | 'zelle'
+  | 'exonerated';
 
 export type PaymentState = {
   method: PaymentMethod;
@@ -12,6 +18,8 @@ export type PaymentState = {
   amountBs: string;
   amountUsd: string;
   bcvRate: string;
+  // Motivo acordado con Mall Hub; obligatorio cuando method === 'exonerated'.
+  reason: string;
 };
 
 export const BANK_BS_OPTIONS = [
@@ -42,36 +50,77 @@ export const METHOD_OPTIONS: { key: PaymentMethod; label: string; sub: string }[
   { key: 'transfer_bs', label: 'Transferencia Bs', sub: 'Banco · tasa BCV' },
   { key: 'transfer_usd', label: 'Transferencia USD', sub: 'Bancamiga' },
   { key: 'cash_usd', label: 'Efectivo USD', sub: 'Dólares en efectivo' },
+  { key: 'zelle', label: 'Zelle', sub: 'Pago en USD · Zelle' },
+  { key: 'exonerated', label: 'Pago exonerado', sub: 'Acordado con Mall Hub' },
 ];
 
+// ── Helpers de método ──────────────────────────────────────────────────────────
+// Centralizamos qué campos exige cada método para que el form, el builder del
+// payload y el backend usen exactamente la misma noción.
+export const isExonerated = (m: PaymentMethod) => m === 'exonerated';
+const needsBankOf = (m: PaymentMethod) => m === 'transfer_bs' || m === 'transfer_usd';
+const needsReferenceOf = (m: PaymentMethod) => needsBankOf(m) || m === 'zelle';
+const needsBsOf = (m: PaymentMethod) => m === 'transfer_bs' || m === 'cash_bs';
+const needsUsdOf = (m: PaymentMethod) => m === 'transfer_usd' || m === 'cash_usd' || m === 'zelle';
+
 export function emptyPaymentState(): PaymentState {
-  return { method: 'transfer_bs', bank: BANK_BS_OPTIONS[0], reference: '', amountBs: '', amountUsd: '', bcvRate: '' };
+  return { method: 'transfer_bs', bank: BANK_BS_OPTIONS[0], reference: '', amountBs: '', amountUsd: '', bcvRate: '', reason: '' };
 }
+
+export type PaymentPayload = {
+  method: PaymentMethod;
+  bank: string | null;
+  reference: string | null;
+  amountBs: number | null;
+  amountUsd: number | null;
+  bcvRate: number | null;
+  // Texto a propagar a transactions.notes (motivo de exoneración u otra nota).
+  notes: string | null;
+};
 
 /**
  * Convierte el estado del form al payload que aceptan tanto la RPC
  * request_plan_atomic como un insert directo en transactions.
  * Devuelve { error } si hay validación incompleta, o { payload } válido.
+ *
+ * Para method === 'exonerated' no se piden montos ni referencias: solo el
+ * motivo acordado con Mall Hub. El monto en USD se fija al costo total esperado
+ * (expectedUsd) para que, al aprobar el admin, el plan se active igual que un
+ * pago real; el backend igualmente fuerza el total autoritativo.
  */
 export function buildPaymentPayload(s: PaymentState, expectedUsd?: number): {
   error?: string;
-  payload?: {
-    method: PaymentMethod;
-    bank: string | null;
-    reference: string | null;
-    amountBs: number | null;
-    amountUsd: number | null;
-    bcvRate: number | null;
-  };
+  payload?: PaymentPayload;
 } {
-  const needsTransfer = s.method === 'transfer_bs' || s.method === 'transfer_usd';
-  const needsBs = s.method === 'transfer_bs' || s.method === 'cash_bs';
-  const needsUsd = s.method === 'transfer_usd' || s.method === 'cash_usd';
-
-  if (needsTransfer) {
-    if (!s.reference.trim()) return { error: 'Indica el número de referencia.' };
-    if (!s.bank.trim()) return { error: 'Indica el banco emisor.' };
+  if (isExonerated(s.method)) {
+    if (!s.reason.trim()) {
+      return { error: 'Indica el motivo de la exoneración acordado con Mall Hub.' };
+    }
+    return {
+      payload: {
+        method: 'exonerated',
+        bank: null,
+        reference: null,
+        amountBs: null,
+        amountUsd: expectedUsd != null ? expectedUsd : null,
+        bcvRate: null,
+        notes: s.reason.trim(),
+      },
+    };
   }
+
+  const needsBank = needsBankOf(s.method);
+  const needsReference = needsReferenceOf(s.method);
+  const needsBs = needsBsOf(s.method);
+  const needsUsd = needsUsdOf(s.method);
+
+  if (needsReference && !s.reference.trim()) {
+    return { error: s.method === 'zelle' ? 'Indica el nº de confirmación de Zelle.' : 'Indica el número de referencia.' };
+  }
+  if (needsBank && !s.bank.trim()) {
+    return { error: 'Indica el banco emisor.' };
+  }
+
   let amountBsNum: number | null = null;
   let amountUsdNum: number | null = null;
   let bcvRateNum: number | null = null;
@@ -102,11 +151,13 @@ export function buildPaymentPayload(s: PaymentState, expectedUsd?: number): {
   return {
     payload: {
       method: s.method,
-      bank: needsTransfer ? s.bank.trim() : null,
-      reference: needsTransfer ? s.reference.trim() : null,
+      // Zelle no usa banco emisor; etiquetamos la plataforma como "Zelle".
+      bank: needsBank ? s.bank.trim() : (s.method === 'zelle' ? 'Zelle' : null),
+      reference: needsReference ? s.reference.trim() : null,
       amountBs: amountBsNum,
       amountUsd: amountUsdNum,
       bcvRate: bcvRateNum,
+      notes: null,
     },
   };
 }
@@ -121,26 +172,28 @@ export function PaymentFields({
   const s = value;
   const set = (patch: Partial<PaymentState>) => onChange({ ...s, ...patch });
 
-  // Al cambiar método, resetea el banco al primer item de la lista relevante.
+  // Al cambiar método, resetea el banco al primer item de la lista relevante y
+  // limpia los campos que no aplican para no enviar datos sucios.
   const switchMethod = (m: PaymentMethod) => {
     const banks = (m === 'transfer_usd') ? BANK_USD_OPTIONS : BANK_BS_OPTIONS;
     onChange({
       ...s,
       method: m,
       bank: banks[0],
-      // Limpia campos no aplicables a evitar enviar datos sucios
-      reference: (m === 'cash_usd' || m === 'cash_bs') ? '' : s.reference,
-      amountBs: (m === 'transfer_usd' || m === 'cash_usd') ? '' : s.amountBs,
-      amountUsd: (m === 'transfer_bs' || m === 'cash_bs') ? '' : s.amountUsd,
-      bcvRate: (m === 'transfer_usd' || m === 'cash_usd') ? '' : s.bcvRate,
+      reference: needsReferenceOf(m) ? s.reference : '',
+      amountBs: needsBsOf(m) ? s.amountBs : '',
+      amountUsd: needsUsdOf(m) ? s.amountUsd : '',
+      bcvRate: needsBsOf(m) ? s.bcvRate : '',
+      reason: m === 'exonerated' ? s.reason : '',
     });
   };
 
   const banks = s.method === 'transfer_usd' ? BANK_USD_OPTIONS : BANK_BS_OPTIONS;
 
-  const needsTransfer = s.method === 'transfer_bs' || s.method === 'transfer_usd';
-  const needsBs = s.method === 'transfer_bs' || s.method === 'cash_bs';
-  const needsUsd = s.method === 'transfer_usd' || s.method === 'cash_usd';
+  const needsBank = needsBankOf(s.method);
+  const needsBs = needsBsOf(s.method);
+  const needsUsd = needsUsdOf(s.method);
+  const isExon = isExonerated(s.method);
 
   // Tasa BCV oficial: vive en app_config, refrescada por la edge update-rate.
   // El usuario NO la edita; el backend la re-lee al validar para que sea
@@ -204,16 +257,21 @@ export function PaymentFields({
         <div className="grid grid-cols-2 gap-2">
           {METHOD_OPTIONS.map(m => {
             const active = s.method === m.key;
+            const exonOption = m.key === 'exonerated';
             return (
               <button
                 key={m.key} type="button" onClick={() => switchMethod(m.key)}
                 className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${active
-                    ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200'
+                    ? (exonOption
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                        : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200')
                     : 'bg-white/[0.02] border-white/10 text-white/60 hover:border-white/20'
                   }`}
               >
                 <p className="text-xs font-semibold">{m.label}</p>
-                <p className={`text-[10px] mt-0.5 ${active ? 'text-cyan-300/70' : 'text-white/30'}`}>
+                <p className={`text-[10px] mt-0.5 ${active
+                    ? (exonOption ? 'text-amber-300/70' : 'text-cyan-300/70')
+                    : 'text-white/30'}`}>
                   {m.sub}
                 </p>
               </button>
@@ -221,6 +279,32 @@ export function PaymentFields({
           })}
         </div>
       </div>
+
+      {isExon && (
+        <div className="space-y-3">
+          <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+            <p className="text-amber-300 text-[11px] font-semibold uppercase tracking-wider mb-1">
+              🤝 Pago exonerado
+            </p>
+            <p className="text-white/70 text-[11px] leading-relaxed">
+              Usa esta opción solo si Mall Hub <strong className="text-amber-200">acordó exonerar</strong> este
+              pago. No se cobra monto: al validarlo la administración, tu plan se activa sin costo.
+              Indica el motivo del acuerdo para que quede registrado.
+            </p>
+          </div>
+          <div>
+            <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+              Motivo del acuerdo <span className="text-amber-300/70">(requerido)</span>
+            </label>
+            <textarea
+              value={s.reason} onChange={(e) => set({ reason: e.target.value })}
+              rows={3}
+              className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500/50 resize-none"
+              placeholder="Ej: cortesía acordada con Mall Hub por convenio de lanzamiento."
+            />
+          </div>
+        </div>
+      )}
 
       {needsBs && (
         <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
@@ -235,7 +319,7 @@ export function PaymentFields({
         </div>
       )}
 
-      {needsTransfer && (
+      {needsBank && (
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
@@ -259,6 +343,20 @@ export function PaymentFields({
               placeholder="012345678901"
             />
           </div>
+        </div>
+      )}
+
+      {s.method === 'zelle' && (
+        <div>
+          <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+            Nº de confirmación Zelle
+          </label>
+          <input
+            type="text" required
+            value={s.reference} onChange={(e) => set({ reference: e.target.value })}
+            className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-cyan-500/50"
+            placeholder="Ej: 1234567890"
+          />
         </div>
       )}
 
@@ -308,7 +406,7 @@ export function PaymentFields({
               <span className="font-mono text-white/50">
                 {new Date(bcvUpdatedAt).toLocaleDateString('es-VE')}
               </span>
-              
+
             </p>
           )}
 
@@ -355,6 +453,8 @@ export function methodLabel(m?: string | null): string {
     case 'transfer_usd': return 'Transferencia USD';
     case 'cash_usd': return 'Efectivo USD';
     case 'cash_bs': return 'Efectivo Bs';
+    case 'zelle': return 'Zelle';
+    case 'exonerated': return 'Pago exonerado';
     case 'bancamiga_bs': return 'Bancamiga · Bs';
     case 'bancamiga_usd': return 'Bancamiga · USD';
     case 'binance': return 'Binance';
