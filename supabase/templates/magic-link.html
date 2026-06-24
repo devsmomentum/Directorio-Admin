@@ -12,33 +12,28 @@
       </style>
     <![endif]-->
     <style>
-      /* Algunos clientes (Apple Mail, iOS, Gmail-app) respetan <style>. Lo usamos
-         solo para detalles que no son críticos: el resto va inline para Outlook. */
-      @media (prefers-color-scheme: light) {
-        .force-dark { background:#050505 !important; color:#ffffff !important; }
-      }
       a { text-decoration: none; }
-      .btn:hover { background:#22d3ee !important; color:#020617 !important; }
+      .btn:hover { opacity: 0.88; }
       @media only screen and (max-width: 620px) {
         .container { width: 100% !important; }
         .px { padding-left: 20px !important; padding-right: 20px !important; }
         .hero-title { font-size: 22px !important; line-height: 28px !important; }
-        .tile-grid td { display:block !important; width:100% !important; padding:0 0 8px 0 !important; }
+        .tile-grid td { display: block !important; width: 100% !important; padding: 0 0 8px 0 !important; }
       }
     </style>
   </head>
   <body
-    class="force-dark"
-    style="margin:0; padding:0; background:#050505; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color:#ffffff;"
+    style="margin:0; padding:0; background:#0a0814; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; color:#ffffff;"
   >
-    <!-- Preheader (texto oculto que aparece como preview en la bandeja). -->
+    <!-- Preheader oculto (preview en bandeja de entrada) -->
     <div style="display:none; max-height:0; overflow:hidden; opacity:0; mso-hide:all;">
-      Activa tu cuenta de Mi Comercio y publica tu tienda en Mall Hub. Este enlace expira en 24 horas.
+      Activa tu cuenta en Mall Hub y empieza a gestionar tu tienda. Este enlace expira en 24 horas.
     </div>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#050505;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0a0814;">
       <tr>
         <td align="center" style="padding:32px 16px;">
+
           <!-- Container -->
           <table
             role="presentation"
@@ -47,11 +42,12 @@
             cellpadding="0"
             cellspacing="0"
             border="0"
-            style="width:600px; max-width:600px; background:#0A0A0A; border:1px solid rgba(255,255,255,0.08); border-radius:16px; overflow:hidden;"
+            style="width:600px; max-width:600px; background:#130f22; border:1px solid rgba(216,180,254,0.14); border-radius:16px; overflow:hidden;"
           >
-            <!-- Acento superior cyan -->
+
+            <!-- Barra superior de acento -->
             <tr>
-              <td style="height:3px; background:linear-gradient(90deg,#22d3ee 0%, #06b6d4 50%, #0ea5e9 100%); line-height:3px; font-size:0;">&nbsp;</td>
+              <td style="height:3px; background:linear-gradient(90deg,#44abe1 0%,#a733be 100%); line-height:3px; font-size:0;">&nbsp;</td>
             </tr>
 
             <!-- Header / brand -->
@@ -62,26 +58,24 @@
                     <td style="vertical-align:middle;">
                       <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                         <tr>
-                          <!-- "logo" tile cyan -->
+                          <!-- Logo tile -->
                           <td
-                            width="40"
-                            height="40"
-                            align="center"
-                            valign="middle"
-                            style="width:40px; height:40px; background:linear-gradient(135deg,#22d3ee 0%, #0ea5e9 100%); border-radius:10px; box-shadow:0 0 24px rgba(34,211,238,0.25);"
+                            width="38" height="38"
+                            align="center" valign="middle"
+                            style="width:38px; height:38px; background:linear-gradient(135deg,#44abe1 0%,#a733be 100%); border-radius:10px;"
                           >
-                            <span style="font-family: 'SFMono-Regular', Menlo, Consolas, monospace; font-size:18px; font-weight:900; color:#020617; line-height:40px;">M</span>
+                            <span style="font-size:17px; font-weight:900; color:#ffffff; line-height:38px; font-family:Arial,sans-serif;">M</span>
                           </td>
                           <td style="width:12px;">&nbsp;</td>
                           <td valign="middle">
-                            <div style="font-size:15px; font-weight:900; letter-spacing:2px; color:#67e8f9; line-height:1;">MI&nbsp;COMERCIO</div>
-                            <div style="margin-top:4px; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:10px; letter-spacing:2.4px; text-transform:uppercase; color:rgba(255,255,255,0.35); line-height:1;">Directorio digital</div>
+                            <div style="font-size:14px; font-weight:800; letter-spacing:2.5px; color:#c8b8f0; line-height:1;">MALL HUB</div>
+                            <div style="margin-top:3px; font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:rgba(200,184,240,0.45); line-height:1;">Plataforma de comerciantes</div>
                           </td>
                         </tr>
                       </table>
                     </td>
                     <td align="right" style="vertical-align:middle;">
-                      <span style="display:inline-block; padding:4px 10px; border-radius:999px; background:rgba(34,211,238,0.10); color:#67e8f9; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:10px; letter-spacing:1.6px; text-transform:uppercase; font-weight:700;">Acceso seguro</span>
+                      <span style="display:inline-block; padding:4px 10px; border-radius:999px; background:rgba(167,51,190,0.15); border:1px solid rgba(167,51,190,0.35); color:#d580f0; font-size:10px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700;">Acceso seguro</span>
                     </td>
                   </tr>
                 </table>
@@ -91,12 +85,12 @@
             <!-- Hero -->
             <tr>
               <td class="px" style="padding:24px 32px 8px 32px;">
-                <p style="margin:0 0 8px 0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:10px; letter-spacing:2.4px; text-transform:uppercase; color:rgba(255,255,255,0.35);">Activación de cuenta</p>
+                <p style="margin:0 0 6px 0; font-size:10px; letter-spacing:2px; text-transform:uppercase; color:rgba(200,184,240,0.40);">Activación de cuenta</p>
                 <h1 class="hero-title" style="margin:0; font-size:26px; line-height:32px; font-weight:800; color:#ffffff; letter-spacing:-0.01em;">
-                  Tu acceso a <span style="color:#67e8f9;">Mall Hub</span> está listo
+                  Tu acceso a Mall Hub está listo
                 </h1>
-                <p style="margin:16px 0 0 0; font-size:14px; line-height:22px; color:rgba(255,255,255,0.65);">
-                  Hola{{ if .Data.full_name }} <strong style="color:#ffffff; font-weight:600;">{{ .Data.full_name }}</strong>{{ end }}, hemos creado tu cuenta de comerciante en el directorio digital del centro comercial. Confirma tu correo para definir tu contraseña y empezar a gestionar tu tienda.
+                <p style="margin:14px 0 0 0; font-size:14px; line-height:22px; color:rgba(200,184,240,0.75);">
+                  Hola{{ if .Data.full_name }} <strong style="color:#ffffff; font-weight:600;">{{ .Data.full_name }}</strong>{{ end }}, hemos creado tu cuenta de comerciante en Mall Hub. Confirma tu correo para definir tu contraseña y empezar a gestionar tu tienda.
                 </p>
               </td>
             </tr>
@@ -110,25 +104,25 @@
                   cellpadding="0"
                   cellspacing="0"
                   border="0"
-                  style="background:#000000; border:1px solid rgba(34,211,238,0.20); border-radius:14px;"
+                  style="background:#1e1635; border:1px solid rgba(167,51,190,0.25); border-radius:14px;"
                 >
                   <tr>
                     <td style="padding:22px 22px 18px 22px;">
-                      <p style="margin:0 0 4px 0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:10px; letter-spacing:2.4px; text-transform:uppercase; color:rgba(103,232,249,0.80);">Enlace de acceso</p>
-                      <p style="margin:0 0 16px 0; font-size:13px; line-height:20px; color:rgba(255,255,255,0.55);">
+                      <p style="margin:0 0 4px 0; font-size:10px; letter-spacing:2px; text-transform:uppercase; color:rgba(200,184,240,0.55);">Enlace de acceso</p>
+                      <p style="margin:0 0 16px 0; font-size:13px; line-height:20px; color:rgba(200,184,240,0.60);">
                         Pulsa el botón para iniciar sesión. El enlace es de un solo uso y expira en
-                        <strong style="color:#ffffff; font-weight:600;">24 horas</strong>.
+                        <strong style="color:#ffffff;">24 horas</strong>.
                       </p>
 
                       <!-- Botón bulletproof (compatible con Outlook) -->
                       <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                         <tr>
-                          <td align="center" bgcolor="#22d3ee" style="border-radius:10px; background:#22d3ee;">
+                          <td align="center" bgcolor="#a733be" style="border-radius:10px; background:#a733be;">
                             <a
                               href="{{ .ConfirmationURL }}"
                               target="_blank"
                               class="btn"
-                              style="display:inline-block; padding:13px 26px; font-size:14px; font-weight:700; color:#020617; background:#22d3ee; border-radius:10px; letter-spacing:0.02em; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;"
+                              style="display:inline-block; padding:13px 28px; font-size:14px; font-weight:700; color:#ffffff; background:#a733be; border-radius:10px; text-decoration:none; letter-spacing:0.02em; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"
                             >
                               Activar mi cuenta →
                             </a>
@@ -136,11 +130,11 @@
                         </tr>
                       </table>
 
-                      <p style="margin:16px 0 0 0; font-size:11px; line-height:18px; color:rgba(255,255,255,0.40);">
+                      <p style="margin:14px 0 0 0; font-size:11px; line-height:17px; color:rgba(200,184,240,0.35);">
                         ¿No funciona el botón? Copia y pega este enlace en tu navegador:
                       </p>
-                      <p style="margin:6px 0 0 0; word-break:break-all;">
-                        <a href="{{ .ConfirmationURL }}" style="color:#67e8f9; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:11px; line-height:16px;">{{ .ConfirmationURL }}</a>
+                      <p style="margin:5px 0 0 0; word-break:break-all;">
+                        <a href="{{ .ConfirmationURL }}" style="color:#7eb8e8; font-size:11px; line-height:16px;">{{ .ConfirmationURL }}</a>
                       </p>
                     </td>
                   </tr>
@@ -148,28 +142,30 @@
               </td>
             </tr>
 
-            <!-- Info tiles (look estilo dashboard) -->
+            <!-- Info tiles -->
             <tr>
               <td class="px" style="padding:20px 32px 8px 32px;">
                 <table role="presentation" class="tile-grid" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td width="50%" style="padding-right:6px; vertical-align:top;">
-                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0A0A0A; border:1px solid rgba(255,255,255,0.06); border-radius:10px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                        style="background:#1a1432; border:1px solid rgba(216,180,254,0.08); border-radius:10px;">
                         <tr>
-                          <td style="padding:14px 14px;">
-                            <p style="margin:0 0 6px 0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:9px; letter-spacing:2px; text-transform:uppercase; color:rgba(255,255,255,0.30);">Cuenta</p>
-                            <p style="margin:0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:13px; line-height:18px; color:#ffffff; word-break:break-all;">{{ .Email }}</p>
+                          <td style="padding:13px 14px;">
+                            <p style="margin:0 0 5px 0; font-size:9px; letter-spacing:2px; text-transform:uppercase; color:rgba(200,184,240,0.35);">Cuenta</p>
+                            <p style="margin:0; font-size:13px; line-height:18px; color:#ffffff; word-break:break-all;">{{ .Email }}</p>
                           </td>
                         </tr>
                       </table>
                     </td>
                     <td width="50%" style="padding-left:6px; vertical-align:top;">
-                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0A0A0A; border:1px solid rgba(255,255,255,0.06); border-radius:10px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                        style="background:#1a1432; border:1px solid rgba(216,180,254,0.08); border-radius:10px;">
                         <tr>
-                          <td style="padding:14px 14px;">
-                            <p style="margin:0 0 6px 0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:9px; letter-spacing:2px; text-transform:uppercase; color:rgba(255,255,255,0.30);">Validez</p>
+                          <td style="padding:13px 14px;">
+                            <p style="margin:0 0 5px 0; font-size:9px; letter-spacing:2px; text-transform:uppercase; color:rgba(200,184,240,0.35);">Validez</p>
                             <p style="margin:0; font-size:13px; line-height:18px; color:#ffffff;">
-                              <span style="color:#fde68a;">●</span> 24 horas · un solo uso
+                              <span style="color:#c084fc;">●</span> 24 horas · un solo uso
                             </p>
                           </td>
                         </tr>
@@ -182,36 +178,36 @@
 
             <!-- Pasos -->
             <tr>
-              <td class="px" style="padding:24px 32px 8px 32px;">
-                <p style="margin:0 0 12px 0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:10px; letter-spacing:2.4px; text-transform:uppercase; color:rgba(255,255,255,0.30);">Qué sigue</p>
+              <td class="px" style="padding:22px 32px 8px 32px;">
+                <p style="margin:0 0 12px 0; font-size:10px; letter-spacing:2px; text-transform:uppercase; color:rgba(200,184,240,0.35);">Qué sigue</p>
 
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
-                    <td width="28" valign="top" style="padding-top:2px;">
-                      <span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; background:rgba(34,211,238,0.15); color:#67e8f9; border-radius:999px; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:11px; font-weight:700;">1</span>
+                    <td width="28" valign="top" style="padding-top:1px;">
+                      <span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; background:rgba(167,51,190,0.20); color:#d580f0; border-radius:999px; font-size:11px; font-weight:700;">1</span>
                     </td>
                     <td valign="top" style="padding-bottom:10px;">
-                      <p style="margin:0; font-size:13px; line-height:20px; color:rgba(255,255,255,0.80);">
+                      <p style="margin:0; font-size:13px; line-height:20px; color:rgba(200,184,240,0.80);">
                         <strong style="color:#ffffff; font-weight:600;">Activa tu cuenta</strong> con el botón de arriba.
                       </p>
                     </td>
                   </tr>
                   <tr>
-                    <td width="28" valign="top" style="padding-top:2px;">
-                      <span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; background:rgba(34,211,238,0.15); color:#67e8f9; border-radius:999px; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:11px; font-weight:700;">2</span>
+                    <td width="28" valign="top" style="padding-top:1px;">
+                      <span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; background:rgba(167,51,190,0.20); color:#d580f0; border-radius:999px; font-size:11px; font-weight:700;">2</span>
                     </td>
                     <td valign="top" style="padding-bottom:10px;">
-                      <p style="margin:0; font-size:13px; line-height:20px; color:rgba(255,255,255,0.80);">
+                      <p style="margin:0; font-size:13px; line-height:20px; color:rgba(200,184,240,0.80);">
                         <strong style="color:#ffffff; font-weight:600;">Define tu contraseña</strong> y completa los datos de tu perfil.
                       </p>
                     </td>
                   </tr>
                   <tr>
-                    <td width="28" valign="top" style="padding-top:2px;">
-                      <span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; background:rgba(34,211,238,0.15); color:#67e8f9; border-radius:999px; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:11px; font-weight:700;">3</span>
+                    <td width="28" valign="top" style="padding-top:1px;">
+                      <span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; background:rgba(167,51,190,0.20); color:#d580f0; border-radius:999px; font-size:11px; font-weight:700;">3</span>
                     </td>
                     <td valign="top">
-                      <p style="margin:0; font-size:13px; line-height:20px; color:rgba(255,255,255,0.80);">
+                      <p style="margin:0; font-size:13px; line-height:20px; color:rgba(200,184,240,0.80);">
                         <strong style="color:#ffffff; font-weight:600;">Gestiona tu tienda</strong>: planes, promociones, pagos y métricas.
                       </p>
                     </td>
@@ -222,13 +218,14 @@
 
             <!-- Aviso seguridad -->
             <tr>
-              <td class="px" style="padding:20px 32px 24px 32px;">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:rgba(251,191,36,0.06); border:1px solid rgba(251,191,36,0.20); border-radius:10px;">
+              <td class="px" style="padding:18px 32px 24px 32px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                  style="background:rgba(251,191,36,0.05); border:1px solid rgba(251,191,36,0.18); border-radius:10px;">
                   <tr>
                     <td style="padding:12px 14px;">
                       <p style="margin:0; font-size:12px; line-height:18px; color:#fde68a;">
                         <strong style="color:#fcd34d;">¿No solicitaste este acceso?</strong>
-                        <span style="color:rgba(253,230,138,0.85);">Puedes ignorar este correo. Tu cuenta no se activará si no abres el enlace.</span>
+                        <span style="color:rgba(253,230,138,0.85);"> Puedes ignorar este correo. Tu cuenta no se activará si no abres el enlace.</span>
                       </p>
                     </td>
                   </tr>
@@ -239,7 +236,7 @@
             <!-- Divider -->
             <tr>
               <td style="padding:0 32px;">
-                <div style="height:1px; background:rgba(255,255,255,0.06); line-height:1px; font-size:0;">&nbsp;</div>
+                <div style="height:1px; background:rgba(216,180,254,0.08); line-height:1px; font-size:0;">&nbsp;</div>
               </td>
             </tr>
 
@@ -249,28 +246,30 @@
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td>
-                      <p style="margin:0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:10px; letter-spacing:1.6px; text-transform:uppercase; color:rgba(255,255,255,0.35);">Mall Hub</p>
-                      <p style="margin:4px 0 0 0; font-size:11px; line-height:16px; color:rgba(255,255,255,0.35);">Directorio digital · Plataforma de comerciantes</p>
+                      <p style="margin:0; font-size:11px; letter-spacing:1.8px; text-transform:uppercase; font-weight:700; color:rgba(200,184,240,0.40);">Mall Hub</p>
+                      <p style="margin:3px 0 0 0; font-size:11px; line-height:16px; color:rgba(200,184,240,0.30);">Plataforma de comerciantes</p>
                     </td>
                     <td align="right">
-                      <p style="margin:0; font-family:'SFMono-Regular', Menlo, Consolas, monospace; font-size:10px; letter-spacing:1.6px; text-transform:uppercase; color:rgba(255,255,255,0.25);">© 2026</p>
+                      <p style="margin:0; font-size:10px; letter-spacing:1px; color:rgba(200,184,240,0.25);">© 2026</p>
                     </td>
                   </tr>
                 </table>
               </td>
             </tr>
+
           </table>
 
-          <!-- Pie minúsculo -->
+          <!-- Pie externo -->
           <table role="presentation" width="600" class="container" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px;">
             <tr>
               <td align="center" style="padding:14px 16px 0 16px;">
-                <p style="margin:0; font-size:10px; line-height:16px; color:rgba(255,255,255,0.25);">
-                  Este correo fue enviado a <span style="color:rgba(255,255,255,0.45);">{{ .Email }}</span> porque un administrador te invitó al panel.
+                <p style="margin:0; font-size:10px; line-height:16px; color:rgba(200,184,240,0.25);">
+                  Este correo fue enviado a <span style="color:rgba(200,184,240,0.45);">{{ .Email }}</span> porque un administrador te invitó al panel.
                 </p>
               </td>
             </tr>
           </table>
+
         </td>
       </tr>
     </table>
