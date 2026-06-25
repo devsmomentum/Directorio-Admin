@@ -12,6 +12,7 @@ import K2CampaignPreview from '../../components/K2CampaignPreview';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS, FLASH_COUPON_PLANS as FLASH_PLANS } from '../../../lib/plans';
 import { toast } from '../../components/toast';
 import { confirmDialog as confirmModal } from '../../components/confirm-dialog';
+import { OFFER_TYPES, OfferType, buildOffer, validateOffer, couponBadge } from '../../../lib/coupon-offers';
 
 const APPROVAL_CHIP: Record<string, { label: string; cls: string }> = {
   // 'draft' = guardada sin plan: inactiva y FUERA de revisión. Pasa a 'pending'
@@ -86,6 +87,13 @@ export default function ClientePromocionesPage() {
   const [cCategory, setCCategory] = useState('');
   const [cDiscount, setCDiscount] = useState<string>('');
   const [cStock, setCStock] = useState<string>('');
+  // Tipo de promoción + inputs específicos (además del % de descuento).
+  const [cOfferType, setCOfferType] = useState<OfferType>('percentage');
+  const [cBuyQty, setCBuyQty] = useState<string>('2');   // nxm
+  const [cPayQty, setCPayQty] = useState<string>('1');   // nxm
+  const [cFixedPrice, setCFixedPrice] = useState<string>(''); // fixed_price
+  const [cGiftText, setCGiftText] = useState<string>(''); // gift
+  const [cFreeText, setCFreeText] = useState<string>(''); // text
   const [cImageFile, setCImageFile] = useState<File | null>(null);
   const [cImageUrl, setCImageUrl] = useState('');
   const [cStartDate, setCStartDate] = useState(new Date().toISOString().split('T')[0]);
@@ -256,6 +264,8 @@ export default function ClientePromocionesPage() {
     setCEditingId(null);
     setCTitle(''); setCCategory('');
     setCDiscount(''); setCStock('');
+    setCOfferType('percentage');
+    setCBuyQty('2'); setCPayQty('1'); setCFixedPrice(''); setCGiftText(''); setCFreeText('');
     setCImageFile(null); setCImageUrl('');
     setCStartDate(today); setCEndDate('');
   };
@@ -347,6 +357,15 @@ export default function ClientePromocionesPage() {
     setCCategory(c.category || '');
     setCDiscount(c.discount_percent != null ? String(c.discount_percent) : '');
     setCStock(c.amount_available != null ? String(c.amount_available) : '');
+    // Reconstruye el tipo de promo y sus inputs desde lo persistido.
+    const t = (c.offer_type || 'percentage') as OfferType;
+    setCOfferType(t);
+    const v = c.offer_value || {};
+    setCBuyQty(typeof v.buy === 'number' ? String(v.buy) : '2');
+    setCPayQty(typeof v.pay === 'number' ? String(v.pay) : '1');
+    setCFixedPrice(typeof v.price === 'number' ? String(v.price) : '');
+    setCGiftText(t === 'gift' ? (typeof v.item === 'string' ? v.item : (c.offer_label || '')) : '');
+    setCFreeText(t === 'text' ? (c.offer_label || '') : '');
     setCImageFile(null);
     setCImageUrl(c.image_url || '');
     setCStartDate((c.start_date || today).split('T')[0]);
@@ -411,11 +430,17 @@ export default function ClientePromocionesPage() {
 
       return;
     }
-    const discountNum = parseFloat(cDiscount);
-    if (!cDiscount || isNaN(discountNum) || discountNum <= 0 || discountNum > 100) {
-      showError('Ingresa un descuento entre 1 y 100%.');
-      return;
-    }
+    const offerInputs = {
+      discountPercent: parseFloat(cDiscount) || 0,
+      buyQty: parseInt(cBuyQty, 10) || 0,
+      payQty: parseInt(cPayQty, 10) || 0,
+      fixedPrice: parseFloat(cFixedPrice) || 0,
+      giftText: cGiftText,
+      freeText: cFreeText,
+    };
+    const offerErr = validateOffer(cOfferType, offerInputs);
+    if (offerErr) { showError(offerErr); return; }
+    const offer = buildOffer(cOfferType, offerInputs);
     const stockNum = parseInt(cStock, 10);
     if (!cStock || isNaN(stockNum) || stockNum <= 0) {
       showError('Ingresa un stock mayor a 0.');
@@ -478,7 +503,8 @@ export default function ClientePromocionesPage() {
         const { error } = await supabase.from('coupons')
           .update({
             title: cTitle, plan_type: effectivePlanType, category: cCategory,
-            discount_percent: discountNum, amount_available: stockNum,
+            offer_type: cOfferType, offer_label: offer.offer_label, offer_value: offer.offer_value,
+            discount_percent: offer.discount_percent, amount_available: stockNum,
             image_url: finalImageUrl || null,
             start_date: cStartDate ? new Date(cStartDate).toISOString() : null,
             end_date: cEndDate ? new Date(cEndDate).toISOString() : null,
@@ -500,7 +526,8 @@ export default function ClientePromocionesPage() {
         const { error } = await supabase.from('coupons').insert([{
           store_id: store.id,
           title: cTitle, plan_type: effectivePlanType, category: cCategory,
-          discount_percent: discountNum, amount_available: stockNum,
+          offer_type: cOfferType, offer_label: offer.offer_label, offer_value: offer.offer_value,
+          discount_percent: offer.discount_percent, amount_available: stockNum,
           image_url: finalImageUrl || null,
           start_date: cStartDate ? new Date(cStartDate).toISOString() : null,
           end_date: cEndDate ? new Date(cEndDate).toISOString() : null,
@@ -1292,18 +1319,85 @@ export default function ClientePromocionesPage() {
                   className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descuento (%)</label>
-                  <div className="relative">
-                    <input type="number" min={1} max={100} step={1} required
-                      value={cDiscount}
-                      onChange={(e) => setCDiscount(e.target.value)}
-                      placeholder="0"
-                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg pl-3 pr-8 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-sm pointer-events-none">%</span>
-                  </div>
+              {/* Tipo de promoción */}
+              <div>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tipo de promoción</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {OFFER_TYPES.map(ot => (
+                    <button
+                      key={ot.key}
+                      type="button"
+                      onClick={() => setCOfferType(ot.key)}
+                      className={`px-2.5 py-2 rounded-lg text-xs font-medium border transition-colors text-left ${
+                        cOfferType === ot.key
+                          ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'
+                          : 'bg-[#0A0A0A] text-white/50 border-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      {ot.label}
+                    </button>
+                  ))}
                 </div>
+                <p className="text-[10px] text-white/30 mt-1.5">
+                  {OFFER_TYPES.find(o => o.key === cOfferType)?.hint}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {/* Input específico del tipo de promo (columna izquierda) */}
+                {cOfferType === 'percentage' && (
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descuento (%)</label>
+                    <div className="relative">
+                      <input type="number" min={1} max={100} step={1}
+                        value={cDiscount}
+                        onChange={(e) => setCDiscount(e.target.value)}
+                        placeholder="0"
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg pl-3 pr-8 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-sm pointer-events-none">%</span>
+                    </div>
+                  </div>
+                )}
+                {cOfferType === 'nxm' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Lleva</label>
+                      <input type="number" min={2} value={cBuyQty}
+                        onChange={(e) => setCBuyQty(e.target.value)} placeholder="2"
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Paga</label>
+                      <input type="number" min={1} value={cPayQty}
+                        onChange={(e) => setCPayQty(e.target.value)} placeholder="1"
+                        className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                    </div>
+                  </div>
+                )}
+                {cOfferType === 'fixed_price' && (
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Precio fijo ($)</label>
+                    <input type="number" min={0} step="0.01" value={cFixedPrice}
+                      onChange={(e) => setCFixedPrice(e.target.value)} placeholder="9.99"
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                  </div>
+                )}
+                {cOfferType === 'gift' && (
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Regalo / obsequio</label>
+                    <input type="text" value={cGiftText}
+                      onChange={(e) => setCGiftText(e.target.value)} placeholder="Ej: Postre gratis"
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                  </div>
+                )}
+                {cOfferType === 'text' && (
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Texto de la promo</label>
+                    <input type="text" value={cFreeText}
+                      onChange={(e) => setCFreeText(e.target.value)} placeholder="Ej: Envío gratis"
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
+                  </div>
+                )}
                 <div>
                   <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Stock disponible</label>
                   <input type="number" min={1} step={1} required
@@ -2374,7 +2468,7 @@ function CouponCard({ c, onEdit, onDelete, today, redeemedCount }: { c: any; onE
           )}
         </div>
         <p className="text-[11px] text-emerald-300 font-mono font-semibold">
-          {Number(c.discount_percent ?? 0)}% OFF · vence {c.end_date?.split('T')[0] || '—'}
+          {couponBadge(c)} · vence {c.end_date?.split('T')[0] || '—'}
         </p>
         <p className="text-[10px] text-white/30 font-mono break-all">{c.code}</p>
         <div className="grid grid-cols-2 gap-2 pt-2 pb-1 border-t border-white/5 text-[11px] font-mono">

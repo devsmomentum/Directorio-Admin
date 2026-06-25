@@ -9,6 +9,7 @@ import Pagination, { usePagination } from '../../components/Pagination';
 import { PLAN_LABELS, PLAN_BADGE as PLAN_COLORS } from '../../../lib/plans';
 import { toast } from '../../components/toast';
 import { confirmDialog } from '../../components/confirm-dialog';
+import { OFFER_TYPES, OfferType, buildOffer, couponBadge } from '../../../lib/coupon-offers';
 
 // Solo se emiten cupones bajo el plan Cupones Flash (diario o semanal).
 // Los planes base ya no admiten cupones — ver migración 018.
@@ -23,6 +24,8 @@ const FLASH_COUPON_BRAND_LIMITS: Record<string, { max: number; windowDays: numbe
   FLASH_COUPON_DIARIO:  { max: 10, windowDays: 1, label: 'día' },
   FLASH_COUPON_SEMANAL: { max: 30, windowDays: 5, label: 'semana (5 días)' },
 };
+
+// Tipos de promoción compartidos con el portal del cliente. Ver lib/coupon-offers.
 
 interface Store {
   id: string;
@@ -49,6 +52,9 @@ interface Coupon {
   campaign_id: string;
   is_active: boolean;
   last_shown_at: string | null;
+  offer_type: OfferType | null;
+  offer_label: string | null;
+  offer_value: Record<string, unknown> | null;
 }
 
 export default function CuponsAdminPage() {
@@ -70,9 +76,17 @@ export default function CuponsAdminPage() {
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [couponTitle, setCouponTitle] = useState('');
   const [amountAvailable, setAmountAvailable] = useState<number>(0);
-  const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
+
+  // Tipo de promoción + sus inputs específicos.
+  const [offerType, setOfferType] = useState<OfferType>('percentage');
+  const [discountPercent, setDiscountPercent] = useState<number>(0); // percentage
+  const [buyQty, setBuyQty] = useState<number>(2);                   // nxm
+  const [payQty, setPayQty] = useState<number>(1);                   // nxm
+  const [fixedPrice, setFixedPrice] = useState<number>(0);           // fixed_price
+  const [giftText, setGiftText] = useState<string>('');              // gift
+  const [freeText, setFreeText] = useState<string>('');              // text
 
   // New Schema fields
   const [planType, setPlanType] = useState<string>('');
@@ -110,7 +124,13 @@ export default function CuponsAdminPage() {
     setStoreDropdownOpen(false);
     setCouponTitle('');
     setAmountAvailable(0);
+    setOfferType('percentage');
     setDiscountPercent(0);
+    setBuyQty(2);
+    setPayQty(1);
+    setFixedPrice(0);
+    setGiftText('');
+    setFreeText('');
     setImageFile(null);
     setImagePreview('');
     setPlanType('');
@@ -157,7 +177,16 @@ export default function CuponsAdminPage() {
     setStoreSearch(coupon.stores?.name || '');
     setCouponTitle(coupon.title || '');
     setAmountAvailable(coupon.amount_available || 0);
+    // Reconstruye el tipo de promo y sus inputs desde lo persistido.
+    const t = (coupon.offer_type || 'percentage') as OfferType;
+    setOfferType(t);
     setDiscountPercent(coupon.discount_percent || 0);
+    const v = coupon.offer_value || {};
+    setBuyQty(typeof v.buy === 'number' ? v.buy : 2);
+    setPayQty(typeof v.pay === 'number' ? v.pay : 1);
+    setFixedPrice(typeof v.price === 'number' ? v.price : 0);
+    setGiftText(t === 'gift' ? (typeof v.item === 'string' ? v.item : (coupon.offer_label || '')) : '');
+    setFreeText(t === 'text' ? (coupon.offer_label || '') : '');
     setImagePreview(coupon.image_url || '');
     setImageFile(null);
     // El plan_type del cupón se respeta tal cual (sea base o addon flash).
@@ -217,6 +246,23 @@ export default function CuponsAdminPage() {
     if (!selectedStoreId) { toast.error('Debes seleccionar una tienda.'); return; }
     if (!endDate) { toast.error('La fecha de vencimiento es requerida por el esquema.'); return; }
     if (!planType) { toast.error('Debes seleccionar el plan del cupón.'); return; }
+
+    // Validación según el tipo de promoción seleccionado.
+    if (offerType === 'percentage' && (discountPercent <= 0 || discountPercent > 100)) {
+      toast.error('El descuento debe estar entre 1 y 100%.'); return;
+    }
+    if (offerType === 'nxm' && (buyQty < 2 || payQty < 1 || payQty >= buyQty)) {
+      toast.error('En NxM, "lleva" debe ser mayor que "paga" (ej. 2x1, 3x2).'); return;
+    }
+    if (offerType === 'fixed_price' && fixedPrice <= 0) {
+      toast.error('Ingresa un precio fijo válido.'); return;
+    }
+    if (offerType === 'gift' && !giftText.trim()) {
+      toast.error('Describe el regalo/obsequio.'); return;
+    }
+    if (offerType === 'text' && !freeText.trim()) {
+      toast.error('Ingresa el texto de la promoción.'); return;
+    }
 
     // Solo se aceptan cupones bajo el plan Cupones Flash vigente de la tienda.
     if (!FLASH_COUPON_PLANS.has(planType) || !planOptionsForStore.includes(planType)) {
@@ -279,12 +325,20 @@ export default function CuponsAdminPage() {
         publicUrl = publicUrlData.publicUrl;
       }
 
+      const offer = buildOffer(offerType, {
+        discountPercent, buyQty, payQty, fixedPrice, giftText, freeText,
+      });
+
       const couponData: any = {
         store_id: selectedStoreId || null,
         campaign_id: campaignId || null,
         title: couponTitle,
         amount_available: amountAvailable,
-        discount_percent: discountPercent,
+        offer_type: offerType,
+        offer_label: offer.offer_label,
+        offer_value: offer.offer_value,
+        // Se conserva por retrocompatibilidad con la app Flutter en producción.
+        discount_percent: offer.discount_percent,
         plan_type: planType,
         category: category,
         start_date: new Date(startDate).toISOString(),
@@ -601,7 +655,104 @@ export default function CuponsAdminPage() {
                 />
               </div>
 
+              {/* Tipo de promoción */}
+              <div>
+                <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Tipo de promoción</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {OFFER_TYPES.map(ot => (
+                    <button
+                      key={ot.key}
+                      type="button"
+                      onClick={() => setOfferType(ot.key)}
+                      className={`px-2.5 py-2 rounded-lg text-xs font-medium border transition-colors text-left ${
+                        offerType === ot.key
+                          ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'
+                          : 'bg-[#0A0A0A] text-white/50 border-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      {ot.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-white/30 mt-1.5">
+                  {OFFER_TYPES.find(o => o.key === offerType)?.hint}
+                </p>
+              </div>
 
+              {/* Inputs dinámicos según el tipo */}
+              {offerType === 'percentage' && (
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Descuento (%)</label>
+                  <input
+                    type="number" min={1} max={100}
+                    value={discountPercent === 0 ? '' : discountPercent}
+                    onChange={e => setDiscountPercent(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    placeholder="20"
+                  />
+                </div>
+              )}
+              {offerType === 'nxm' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Lleva (N)</label>
+                    <input
+                      type="number" min={2}
+                      value={buyQty === 0 ? '' : buyQty}
+                      onChange={e => setBuyQty(parseInt(e.target.value) || 0)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                      placeholder="2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Paga (M)</label>
+                    <input
+                      type="number" min={1}
+                      value={payQty === 0 ? '' : payQty}
+                      onChange={e => setPayQty(parseInt(e.target.value) || 0)}
+                      className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                      placeholder="1"
+                    />
+                  </div>
+                  <p className="col-span-2 text-[10px] text-white/30">Etiqueta resultante: <span className="text-cyan-400 font-mono">{buyQty}x{payQty}</span></p>
+                </div>
+              )}
+              {offerType === 'fixed_price' && (
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Precio fijo ($)</label>
+                  <input
+                    type="number" min={0} step="0.01"
+                    value={fixedPrice === 0 ? '' : fixedPrice}
+                    onChange={e => setFixedPrice(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    placeholder="9.99"
+                  />
+                </div>
+              )}
+              {offerType === 'gift' && (
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Regalo / obsequio</label>
+                  <input
+                    type="text"
+                    value={giftText}
+                    onChange={e => setGiftText(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    placeholder="Ej: Postre gratis"
+                  />
+                </div>
+              )}
+              {offerType === 'text' && (
+                <div>
+                  <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">Texto de la promoción</label>
+                  <input
+                    type="text"
+                    value={freeText}
+                    onChange={e => setFreeText(e.target.value)}
+                    className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500/50 transition-colors"
+                    placeholder="Ej: Envío gratis"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -753,8 +904,8 @@ export default function CuponsAdminPage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-white/40">Descuento</span>
-                      <span className="text-cyan-400 font-medium">{coupon.discount_percent ?? 0}% OFF</span>
+                      <span className="text-white/40">Promoción</span>
+                      <span className="text-cyan-400 font-medium">{couponBadge(coupon)}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-white/40">Vigencia</span>

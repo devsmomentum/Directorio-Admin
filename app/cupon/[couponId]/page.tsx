@@ -21,6 +21,8 @@ type CouponView = {
   title: string | null;
   image_url: string | null;
   discount_percent: number | null;
+  offer_type: string | null;
+  offer_label: string | null;
   amount_available: number;
   end_date: string;
   plan_type: string;
@@ -75,7 +77,7 @@ export default function CapturaCuponPage({
       const { data, error } = await supabase
         .from('coupons')
         .select(
-          'id, title, image_url, discount_percent, amount_available, end_date, plan_type, is_active, approval_status, stores(name)',
+          'id, title, image_url, discount_percent, offer_type, offer_label, amount_available, end_date, plan_type, is_active, approval_status, stores(name)',
         )
         .eq('id', couponId)
         .maybeSingle();
@@ -120,6 +122,9 @@ export default function CapturaCuponPage({
   }, [couponId]);
 
   const discountLabel = useMemo(() => {
+    // Contrato unificado: offer_label si existe; si no y hay %, "X% OFF"; si no, nada.
+    const l = coupon?.offer_label?.trim();
+    if (l) return l;
     const d = Number(coupon?.discount_percent ?? 0);
     return d > 0 ? `${d % 1 === 0 ? d.toFixed(0) : d}% OFF` : null;
   }, [coupon]);

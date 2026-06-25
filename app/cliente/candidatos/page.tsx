@@ -13,6 +13,7 @@ import { PageSpinner, Spinner } from '@/app/components/PageSpinner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useClienteStore } from '../store-context';
+import { couponBadge } from '../../../lib/coupon-offers';
 
 type Candidate = {
   id: string;
@@ -29,6 +30,8 @@ type Candidate = {
     title: string | null;
     code: string | null;
     discount_percent: number | null;
+    offer_type: string | null;
+    offer_label: string | null;
     end_date: string | null;
     image_url: string | null;
     amount_available: number | null;
@@ -81,7 +84,7 @@ export default function CandidatosPage() {
     const { data } = await supabase
       .from('coupon_leads')
       .select(
-        'id, coupon_id, first_name, last_name, id_document, telefono, email, status, created_at, redemption_token, coupons(title, code, discount_percent, end_date, image_url, amount_available, category, plan_type)',
+        'id, coupon_id, first_name, last_name, id_document, telefono, email, status, created_at, redemption_token, coupons(title, code, discount_percent, offer_type, offer_label, end_date, image_url, amount_available, category, plan_type)',
       )
       .eq('store_id', store.id)
       .eq('status', 'PENDIENTE')
@@ -303,11 +306,9 @@ export default function CandidatosPage() {
                   </h4>
                   <div className="grid grid-cols-2 gap-3 text-xs pt-1">
                     <div className="bg-white/5 rounded-lg p-2 border border-white/5">
-                      <span className="block text-white/45 text-[10px] uppercase">Descuento</span>
+                      <span className="block text-white/45 text-[10px] uppercase">Promoción</span>
                       <span className="text-emerald-400 font-bold font-mono text-sm">
-                        {detailCandidate.coupons?.discount_percent
-                          ? `${Number(detailCandidate.coupons.discount_percent)}% OFF`
-                          : '—'}
+                        {detailCandidate.coupons ? couponBadge(detailCandidate.coupons) : '—'}
                       </span>
                     </div>
                     <div className="bg-white/5 rounded-lg p-2 border border-white/5">
@@ -456,9 +457,9 @@ export default function CandidatosPage() {
                     {confirmRedeemCandidate.coupons?.title ?? 'Cupón Promocional'}
                   </span>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs font-mono">
-                    {confirmRedeemCandidate.coupons?.discount_percent && (
+                    {confirmRedeemCandidate.coupons && couponBadge(confirmRedeemCandidate.coupons) !== '—' && (
                       <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold">
-                        {Number(confirmRedeemCandidate.coupons.discount_percent)}% OFF
+                        {couponBadge(confirmRedeemCandidate.coupons)}
                       </span>
                     )}
                     {confirmRedeemCandidate.coupons?.code && (
@@ -556,9 +557,9 @@ function CandidateRow({
           <p className="text-sm font-bold text-white truncate">{c.coupons?.title ?? 'Cupón'}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          {c.coupons?.discount_percent && (
+          {c.coupons && couponBadge(c.coupons) !== '—' && (
             <span className="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold font-mono">
-              {Number(c.coupons.discount_percent)}% OFF
+              {couponBadge(c.coupons)}
             </span>
           )}
           {c.coupons?.code && (
