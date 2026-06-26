@@ -50,9 +50,15 @@ function LoginInner() {
 
     const { data: profile } = await supabase
       .from('users')
-      .select('role')
+      .select('role, is_blocked')
       .eq('id', data.user.id)
       .maybeSingle();
+
+    // Cliente bloqueado: no entra al portal, se le manda a la vista de bloqueo.
+    if (profile?.role !== 'admin' && profile?.is_blocked) {
+      router.replace('/bloqueado');
+      return;
+    }
 
     router.replace(profile?.role === 'admin' ? '/panel' : '/cliente/dashboard');
   };

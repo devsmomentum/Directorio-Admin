@@ -6,10 +6,12 @@ export type AuditActionType =
   | 'ELIMINAR' 
   | 'APROBAR' 
   | 'RECHAZAR' 
-  | 'ACTIVAR' 
+  | 'ACTIVAR'
   | 'DESACTIVAR'
   | 'VINCULAR'
-  | 'DESVINCULAR';
+  | 'DESVINCULAR'
+  | 'BLOQUEAR'
+  | 'DESBLOQUEAR';
 
 export type AuditEntityType =
   | 'tienda'

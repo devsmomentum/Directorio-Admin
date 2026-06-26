@@ -7,6 +7,7 @@ import { supabase } from '../../../lib/supabase';
 import { uploadPrivateDoc, openPrivateDoc, downloadPrivateDoc, fileExt } from '../../../lib/storage';
 import { toast } from '../../components/toast';
 import { confirmDialog } from '../../components/confirm-dialog';
+import { logAdminAction } from '../../../lib/audit';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // /panel/clientes — gestión de usuarios cliente del portal.
@@ -34,6 +35,9 @@ type ClientRow = {
   cedula_url: string | null;
   telefono_personal: string | null;
   created_at: string;
+  is_blocked: boolean;
+  block_reason: string | null;
+  blocked_at: string | null;
 };
 
 // Límites de caracteres por campo para prevenir inyección SQL
@@ -131,7 +135,7 @@ export default function ClientesPage() {
     const [clientsRes, storesRes, linksRes] = await Promise.all([
       supabase
         .from('users')
-        .select('id, email, full_name, doc_tipo, cedula_numero, cedula_url, telefono_personal, created_at')
+        .select('id, email, full_name, doc_tipo, cedula_numero, cedula_url, telefono_personal, created_at, is_blocked, block_reason, blocked_at')
         .eq('role', 'cliente')
         .order('created_at', { ascending: false }),
       supabase
@@ -232,6 +236,78 @@ export default function ClientesPage() {
       // (URL/host de la BD, IDs) en el texto del error.
       toast.error('No se pudo eliminar el cliente. Intenta nuevamente.');
     }
+  };
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Bloqueo de acceso. Bloquear exige una razón (uso administrativo; al cliente
+  // solo se le pide contactar a Mall Hub). Desbloquear se confirma sin razón.
+  // El RPC corre SECURITY DEFINER y valida que quien llama sea admin.
+  // ────────────────────────────────────────────────────────────────────────
+  const [blockTarget, setBlockTarget] = useState<ClientRow | null>(null);
+  const [blockReason, setBlockReason] = useState('');
+  const [blockError, setBlockError] = useState<string | null>(null);
+  const [blockSubmitting, setBlockSubmitting] = useState(false);
+
+  const openBlockDialog = (c: ClientRow) => {
+    setBlockTarget(c);
+    setBlockReason('');
+    setBlockError(null);
+  };
+
+  const confirmBlock = async () => {
+    if (!blockTarget) return;
+    const reason = sanitizeString(blockReason);
+    if (reason.length < 5) {
+      setBlockError('Indica una razón de al menos 5 caracteres.');
+      return;
+    }
+    if (reason.length > 500) {
+      setBlockError('La razón no puede exceder 500 caracteres.');
+      return;
+    }
+    setBlockSubmitting(true);
+    const { error } = await supabase.rpc('admin_block_client', {
+      p_user_id: blockTarget.id,
+      p_reason: reason,
+    });
+    if (error) {
+      setBlockSubmitting(false);
+      setBlockError('No se pudo bloquear al cliente. Intenta nuevamente.');
+      return;
+    }
+    await logAdminAction({
+      action_type: 'BLOQUEAR',
+      entity_type: 'cliente',
+      entity_id: blockTarget.id,
+      entity_name: blockTarget.full_name || blockTarget.email,
+      details: { reason },
+    });
+    setBlockSubmitting(false);
+    setBlockTarget(null);
+    await fetchAll();
+    toast.success('Cliente bloqueado.');
+  };
+
+  const handleUnblock = async (c: ClientRow) => {
+    const ok = await confirmDialog({
+      title: `¿Desbloquear a "${c.full_name || c.email}"?`,
+      message: 'El cliente recuperará el acceso al portal y a sus tiendas.',
+      confirmLabel: 'Desbloquear',
+    });
+    if (!ok) return;
+    const { error } = await supabase.rpc('admin_unblock_client', { p_user_id: c.id });
+    if (error) {
+      toast.error('No se pudo desbloquear al cliente. Intenta nuevamente.');
+      return;
+    }
+    await logAdminAction({
+      action_type: 'DESBLOQUEAR',
+      entity_type: 'cliente',
+      entity_id: c.id,
+      entity_name: c.full_name || c.email,
+    });
+    await fetchAll();
+    toast.success('Cliente desbloqueado.');
   };
 
   // Crea o actualiza al cliente. Pasos:
@@ -626,14 +702,25 @@ export default function ClientesPage() {
                 {pg.paginated.map(c => (
                   <tr key={c.id} className="border-b border-white/[0.03] hover:bg-white/[0.02] group">
                     <td className="px-5 py-3.5">
-                      <button
-                        type="button"
-                        onClick={() => setDetailClient(c)}
-                        title="Ver información del cliente"
-                        className="text-white/85 hover:text-pink-400 transition-colors text-left font-medium"
-                      >
-                        {c.full_name || <span className="text-white/30 italic">Sin nombre</span>}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDetailClient(c)}
+                          title="Ver información del cliente"
+                          className="text-white/85 hover:text-pink-400 transition-colors text-left font-medium"
+                        >
+                          {c.full_name || <span className="text-white/30 italic">Sin nombre</span>}
+                        </button>
+                        {c.is_blocked && (
+                          <span
+                            title={c.block_reason || 'Cliente bloqueado'}
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold bg-red-500/15 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded"
+                          >
+                            <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                            Bloqueado
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-3.5 text-white/60 text-xs font-mono">{c.email}</td>
                     <td className="px-5 py-3.5 text-white/50 text-xs font-mono">{c.cedula_numero ? `${c.doc_tipo || 'V'}-${c.cedula_numero}` : '—'}</td>
@@ -683,6 +770,23 @@ export default function ClientesPage() {
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                         </button>
+                        {c.is_blocked ? (
+                          <button
+                            onClick={() => handleUnblock(c)}
+                            title="Desbloquear acceso"
+                            className="p-1.5 rounded-md text-emerald-400/70 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 11V7a4 4 0 118 0m-9 4h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z" /></svg>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => openBlockDialog(c)}
+                            title="Bloquear acceso"
+                            className="p-1.5 rounded-md text-white/30 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDeleteClient(c)}
                           title="Eliminar"
@@ -723,6 +827,12 @@ export default function ClientesPage() {
                       {c.full_name || <span className="italic text-white/30">Sin nombre</span>}
                     </button>
                     <p className="text-xs text-white/40 font-mono truncate mt-0.5">{c.email}</p>
+                    {c.is_blocked && (
+                      <span className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold bg-red-500/15 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded">
+                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                        Bloqueado
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
@@ -756,6 +866,23 @@ export default function ClientesPage() {
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                     </button>
+                    {c.is_blocked ? (
+                      <button
+                        onClick={() => handleUnblock(c)}
+                        title="Desbloquear acceso"
+                        className="p-2 rounded-lg text-emerald-400/70 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 11V7a4 4 0 118 0m-9 4h10a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6a2 2 0 012-2z" /></svg>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => openBlockDialog(c)}
+                        title="Bloquear acceso"
+                        className="p-2 rounded-lg text-white/30 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeleteClient(c)}
                       title="Eliminar"
@@ -1140,6 +1267,18 @@ export default function ClientesPage() {
               </div>
             </div>
 
+            {detailClient.is_blocked && (
+              <div className="mt-4 border-t border-white/5 pt-4">
+                <p className="text-[10px] text-red-400/80 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                  Acceso bloqueado
+                </p>
+                <p className="text-xs text-white/70 whitespace-pre-line bg-red-500/[0.06] border border-red-500/20 rounded-lg p-2.5">
+                  {detailClient.block_reason || 'Sin razón registrada.'}
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2 pt-5 mt-5 border-t border-white/5">
               <button
                 type="button"
@@ -1241,6 +1380,70 @@ export default function ClientesPage() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {blockTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !blockSubmitting && setBlockTarget(null)}
+          />
+          <div className="relative bg-[#111] border border-red-500/30 rounded-xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center bg-red-500/15 text-red-400">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+              </div>
+              <h3 className="text-sm font-semibold text-white">Bloquear acceso</h3>
+            </div>
+            <p className="text-xs text-white/60 leading-relaxed mb-1">
+              Vas a bloquear el acceso de{' '}
+              <span className="text-white/90 font-medium">{blockTarget.full_name || blockTarget.email}</span>.
+              No podrá entrar al portal ni ver sus tiendas hasta que lo desbloquees.
+            </p>
+            <p className="text-[11px] text-white/40 mb-4">
+              La razón es de uso interno; al cliente solo se le pedirá contactar a Mall Hub.
+            </p>
+
+            <label className="block text-[11px] text-white/40 uppercase tracking-wider mb-1.5">
+              Razón del bloqueo <span className="text-red-400">*</span>
+            </label>
+            <textarea
+              value={blockReason}
+              onChange={(e) => { setBlockReason(e.target.value); if (blockError) setBlockError(null); }}
+              maxLength={500}
+              rows={3}
+              autoFocus
+              className="w-full bg-[#0A0A0A] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-red-500/50 transition-colors resize-none"
+              placeholder="Ej: Incumplimiento de pago / Uso indebido del portal…"
+            />
+            <p className="text-[10px] text-white/30 mt-1">{blockReason.length}/500</p>
+
+            {blockError && (
+              <div className="mt-3 bg-red-500/10 border border-red-500/30 text-red-400 text-xs p-2.5 rounded-lg">
+                {blockError}
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setBlockTarget(null)}
+                disabled={blockSubmitting}
+                className="flex-1 px-4 py-2 text-sm text-white/50 hover:text-white/80 bg-white/5 hover:bg-white/10 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmBlock}
+                disabled={blockSubmitting}
+                className="flex-1 px-4 py-2 text-sm font-semibold rounded-lg bg-red-500/90 hover:bg-red-500 text-white transition-colors disabled:opacity-50"
+              >
+                {blockSubmitting ? 'Bloqueando…' : 'Bloquear'}
+              </button>
+            </div>
           </div>
         </div>
       )}

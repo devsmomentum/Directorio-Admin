@@ -104,13 +104,16 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
 
       const { data: u } = await supabase
         .from('users')
-        .select('id, email, role, full_name')
+        .select('id, email, role, full_name, is_blocked')
         .eq('id', session.user.id)
         .maybeSingle();
 
       if (!mounted) return;
       if (!u) { router.replace('/login'); return; }
       if (u.role === 'admin') { router.replace('/panel'); return; }
+      // Cliente bloqueado: fuera del portal. La barrera real la pone RLS
+      // (user_owns_store devuelve false), esto es el redirect de UX.
+      if (u.is_blocked) { router.replace('/bloqueado'); return; }
 
       setProfile(u);
       await fetchStores();
